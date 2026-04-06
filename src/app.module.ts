@@ -3,8 +3,9 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import appConfig from './config/app.config';
 
-import { RolesGuard } from './common/guards';
+import { JwtAuthGuard, RolesGuard } from './common/guards';
 
+import { SupabaseModule } from './supabase/supabase.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { BranchesModule } from './branches/branches.module';
@@ -20,6 +21,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
       isGlobal: true,
       load: [appConfig],
     }),
+    SupabaseModule,
     AuthModule,
     UsersModule,
     BranchesModule,
@@ -30,6 +32,10 @@ import { DashboardModule } from './dashboard/dashboard.module';
     DashboardModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
