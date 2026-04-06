@@ -1,12 +1,12 @@
 export default () => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
-  database: {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT ?? '5432', 10),
-    name: process.env.DB_NAME || 'pms_db',
+  supabase: {
+    url: process.env.SUPABASE_URL,
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    jwtSecret: process.env.SUPABASE_JWT_SECRET,
   },
   jwt: {
-    secret: process.env.JWT_SECRET || 'change-me',
+    secret: process.env.SUPABASE_JWT_SECRET || 'change-me',
     expiresIn: process.env.JWT_EXPIRES_IN || '1d',
   },
 });
