@@ -5,15 +5,15 @@ import appConfig from './config/app.config';
 
 import { JwtAuthGuard, RolesGuard } from './common/guards';
 
-import { SupabaseModule } from './supabase/supabase.module';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { BranchesModule } from './branches/branches.module';
-import { ItemsModule } from './items/items.module';
-import { TransactionsModule } from './transactions/transactions.module';
-import { CategoriesModule } from './categories/categories.module';
-import { ReportsModule } from './reports/reports.module';
-import { DashboardModule } from './dashboard/dashboard.module';
+import { SupabaseModule } from './infrastructure/supabase/supabase.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { BranchesModule } from './modules/branches/branches.module';
+import { ItemsModule } from './modules/items/items.module';
+import { TransactionsModule } from './modules/transactions/transactions.module';
+import { CategoriesModule } from './modules/categories/categories.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
