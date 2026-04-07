@@ -14,6 +14,7 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     CategoriesModule,
     ReportsModule,
     DashboardModule,
+    InventoryModule,
   ],
   providers: [
     {
