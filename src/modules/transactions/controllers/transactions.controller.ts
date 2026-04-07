@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { TransactionsService } from '../services/transactions.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
@@ -14,8 +14,8 @@ export class TransactionsController {
   }
 
   @Get()
-  findAll() {
-    return this.transactionsService.findAll();
+  findAll(@Query('branch') branch?: string) {
+    return this.transactionsService.findAll(branch);
   }
 
   @Get(':id')
@@ -23,3 +23,4 @@ export class TransactionsController {
     return this.transactionsService.findOne(id);
   }
 }
+
