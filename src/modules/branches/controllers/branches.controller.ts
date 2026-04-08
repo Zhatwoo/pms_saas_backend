@@ -1,5 +1,7 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
 import { BranchesService } from '../services/branches.service';
+import { CreateBranchDto } from '../dto/create-branch.dto';
+import { UpdateBranchDto } from '../dto/update-branch.dto';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 
@@ -9,7 +11,7 @@ export class BranchesController {
 
   @Roles(Role.SUPERADMIN)
   @Post()
-  create(@Body() createBranchDto: any) {
+  create(@Body() createBranchDto: CreateBranchDto) {
     return this.branchesService.create(createBranchDto);
   }
 
@@ -26,7 +28,7 @@ export class BranchesController {
 
   @Roles(Role.SUPERADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateBranchDto: any) {
+  update(@Param('id') id: string, @Body() updateBranchDto: UpdateBranchDto) {
     return this.branchesService.update(id, updateBranchDto);
   }
 
