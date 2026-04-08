@@ -23,18 +23,61 @@ export class BranchesService {
     return `${normalizedBase} Branch`;
   }
 
+  private async getNextAvailableBranchCode(): Promise<string> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('branches')
+      .select('branch_code');
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const usedCodes = new Set(
+      (data ?? []).map((row: { branch_code: string }) => row.branch_code),
+    );
+
+    for (let i = 1; i <= 9999; i++) {
+      const candidate = String(i).padStart(3, '0');
+      if (!usedCodes.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    throw new InternalServerErrorException('No available branch code slots');
+  }
+
   async create(createBranchDto: CreateBranchDto) {
-    const payload: CreateBranchDto = {
+    let payload: CreateBranchDto = {
       ...createBranchDto,
       name: this.normalizeBranchName(createBranchDto.name),
+      branch_code: createBranchDto.branch_code.trim(),
     };
 
-    const { data, error } = await this.supabaseService
+    let { data, error } = await this.supabaseService
       .getClient()
       .from('branches')
       .insert([payload])
       .select()
       .single();
+
+    // If client-side generated code is stale, retry once using the next free code.
+    if (error?.code === '23505' || /branch_code/i.test(error?.message ?? '')) {
+      payload = {
+        ...payload,
+        branch_code: await this.getNextAvailableBranchCode(),
+      };
+
+      const retryResult = await this.supabaseService
+        .getClient()
+        .from('branches')
+        .insert([payload])
+        .select()
+        .single();
+
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
       throw new InternalServerErrorException(error.message);

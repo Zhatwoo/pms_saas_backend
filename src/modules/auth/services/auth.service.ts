@@ -26,6 +26,7 @@ export class AuthService {
 
     return {
       access_token: data.session.access_token,
+      expires_in: data.session.expires_in,
       user: {
         id: profile.id,
         email: profile.email,
