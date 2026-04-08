@@ -21,6 +21,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     ConfigModule.forRoot({
       isGlobal: true,
       load: [appConfig],
+      envFilePath: '.env',
     }),
     SupabaseModule,
     AuthModule,
