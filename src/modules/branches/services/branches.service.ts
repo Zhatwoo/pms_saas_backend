@@ -7,13 +7,77 @@ import { SupabaseService } from '../../../infrastructure/supabase/supabase.servi
 export class BranchesService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  async create(createBranchDto: CreateBranchDto) {
+  private toTitleCase(value: string): string {
+    return value
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  private normalizeBranchName(rawName: string): string {
+    const trimmed = rawName.trim();
+    const withoutSuffix = trimmed.replace(/\s*branch\s*$/i, '');
+    const normalizedBase = this.toTitleCase(withoutSuffix);
+    return `${normalizedBase} Branch`;
+  }
+
+  private async getNextAvailableBranchCode(): Promise<string> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('branches')
-      .insert([createBranchDto])
+      .select('branch_code');
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const usedCodes = new Set(
+      (data ?? []).map((row: { branch_code: string }) => row.branch_code),
+    );
+
+    for (let i = 1; i <= 9999; i++) {
+      const candidate = String(i).padStart(3, '0');
+      if (!usedCodes.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    throw new InternalServerErrorException('No available branch code slots');
+  }
+
+  async create(createBranchDto: CreateBranchDto) {
+    let payload: CreateBranchDto = {
+      ...createBranchDto,
+      name: this.normalizeBranchName(createBranchDto.name),
+      branch_code: createBranchDto.branch_code.trim(),
+    };
+
+    let { data, error } = await this.supabaseService
+      .getClient()
+      .from('branches')
+      .insert([payload])
       .select()
       .single();
+
+    // If client-side generated code is stale, retry once using the next free code.
+    if (error?.code === '23505' || /branch_code/i.test(error?.message ?? '')) {
+      payload = {
+        ...payload,
+        branch_code: await this.getNextAvailableBranchCode(),
+      };
+
+      const retryResult = await this.supabaseService
+        .getClient()
+        .from('branches')
+        .insert([payload])
+        .select()
+        .single();
+
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -52,10 +116,17 @@ export class BranchesService {
   }
 
   async update(id: string, updateBranchDto: UpdateBranchDto) {
+    const payload: UpdateBranchDto = {
+      ...updateBranchDto,
+      ...(updateBranchDto.name
+        ? { name: this.normalizeBranchName(updateBranchDto.name) }
+        : {}),
+    };
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('branches')
-      .update(updateBranchDto)
+      .update(payload)
       .eq('id', id)
       .select()
       .single();
