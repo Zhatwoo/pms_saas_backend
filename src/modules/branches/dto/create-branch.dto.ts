@@ -10,6 +10,10 @@ export enum BranchStatus {
 export class CreateBranchDto {
   @IsNotEmpty()
   @IsString()
+  branch_code: string;
+
+  @IsNotEmpty()
+  @IsString()
   name: string;
 
   @IsNotEmpty()
@@ -20,3 +24,4 @@ export class CreateBranchDto {
   @IsEnum(BranchStatus)
   status?: BranchStatus = BranchStatus.ACTIVE;
 }
+
