@@ -7,11 +7,32 @@ import { SupabaseService } from '../../../infrastructure/supabase/supabase.servi
 export class BranchesService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
+  private toTitleCase(value: string): string {
+    return value
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  private normalizeBranchName(rawName: string): string {
+    const trimmed = rawName.trim();
+    const withoutSuffix = trimmed.replace(/\s*branch\s*$/i, '');
+    const normalizedBase = this.toTitleCase(withoutSuffix);
+    return `${normalizedBase} Branch`;
+  }
+
   async create(createBranchDto: CreateBranchDto) {
+    const payload: CreateBranchDto = {
+      ...createBranchDto,
+      name: this.normalizeBranchName(createBranchDto.name),
+    };
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('branches')
-      .insert([createBranchDto])
+      .insert([payload])
       .select()
       .single();
 
@@ -52,10 +73,17 @@ export class BranchesService {
   }
 
   async update(id: string, updateBranchDto: UpdateBranchDto) {
+    const payload: UpdateBranchDto = {
+      ...updateBranchDto,
+      ...(updateBranchDto.name
+        ? { name: this.normalizeBranchName(updateBranchDto.name) }
+        : {}),
+    };
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('branches')
-      .update(updateBranchDto)
+      .update(payload)
       .eq('id', id)
       .select()
       .single();
