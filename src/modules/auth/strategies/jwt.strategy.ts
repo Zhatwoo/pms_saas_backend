@@ -73,12 +73,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Invalid token payload');
     }
 
-    console.log(`[JWT Strategy] Validating user: ${payload.email} (${payload.sub})`);
+    // console.log(`[JWT Strategy] Validating user: ${payload.email} (${payload.sub})`);
 
     const user = await this.supabaseService.getUserByAuthId(payload.sub);
 
     if (!user) {
-      console.warn(`[JWT Strategy] User NOT FOUND for auth ID: ${payload.sub}`);
+      // console.warn(`[JWT Strategy] User NOT FOUND for auth ID: ${payload.sub}`);
       throw new UnauthorizedException('User account not found in database');
     }
 
