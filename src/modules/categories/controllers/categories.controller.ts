@@ -7,7 +7,7 @@ import { Role } from '../../../common/enums';
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post()
   create(@Body() createCategoryDto: any) {
     return this.categoriesService.create(createCategoryDto);
@@ -23,13 +23,13 @@ export class CategoriesController {
     return this.categoriesService.findOne(id);
   }
 
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateCategoryDto: any) {
     return this.categoriesService.update(id, updateCategoryDto);
   }
 
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.categoriesService.remove(id);

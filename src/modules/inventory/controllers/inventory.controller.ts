@@ -48,7 +48,7 @@ export class InventoryController {
   }
 
   // Renewal tracking
-  @Roles(Role.ADMIN, Role.BRANCH)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post('pawned/:id/renew')
   addRenewal(@Param('id') id: string, @Body() dto: { renewal_date: string; amount_paid: number }) {
     return this.inventoryService.addRenewal(id, dto);
