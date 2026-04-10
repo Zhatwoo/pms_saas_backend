@@ -7,7 +7,7 @@ import { Role } from '../../../common/enums';
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
-  @Roles(Role.ADMIN, Role.BRANCH)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post()
   create(@Body() createTransactionDto: any) {
     return this.transactionsService.create(createTransactionDto);

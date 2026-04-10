@@ -7,7 +7,7 @@ import { Role } from '../../../common/enums';
 export class ItemsController {
   constructor(private readonly itemsService: ItemsService) {}
 
-  @Roles(Role.ADMIN, Role.BRANCH)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post()
   create(@Body() createItemDto: any) {
     return this.itemsService.create(createItemDto);
@@ -23,7 +23,7 @@ export class ItemsController {
     return this.itemsService.findOne(id);
   }
 
-  @Roles(Role.ADMIN, Role.BRANCH)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateItemDto: any) {
     return this.itemsService.update(id, updateItemDto);
