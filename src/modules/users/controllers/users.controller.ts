@@ -7,13 +7,13 @@ import { Role } from '../../../common/enums';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPER_ADMIN)
   @Post()
   create(@Body() createUserDto: any) {
     return this.usersService.create(createUserDto);
   }
 
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get()
   findAll() {
     return this.usersService.findAll();
@@ -24,13 +24,13 @@ export class UsersController {
     return this.usersService.findOne(id);
   }
 
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPER_ADMIN)
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateUserDto: any) {
     return this.usersService.update(id, updateUserDto);
   }
 
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.usersService.remove(id);

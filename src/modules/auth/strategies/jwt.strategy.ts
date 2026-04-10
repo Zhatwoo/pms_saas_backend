@@ -75,21 +75,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     console.log(`[JWT Strategy] Validating user: ${payload.email} (${payload.sub})`);
 
-    const profile = await this.supabaseService.getProfile(payload.sub);
+    const user = await this.supabaseService.getUserByAuthId(payload.sub);
 
-    if (!profile) {
-      console.warn(`[JWT Strategy] Profile NOT FOUND for ID: ${payload.sub}`);
-      throw new UnauthorizedException('Profile not found in database');
+    if (!user) {
+      console.warn(`[JWT Strategy] User NOT FOUND for auth ID: ${payload.sub}`);
+      throw new UnauthorizedException('User account not found in database');
     }
 
-    return {
-      id: profile.id,
-      email: profile.email,
-      fullName: profile.full_name,
-      role: profile.role,
-      branchId: profile.branch_id,
-      avatarUrl: profile.avatar_url,
-    };
+    return user;
   }
 }
 

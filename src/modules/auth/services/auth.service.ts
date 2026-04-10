@@ -18,40 +18,42 @@ export class AuthService {
       throw new UnauthorizedException(error.message);
     }
 
-    const profile = await this.supabaseService.getProfile(data.user.id);
+    const user = await this.supabaseService.getUserByAuthId(data.user.id);
 
-    if (!profile) {
-      throw new UnauthorizedException('User profile not found');
+    if (!user) {
+      throw new UnauthorizedException('User account not found');
     }
 
     return {
       access_token: data.session.access_token,
       expires_in: data.session.expires_in,
       user: {
-        id: profile.id,
-        email: profile.email,
-        fullName: profile.full_name,
-        role: profile.role,
-        branchId: profile.branch_id,
-        avatarUrl: profile.avatar_url,
+        id: user.id,
+        authId: user.authId,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        branchId: user.branchId,
+        avatarUrl: user.avatarUrl,
       },
     };
   }
 
   async getProfile(userId: string) {
-    const profile = await this.supabaseService.getProfile(userId);
+    const user = await this.supabaseService.getUserById(userId);
 
-    if (!profile) {
-      throw new UnauthorizedException('Profile not found');
+    if (!user) {
+      throw new UnauthorizedException('User account not found');
     }
 
     return {
-      id: profile.id,
-      email: profile.email,
-      fullName: profile.full_name,
-      role: profile.role,
-      branchId: profile.branch_id,
-      avatarUrl: profile.avatar_url,
+      id: user.id,
+      authId: user.authId,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      branchId: user.branchId,
+      avatarUrl: user.avatarUrl,
     };
   }
 }

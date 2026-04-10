@@ -7,19 +7,19 @@ import { Role } from '../../../common/enums';
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPER_ADMIN)
   @Get('system')
   getSystemReport() {
     return this.reportsService.getSystemReport();
   }
 
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get('branch-summary')
   getBranchSummary() {
     return this.reportsService.getBranchSummary();
   }
 
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.BRANCH)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get('transactions')
   getTransactionReport() {
     return this.reportsService.getTransactionReport();
