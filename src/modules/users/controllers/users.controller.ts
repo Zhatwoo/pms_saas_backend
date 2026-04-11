@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete } from '@nestjs/common';
 import { UsersService } from '../services/users.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
+import { CreateUserDto } from '../dto/create-user.dto';
 
 @Controller('users')
 export class UsersController {
@@ -9,8 +10,28 @@ export class UsersController {
 
   @Roles(Role.SUPER_ADMIN)
   @Post()
-  create(@Body() createUserDto: any) {
-    return this.usersService.create(createUserDto);
+  async create(@Body() createUserDto: CreateUserDto) {
+    console.log('[UsersController.create] Received payload:', createUserDto);
+    console.log('[UsersController.create] Payload types:', {
+      fullName: typeof createUserDto.fullName,
+      email: typeof createUserDto.email,
+      password: typeof createUserDto.password,
+      role: typeof createUserDto.role,
+      branchId: typeof createUserDto.branchId,
+    });
+    console.log('[UsersController.create] Branch ID value:', createUserDto.branchId, {
+      isEmpty: !createUserDto.branchId,
+      length: createUserDto.branchId?.length,
+    });
+    
+    try {
+      const result = await this.usersService.create(createUserDto);
+      console.log('[UsersController.create] Success, result:', result);
+      return result;
+    } catch (error) {
+      console.error('[UsersController.create] Error:', error);
+      throw error;
+    }
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
@@ -19,15 +40,10 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
-  }
-
-  @Roles(Role.SUPER_ADMIN)
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserDto: any) {
-    return this.usersService.update(id, updateUserDto);
   }
 
   @Roles(Role.SUPER_ADMIN)

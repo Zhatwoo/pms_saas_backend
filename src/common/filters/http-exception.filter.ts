@@ -4,6 +4,7 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
 
@@ -18,15 +19,35 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const message =
-      exception instanceof HttpException
-        ? exception.getResponse()
-        : 'Internal server error';
+    let message: any = 'Internal server error';
+    let data: any = undefined;
 
-    response.status(status).json({
+    if (exception instanceof HttpException) {
+      const exceptionResponse = exception.getResponse();
+      
+      if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else {
+        const responseObj = exceptionResponse as any;
+        message = responseObj.message || 'An error occurred';
+        // Include both 'details' and 'errors' to cover all cases
+        data = responseObj.details || responseObj.errors || responseObj.error;
+      }
+    } else if (exception instanceof Error) {
+      message = exception.message;
+    }
+
+    const errorResponse: any = {
       statusCode: status,
-      message: typeof message === 'string' ? message : (message as any).message,
+      message,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    if (data) {
+      errorResponse.data = data;
+    }
+
+    console.error(`[HttpExceptionFilter] ${status}:`, errorResponse);
+    response.status(status).json(errorResponse);
   }
 }
