@@ -1,5 +1,16 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { Role } from '../../../common/enums';
+import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
+import {
+  assertResourceBranch,
+  inventoryBranchFilters,
+  requireUserBranchId,
+} from '../../../common/utils/branch-scope.util';
 
 interface QueryFilters {
   branch?: string;
@@ -19,23 +30,41 @@ export class InventoryService {
   // PAWNED ITEMS
   // ═══════════════════════════════════════════════════════════
 
-  async findAllPawned(filters: QueryFilters) {
+  async findAllPawned(user: UserWithBranch, filters: QueryFilters) {
     const client = this.supabase.getClient();
+    const { branchId, branchNameIlike } = inventoryBranchFilters(
+      user,
+      filters.branch,
+    );
+
     let query = client
       .from('pawned_items')
       .select('*, item_renewals(*)', { count: 'exact' })
       .order('created_at', { ascending: false });
 
-    if (filters.branch) query = query.ilike('branch', `%${filters.branch}%`);
-    if (filters.category) query = query.ilike('category', `%${filters.category}%`);
-    if (filters.status) query = query.eq('status', filters.status);
-    if (filters.search) query = query.ilike('item_name', `%${filters.search}%`);
+    if (branchId) {
+      query = query.eq('branch_id', branchId);
+    } else if (branchNameIlike) {
+      query = query.ilike('branch', `%${branchNameIlike}%`);
+    }
+
+    if (filters.category) {
+      query = query.ilike('category', `%${filters.category}%`);
+    }
+    if (filters.status) {
+      query = query.eq('status', filters.status);
+    }
+    if (filters.search) {
+      query = query.ilike('item_name', `%${filters.search}%`);
+    }
 
     const from = (filters.page - 1) * filters.limit;
     query = query.range(from, from + filters.limit - 1);
 
     const { data, error, count } = await query;
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
 
     return {
       items: (data || []).map((item: any) => ({
@@ -60,52 +89,85 @@ export class InventoryService {
     };
   }
 
-  async createPawned(dto: any) {
+  async createPawned(user: UserWithBranch, dto: any) {
     const client = this.supabase.getClient();
-    const { data, error } = await client.from('pawned_items').insert([dto]).select().single();
-    if (error) throw new InternalServerErrorException(error.message);
+    const payload =
+      user.role === Role.SUPER_ADMIN
+        ? { ...dto }
+        : {
+            ...dto,
+            branch_id: requireUserBranchId(user),
+          };
+    const { data, error } = await client
+      .from('pawned_items')
+      .insert([payload])
+      .select()
+      .single();
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
     return data;
   }
 
-  async findOnePawned(id: string) {
+  async findOnePawned(user: UserWithBranch, id: string) {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('pawned_items')
       .select('*, item_renewals(*)')
       .eq('id', id)
       .single();
-    if (error) throw new NotFoundException('Item not found');
+    if (error) {
+      throw new NotFoundException('Item not found');
+    }
+    assertResourceBranch(user, data?.branch_id);
     return data;
   }
 
-  async updatePawned(id: string, dto: any) {
+  async updatePawned(user: UserWithBranch, id: string, dto: any) {
+    await this.findOnePawned(user, id);
     const client = this.supabase.getClient();
-    const { data, error } = await client.from('pawned_items').update(dto).eq('id', id).select().single();
-    if (error) throw new InternalServerErrorException(error.message);
+    const { data, error } = await client
+      .from('pawned_items')
+      .update(dto)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
     return data;
   }
 
-  async deletePawned(id: string) {
+  async deletePawned(user: UserWithBranch, id: string) {
+    await this.findOnePawned(user, id);
     const client = this.supabase.getClient();
     const { error } = await client.from('pawned_items').delete().eq('id', id);
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
     return { message: 'Item deleted' };
   }
 
-  // Renewal tracking
-  async addRenewal(itemId: string, dto: { renewal_date: string; amount_paid: number }) {
+  async addRenewal(
+    user: UserWithBranch,
+    itemId: string,
+    dto: { renewal_date: string; amount_paid: number },
+  ) {
+    await this.findOnePawned(user, itemId);
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('item_renewals')
       .insert([{ pawned_item_id: itemId, ...dto }])
       .select()
       .single();
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
     return data;
   }
 
-  // Remarks
-  async addRemark(itemId: string, remark: string) {
+  async addRemark(user: UserWithBranch, itemId: string, remark: string) {
+    await this.findOnePawned(user, itemId);
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('pawned_items')
@@ -113,63 +175,82 @@ export class InventoryService {
       .eq('id', itemId)
       .select()
       .single();
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
     return data;
   }
 
-  // ─── EXPIRE & AUTO-TRANSFER TO ITEMS FOR SALE ─────────────
-  async expireAndTransfer(itemId: string) {
+  async expireAndTransfer(user: UserWithBranch, itemId: string) {
     const client = this.supabase.getClient();
 
-    // 1. Get the pawned item
     const { data: pawnedItem, error: fetchErr } = await client
       .from('pawned_items')
       .select('*')
       .eq('id', itemId)
       .single();
-    if (fetchErr || !pawnedItem) throw new NotFoundException('Pawned item not found');
+    if (fetchErr || !pawnedItem) {
+      throw new NotFoundException('Pawned item not found');
+    }
+    assertResourceBranch(user, pawnedItem.branch_id);
 
-    // 2. Mark as Expired
     const { error: updateErr } = await client
       .from('pawned_items')
       .update({ status: 'Expired' })
       .eq('id', itemId);
-    if (updateErr) throw new InternalServerErrorException(updateErr.message);
+    if (updateErr) {
+      throw new InternalServerErrorException(updateErr.message);
+    }
 
-    // 3. Auto-create entry in sale_items
     const { data: saleItem, error: insertErr } = await client
       .from('sale_items')
-      .insert([{
-        item_name: pawnedItem.item_name,
-        category: pawnedItem.category,
-        branch: pawnedItem.branch,
-        branch_id: pawnedItem.branch_id,
-        available_date: new Date().toISOString().split('T')[0],
-        price: 0, // Admin will set the selling price later
-        status: 'Available',
-        original_pawn_id: pawnedItem.id,
-      }])
+      .insert([
+        {
+          item_name: pawnedItem.item_name,
+          category: pawnedItem.category,
+          branch: pawnedItem.branch,
+          branch_id: pawnedItem.branch_id,
+          available_date: new Date().toISOString().split('T')[0],
+          price: 0,
+          status: 'Available',
+          original_pawn_id: pawnedItem.id,
+        },
+      ])
       .select()
       .single();
-    if (insertErr) throw new InternalServerErrorException(insertErr.message);
+    if (insertErr) {
+      throw new InternalServerErrorException(insertErr.message);
+    }
 
-    return { message: 'Item expired and transferred to Items for Sale', saleItem };
+    return {
+      message: 'Item expired and transferred to Items for Sale',
+      saleItem,
+    };
   }
 
-  // ─── QR TALLY (Physical vs System check) ──────────────────
-  async qrTally(branchId: number, scannedItemIds: string[]) {
+  async qrTally(
+    user: UserWithBranch,
+    branchIdParam: string | number,
+    scannedItemIds: string[],
+  ) {
+    const branchId = String(branchIdParam);
+    assertResourceBranch(user, branchId);
+
     const client = this.supabase.getClient();
 
-    // Get all Active items in the branch
     const { data: systemItems, error } = await client
       .from('pawned_items')
       .select('item_id')
       .eq('branch_id', branchId)
       .eq('status', 'Active');
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
 
     const systemIds = (systemItems || []).map((i: any) => i.item_id);
-    const missingInVault = systemIds.filter((id: string) => !scannedItemIds.includes(id));
+    const missingInVault = systemIds.filter(
+      (id: string) => !scannedItemIds.includes(id),
+    );
     const extraInVault = scannedItemIds.filter((id) => !systemIds.includes(id));
 
     return {
@@ -185,18 +266,31 @@ export class InventoryService {
   // ITEMS FOR SALE
   // ═══════════════════════════════════════════════════════════
 
-  async findAllForSale(filters: QueryFilters) {
+  async findAllForSale(user: UserWithBranch, filters: QueryFilters) {
     const client = this.supabase.getClient();
+    const { branchId, branchNameIlike } = inventoryBranchFilters(
+      user,
+      filters.branch,
+    );
+
     let query = client
       .from('sale_items')
       .select('*', { count: 'exact' })
       .order('created_at', { ascending: false });
 
-    if (filters.branch) query = query.ilike('branch', `%${filters.branch}%`);
-    if (filters.category) query = query.ilike('category', `%${filters.category}%`);
-    if (filters.search) query = query.ilike('item_name', `%${filters.search}%`);
+    if (branchId) {
+      query = query.eq('branch_id', branchId);
+    } else if (branchNameIlike) {
+      query = query.ilike('branch', `%${branchNameIlike}%`);
+    }
 
-    // Current month vs History
+    if (filters.category) {
+      query = query.ilike('category', `%${filters.category}%`);
+    }
+    if (filters.search) {
+      query = query.ilike('item_name', `%${filters.search}%`);
+    }
+
     if (filters.viewMode === 'history') {
       query = query.eq('status', 'Sold');
     } else {
@@ -211,7 +305,9 @@ export class InventoryService {
     query = query.range(from, from + filters.limit - 1);
 
     const { data, error, count } = await query;
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
 
     return {
       items: (data || []).map((item: any) => ({
@@ -229,18 +325,26 @@ export class InventoryService {
     };
   }
 
-  // ─── MARK SOLD → ADD TO BRANCH BALANCE ────────────────────
-  async markSoldAndAddToBalance(itemId: string, soldPrice: number, branchId: number) {
+  async markSoldAndAddToBalance(
+    user: UserWithBranch,
+    itemId: string,
+    soldPrice: number,
+    branchIdParam: string | number,
+  ) {
+    const item = await this.findOneForSale(user, itemId);
+    const branchId = String(item.branch_id ?? branchIdParam);
+    assertResourceBranch(user, branchId);
+
     const client = this.supabase.getClient();
 
-    // 1. Mark as Sold
     const { error: updateErr } = await client
       .from('sale_items')
       .update({ status: 'Sold', price: soldPrice })
       .eq('id', itemId);
-    if (updateErr) throw new InternalServerErrorException(updateErr.message);
+    if (updateErr) {
+      throw new InternalServerErrorException(updateErr.message);
+    }
 
-    // 2. Add sold amount to branch daily balance (cash in)
     const today = new Date().toISOString().split('T')[0];
     const { data: balanceData } = await client
       .from('daily_balances')
@@ -252,39 +356,55 @@ export class InventoryService {
     if (balanceData) {
       await client
         .from('daily_balances')
-        .update({ ending_balance: parseFloat(balanceData.ending_balance) + soldPrice })
+        .update({
+          ending_balance:
+            parseFloat(balanceData.ending_balance) + soldPrice,
+        })
         .eq('branch_id', branchId)
         .eq('record_date', today);
     }
 
-    return { message: 'Item marked as sold, amount added to branch balance' };
+    return {
+      message: 'Item marked as sold, amount added to branch balance',
+    };
   }
 
-  async createForSale(dto: any) {
+  async findOneForSale(user: UserWithBranch, id: string) {
     const client = this.supabase.getClient();
-    const { data, error } = await client.from('sale_items').insert([dto]).select().single();
-    if (error) throw new InternalServerErrorException(error.message);
+    const { data, error } = await client
+      .from('sale_items')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) {
+      throw new NotFoundException('Item not found');
+    }
+    assertResourceBranch(user, data?.branch_id);
     return data;
   }
 
-  async findOneForSale(id: string) {
+  async updateForSale(user: UserWithBranch, id: string, dto: any) {
+    await this.findOneForSale(user, id);
     const client = this.supabase.getClient();
-    const { data, error } = await client.from('sale_items').select('*').eq('id', id).single();
-    if (error) throw new NotFoundException('Item not found');
+    const { data, error } = await client
+      .from('sale_items')
+      .update(dto)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
     return data;
   }
 
-  async updateForSale(id: string, dto: any) {
-    const client = this.supabase.getClient();
-    const { data, error } = await client.from('sale_items').update(dto).eq('id', id).select().single();
-    if (error) throw new InternalServerErrorException(error.message);
-    return data;
-  }
-
-  async deleteForSale(id: string) {
+  async deleteForSale(user: UserWithBranch, id: string) {
+    await this.findOneForSale(user, id);
     const client = this.supabase.getClient();
     const { error } = await client.from('sale_items').delete().eq('id', id);
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
     return { message: 'Item deleted' };
   }
 }

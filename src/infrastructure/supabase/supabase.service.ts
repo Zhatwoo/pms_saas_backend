@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Role } from '../../common/enums';
+
+export type AccountStatus = 'pending' | 'active' | 'rejected';
 
 interface UserRecord {
   id: string;
@@ -11,6 +13,7 @@ interface UserRecord {
   role: string | null;
   branch_id: string | null;
   avatar_url: string | null;
+  account_status: AccountStatus | null;
 }
 
 export interface AuthenticatedUserProfile {
@@ -22,6 +25,9 @@ export interface AuthenticatedUserProfile {
   branchId: string | null;
   avatarUrl: string | null;
 }
+
+const USER_SELECT_COLUMNS =
+  'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status';
 
 @Injectable()
 export class SupabaseService {
@@ -81,13 +87,22 @@ export class SupabaseService {
     };
   }
 
-  private async findUser(
+  private normalizeAccountStatus(
+    value: string | null | undefined,
+  ): AccountStatus {
+    if (value === 'pending' || value === 'rejected') {
+      return value;
+    }
+    return 'active';
+  }
+
+  private async fetchUserRow(
     column: 'id' | 'auth_id',
     value: string,
-  ): Promise<AuthenticatedUserProfile | null> {
+  ): Promise<UserRecord | null> {
     const { data, error } = await this.client
       .from('users')
-      .select('id, auth_id, email, full_name, role, branch_id, avatar_url')
+      .select(USER_SELECT_COLUMNS)
       .eq(column, value)
       .maybeSingle<UserRecord>();
 
@@ -95,14 +110,68 @@ export class SupabaseService {
       return null;
     }
 
-    return this.mapUserRecord(data);
+    return data;
   }
 
-  async getUserById(userId: string) {
-    return this.findUser('id', userId);
+  /**
+   * Only for active accounts (login + JWT). Pending/rejected are blocked.
+   */
+  async assertSessionUserByAuthId(
+    authUserId: string,
+  ): Promise<AuthenticatedUserProfile> {
+    const row = await this.fetchUserRow('auth_id', authUserId);
+
+    if (!row) {
+      throw new UnauthorizedException('User account not found');
+    }
+
+    const status = this.normalizeAccountStatus(row.account_status);
+
+    if (status === 'pending') {
+      throw new UnauthorizedException('Account pending approval');
+    }
+
+    if (status === 'rejected') {
+      throw new UnauthorizedException('Account rejected');
+    }
+
+    const profile = this.mapUserRecord(row);
+
+    if (!profile) {
+      throw new UnauthorizedException('User account not found');
+    }
+
+    return profile;
   }
 
-  async getUserByAuthId(authUserId: string) {
-    return this.findUser('auth_id', authUserId);
+  /**
+   * Only for active accounts (/auth/me and similar).
+   */
+  async assertSessionUserById(
+    userId: string,
+  ): Promise<AuthenticatedUserProfile> {
+    const row = await this.fetchUserRow('id', userId);
+
+    if (!row) {
+      throw new UnauthorizedException('User account not found');
+    }
+
+    const status = this.normalizeAccountStatus(row.account_status);
+
+    if (status === 'pending') {
+      throw new UnauthorizedException('Account pending approval');
+    }
+
+    if (status === 'rejected') {
+      throw new UnauthorizedException('Account rejected');
+    }
+
+    const profile = this.mapUserRecord(row);
+
+    if (!profile) {
+      throw new UnauthorizedException('User account not found');
+    }
+
+    return profile;
   }
 }
