@@ -265,6 +265,14 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
+    const authId = String(existing.auth_id ?? '').trim();
+    const publicId = String(existing.id ?? '').trim();
+    if (!authId) {
+      throw new InternalServerErrorException(
+        'User row is missing auth_id; cannot update profile.',
+      );
+    }
+
     const roleNorm = (existing.role ?? '').toLowerCase();
     if (
       roleNorm === 'super_admin' ||
@@ -306,13 +314,15 @@ export class UsersService {
       }
     }
 
-    const { data: updatedRows, error: updateError } = await client
+    const selectColumns =
+      'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at';
+
+    // Prefer auth_id: unique, stable, and matches the auth user even if public `id` drifts in clients.
+    let { data: updatedRows, error: updateError } = await client
       .from('users')
       .update(payload)
-      .eq('id', existing.id)
-      .select(
-        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
-      );
+      .eq('auth_id', authId)
+      .select(selectColumns);
 
     if (updateError) {
       throw new InternalServerErrorException(
@@ -320,10 +330,25 @@ export class UsersService {
       );
     }
 
-    const updated = (updatedRows ?? [])[0] as UserRow | undefined;
+    let updated = (updatedRows ?? [])[0] as UserRow | undefined;
+
+    if (!updated && publicId) {
+      const second = await client
+        .from('users')
+        .update(payload)
+        .eq('id', publicId)
+        .select(selectColumns);
+      if (second.error) {
+        throw new InternalServerErrorException(
+          this.formatSupabaseError(second.error),
+        );
+      }
+      updated = (second.data ?? [])[0] as UserRow | undefined;
+    }
+
     if (!updated) {
       throw new InternalServerErrorException(
-        'User update returned no row (id mismatch or database policy).',
+        'User update returned no row (check database policies and users table).',
       );
     }
 
