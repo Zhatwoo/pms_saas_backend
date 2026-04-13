@@ -1,27 +1,25 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '../../../common/enums';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { CreateUserDto } from '../dto/create-user.dto';
-
-interface BranchRow {
-  id: string;
-  name: string;
-  branch_code: string;
-}
+import { UpdateUserDto } from '../dto/update-user.dto';
+import { Role } from '../../../common/enums';
+import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 
 interface UserRow {
   id: string;
   auth_id: string;
-  full_name: string | null;
   email: string;
+  full_name: string | null;
   role: string | null;
   branch_id: string | null;
   avatar_url: string | null;
+  account_status: string | null;
   created_at: string;
 }
 
@@ -29,305 +27,310 @@ interface UserRow {
 export class UsersService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  private normalizeRole(role: string | null): Role {
-    switch (role) {
-      case 'super_admin':
-      case 'superadmin':
-        return Role.SUPER_ADMIN;
-      case 'admin':
-        return Role.ADMIN;
-      case 'employee':
-      case 'branch':
-        return Role.EMPLOYEE;
-      default:
-        return Role.EMPLOYEE;
+  private normalizeStoredRole(role: string): string {
+    if (role === 'superadmin') {
+      return 'super_admin';
     }
+    if (role === 'branch') {
+      return 'employee';
+    }
+    return role;
   }
 
-  private formatUser(user: UserRow, branches: Map<string, BranchRow>) {
-    const branch = user.branch_id ? branches.get(user.branch_id) : null;
-
-    if (!branch && user.branch_id) {
-      console.warn('[formatUser] Branch not found in map:', {
-        email: user.email,
-        branchId: user.branch_id,
-        availableBranchIds: Array.from(branches.keys()),
-      });
-    }
-
+  private mapToResponse(row: UserRow, branchName: string | null) {
     return {
-      id: user.id,
-      authId: user.auth_id,
-      fullName: user.full_name,
-      email: user.email,
-      role: this.normalizeRole(user.role),
-      branchId: user.branch_id,
-      branchName: branch?.name ?? null,
-      branchCode: branch?.branch_code ?? null,
-      avatarUrl: user.avatar_url,
-      createdAt: user.created_at,
-      status: 'active' as const,
+      id: row.id,
+      authId: row.auth_id,
+      email: row.email,
+      fullName: row.full_name,
+      role: row.role,
+      branchId: row.branch_id,
+      branchName,
+      accountStatus: row.account_status ?? 'active',
+      createdAt: row.created_at,
     };
   }
 
-  private async getBranchMap() {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('id, name, branch_code');
+  /**
+   * Super admin: all users, all branches.
+   * Branch admin: only `admin`, `employee`, `branch` roles in that branch (no super admins).
+   */
+  async findAll(scope?: { branchId: string; forBranchAdmin: true } | undefined) {
+    const client = this.supabaseService.getClient();
+
+    let q = client
+      .from('users')
+      .select(
+        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
+      )
+      .order('created_at', { ascending: false });
+
+    if (scope?.forBranchAdmin && scope.branchId) {
+      q = q
+        .eq('branch_id', scope.branchId)
+        .in('role', ['admin', 'employee', 'branch']);
+    }
+
+    const { data: users, error } = await q;
 
     if (error) {
-      console.error('[getBranchMap] Error:', error);
       throw new InternalServerErrorException(error.message);
     }
 
-    console.log('[getBranchMap] Branches loaded:', data?.length ?? 0, {
-      branches: data?.map((b) => ({ id: b.id, name: b.name })),
-    });
+    const rows = (users ?? []) as UserRow[];
+    const branchIds = [
+      ...new Set(
+        rows
+          .map((u) => u.branch_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
 
-    return new Map(
-      (data ?? []).map((branch) => [branch.id, branch as BranchRow]),
+    const branchMap = new Map<string, string>();
+    if (branchIds.length > 0) {
+      const { data: branches, error: branchError } = await client
+        .from('branches')
+        .select('id, name')
+        .in('id', branchIds);
+
+      if (branchError) {
+        throw new InternalServerErrorException(branchError.message);
+      }
+
+      (branches ?? []).forEach((b: { id: string; name: string }) => {
+        branchMap.set(b.id, b.name);
+      });
+    }
+
+    return rows.map((row) =>
+      this.mapToResponse(
+        row,
+        row.branch_id ? branchMap.get(row.branch_id) ?? null : null,
+      ),
     );
   }
 
-  private async getBranchOrThrow(branchId: string) {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('id, name, branch_code')
-      .eq('id', branchId)
-      .maybeSingle<BranchRow>();
+  async findOne(id: string, viewer?: AuthenticatedUserProfile) {
+    const client = this.supabaseService.getClient();
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    if (!data) {
-      throw new BadRequestException('Selected branch was not found');
-    }
-
-    return data;
-  }
-
-  private async getUserRowByAuthId(authId: string) {
-    const { data, error } = await this.supabaseService
-      .getClient()
+    const { data: row, error } = await client
       .from('users')
       .select(
-        'id, auth_id, full_name, email, role, branch_id, avatar_url, created_at',
+        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
       )
-      .eq('auth_id', authId)
+      .eq('id', id)
       .maybeSingle<UserRow>();
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
-  }
-
-  private async syncUserRowFromAuth(params: {
-    authId: string;
-    email: string;
-    fullName: string;
-    role: CreateUserDto['role'];
-    branchId: string;
-  }) {
-    console.log('[syncUserRowFromAuth] Waiting for trigger to sync user:', params.authId);
-
-    // The trigger automatically creates the user when auth user is created
-    // We just need to wait a moment and fetch it
-    // Retry a few times in case there's a slight delay
-    let user: UserRow | null = null;
-    let attempts = 0;
-    const maxAttempts = 5;
-
-    while (!user && attempts < maxAttempts) {
-      attempts++;
-      console.log(`[syncUserRowFromAuth] Fetch attempt ${attempts}/${maxAttempts}`);
-
-      const { data, error } = await this.supabaseService
-        .getClient()
-        .from('users')
-        .select(
-          'id, auth_id, full_name, email, role, branch_id, avatar_url, created_at',
-        )
-        .eq('auth_id', params.authId)
-        .maybeSingle<UserRow>();
-
-      if (error) {
-        console.error('[syncUserRowFromAuth] Fetch error:', error);
-        throw new InternalServerErrorException(error.message);
-      }
-
-      if (data) {
-        console.log('[syncUserRowFromAuth] User found:', data.id);
-        user = data;
-        break;
-      }
-
-      // Wait 100ms before retry
-      if (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
-
-    if (!user) {
-      throw new InternalServerErrorException(
-        'User was created in authentication but not synced to database. The trigger may not have executed.',
-      );
-    }
-
-    return user;
-  }
-
-  async create(createUserDto: CreateUserDto) {
-    const branch = await this.getBranchOrThrow(createUserDto.branchId);
-    const email = createUserDto.email.trim().toLowerCase();
-    const fullName = createUserDto.fullName.trim();
-
-    console.log('[UsersService.create] Creating auth user:', { email, fullName, branchId: createUserDto.branchId });
-
-    const authPayload = {
-      email,
-      password: createUserDto.password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: fullName,
-      },
-      app_metadata: {
-        role: createUserDto.role,
-        branch_id: createUserDto.branchId,
-      },
-    };
-
-    console.log('[UsersService.create] Auth payload:', authPayload);
-
-    const { data: authData, error: authError } =
-      await this.supabaseService.getClient().auth.admin.createUser(authPayload as any);
-
-    if (authError || !authData.user) {
-      console.error('[UsersService.create] Auth error:', authError);
-      throw new BadRequestException(
-        authError?.message ?? 'Failed to create user in authentication',
-      );
-    }
-
-    console.log('[UsersService.create] Auth user created:', {
-      id: authData.user.id,
-      email: authData.user.email,
-      app_metadata: authData.user.app_metadata,
-    });
-
-    // The trigger will sync the user to public.users, just fetch it
-    let data: UserRow;
-    try {
-      data = await this.syncUserRowFromAuth({
-        authId: authData.user.id,
-        email,
-        fullName,
-        role: createUserDto.role,
-        branchId: createUserDto.branchId,
-      });
-    } catch (error) {
-      // If sync fails, delete the auth user since the trigger didn't work
-      console.error('[UsersService.create] Sync failed, rolling back auth user:', error);
-      await this.supabaseService
-        .getClient()
-        .auth.admin.deleteUser(authData.user.id);
-      throw error;
-    }
-
-    return this.formatUser(
-      data,
-      new Map([[branch.id, branch]]),
-    );
-  }
-
-  async findAll() {
-    const [branches, usersResult] = await Promise.all([
-      this.getBranchMap(),
-      this.supabaseService
-        .getClient()
-        .from('users')
-        .select(
-          'id, auth_id, full_name, email, role, branch_id, avatar_url, created_at',
-        )
-        .order('created_at', { ascending: false }),
-    ]);
-
-    if (usersResult.error) {
-      throw new InternalServerErrorException(usersResult.error.message);
-    }
-
-    return (usersResult.data ?? []).map((user) =>
-      this.formatUser(user as UserRow, branches),
-    );
-  }
-
-  async findOne(id: string) {
-    const [branches, userResult] = await Promise.all([
-      this.getBranchMap(),
-      this.supabaseService
-        .getClient()
-        .from('users')
-        .select(
-          'id, auth_id, full_name, email, role, branch_id, avatar_url, created_at',
-        )
-        .eq('id', id)
-        .maybeSingle<UserRow>(),
-    ]);
-
-    if (userResult.error) {
-      throw new InternalServerErrorException(userResult.error.message);
-    }
-
-    if (!userResult.data) {
+    if (!row) {
       throw new NotFoundException('User not found');
     }
 
-    return this.formatUser(userResult.data, branches);
+    if (viewer && viewer.role === Role.ADMIN) {
+      const targetRole = (row.role ?? '').toLowerCase();
+      if (targetRole === 'super_admin' || targetRole === 'superadmin') {
+        throw new ForbiddenException('You cannot access Super Admin accounts');
+      }
+      if (String(row.branch_id) !== String(viewer.branchId)) {
+        throw new ForbiddenException('You cannot access users outside your branch');
+      }
+    }
+
+    let branchName: string | null = null;
+    if (row.branch_id) {
+      const { data: branch } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', row.branch_id)
+        .maybeSingle<{ name: string }>();
+      branchName = branch?.name ?? null;
+    }
+
+    return this.mapToResponse(row, branchName);
+  }
+
+  async create(dto: CreateUserDto) {
+    const client = this.supabaseService.getClient();
+    const email = dto.email.trim().toLowerCase();
+
+    const { data: branch, error: branchError } = await client
+      .from('branches')
+      .select('id, status, name')
+      .eq('id', dto.branchId)
+      .maybeSingle<{ id: string; status: string; name: string }>();
+
+    if (branchError || !branch || branch.status !== 'Active') {
+      throw new BadRequestException('Invalid or inactive branch');
+    }
+
+    const { data: authData, error: authError } =
+      await client.auth.admin.createUser({
+        email,
+        password: dto.password,
+        email_confirm: true,
+        user_metadata: { full_name: dto.fullName.trim() },
+      });
+
+    if (authError || !authData.user) {
+      const msg = authError?.message ?? 'Failed to create user';
+      if (/already|registered|exists/i.test(msg)) {
+        throw new BadRequestException('Email already in use');
+      }
+      throw new InternalServerErrorException(msg);
+    }
+
+    const authId = authData.user.id;
+
+    const { data: inserted, error: insertError } = await client
+      .from('users')
+      .insert({
+        auth_id: authId,
+        email,
+        full_name: dto.fullName.trim(),
+        role: dto.role,
+        branch_id: dto.branchId,
+        account_status: 'active',
+      })
+      .select(
+        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
+      )
+      .single<UserRow>();
+
+    if (insertError) {
+      await client.auth.admin.deleteUser(authId);
+      throw new InternalServerErrorException(insertError.message);
+    }
+
+    return this.mapToResponse(inserted, branch.name);
+  }
+
+  async update(id: string, dto: UpdateUserDto) {
+    if (
+      dto.accountStatus === undefined &&
+      dto.role === undefined &&
+      dto.branchId === undefined
+    ) {
+      throw new BadRequestException('No updates provided');
+    }
+
+    const client = this.supabaseService.getClient();
+
+    const { data: existing, error: findError } = await client
+      .from('users')
+      .select(
+        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
+      )
+      .eq('id', id)
+      .maybeSingle<UserRow>();
+
+    if (findError) {
+      throw new InternalServerErrorException(findError.message);
+    }
+
+    if (!existing) {
+      throw new NotFoundException('User not found');
+    }
+
+    const roleNorm = (existing.role ?? '').toLowerCase();
+    if (
+      roleNorm === 'super_admin' ||
+      roleNorm === 'superadmin'
+    ) {
+      if (dto.accountStatus === 'rejected') {
+        throw new ForbiddenException('Cannot reject a Super Admin account');
+      }
+    }
+
+    const payload: Record<string, unknown> = {};
+
+    if (dto.accountStatus !== undefined) {
+      payload.account_status = dto.accountStatus;
+    }
+
+    if (dto.role !== undefined) {
+      const next = this.normalizeStoredRole(dto.role);
+      if (next === 'super_admin' && roleNorm !== 'super_admin' && roleNorm !== 'superadmin') {
+        throw new ForbiddenException('Cannot assign Super Admin via this endpoint');
+      }
+      payload.role = next;
+    }
+
+    if (dto.branchId !== undefined) {
+      if (dto.branchId === null) {
+        payload.branch_id = null;
+      } else {
+        const { data: branch, error: branchError } = await client
+          .from('branches')
+          .select('id, status')
+          .eq('id', dto.branchId)
+          .maybeSingle<{ id: string; status: string }>();
+
+        if (branchError || !branch || branch.status !== 'Active') {
+          throw new BadRequestException('Invalid or inactive branch');
+        }
+        payload.branch_id = dto.branchId;
+      }
+    }
+
+    const { data: updated, error: updateError } = await client
+      .from('users')
+      .update(payload)
+      .eq('id', id)
+      .select(
+        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
+      )
+      .single<UserRow>();
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    let branchName: string | null = null;
+    if (updated.branch_id) {
+      const { data: branch } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', updated.branch_id)
+        .maybeSingle<{ name: string }>();
+      branchName = branch?.name ?? null;
+    }
+
+    return this.mapToResponse(updated, branchName);
   }
 
   async remove(id: string) {
-    const { data: existingUser, error: existingUserError } =
-      await this.supabaseService
-        .getClient()
-        .from('users')
-        .select('id, auth_id, role')
-        .eq('id', id)
-        .maybeSingle<{ id: string; auth_id: string; role: string | null }>();
+    const client = this.supabaseService.getClient();
 
-    if (existingUserError) {
-      throw new InternalServerErrorException(existingUserError.message);
+    const { data: existing, error: findError } = await client
+      .from('users')
+      .select('id, auth_id, role')
+      .eq('id', id)
+      .maybeSingle<{ id: string; auth_id: string; role: string | null }>();
+
+    if (findError) {
+      throw new InternalServerErrorException(findError.message);
     }
 
-    if (!existingUser) {
+    if (!existing) {
       throw new NotFoundException('User not found');
     }
 
-    if (this.normalizeRole(existingUser.role) === Role.SUPER_ADMIN) {
-      throw new BadRequestException('Super admin accounts cannot be deleted here');
+    const roleNorm = (existing.role ?? '').toLowerCase();
+    if (roleNorm === 'super_admin' || roleNorm === 'superadmin') {
+      throw new ForbiddenException('Cannot delete a Super Admin account');
     }
 
-    const { error: deleteProfileError } = await this.supabaseService
-      .getClient()
-      .from('users')
-      .delete()
-      .eq('id', id);
+    const { error: authDeleteError } = await client.auth.admin.deleteUser(
+      existing.auth_id,
+    );
 
-    if (deleteProfileError) {
-      throw new InternalServerErrorException(deleteProfileError.message);
+    if (authDeleteError) {
+      throw new InternalServerErrorException(authDeleteError.message);
     }
 
-    const { error: deleteAuthError } = await this.supabaseService
-      .getClient()
-      .auth.admin.deleteUser(existingUser.auth_id);
-
-    return {
-      deleted: true,
-      authDeleted: !deleteAuthError,
-      warning: deleteAuthError?.message ?? null,
-    };
+    return { deleted: true };
   }
 }

@@ -2,6 +2,9 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { CreateBranchDto } from '../dto/create-branch.dto';
 import { UpdateBranchDto } from '../dto/update-branch.dto';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { Role } from '../../../common/enums';
+import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
+import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 
 @Injectable()
 export class BranchesService {
@@ -98,6 +101,45 @@ export class BranchesService {
     }
 
     return data;
+  }
+
+  /** Admin / employee: only their assigned branch. Super admin: all. */
+  async findAllForActor(user: UserWithBranch) {
+    if (user.role === Role.SUPER_ADMIN) {
+      return this.findAll();
+    }
+    const branchId = requireUserBranchId(user);
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('branches')
+      .select('*')
+      .eq('id', branchId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data ?? [];
+  }
+
+  /** Public signup: active branches only (id + name). */
+  async findActiveSummaries() {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('branches')
+      .select('id, name')
+      .eq('status', 'Active')
+      .order('name', { ascending: true });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data ?? []).map((row: { id: string; name: string }) => ({
+      id: row.id,
+      name: row.name,
+    }));
   }
 
   async findOne(id: string) {

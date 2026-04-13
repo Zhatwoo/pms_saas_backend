@@ -8,6 +8,26 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 
+function normalizeErrorMessage(payload: string | object): string {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (payload && typeof payload === 'object') {
+    const body = payload as Record<string, unknown>;
+    const m = body.message;
+    if (typeof m === 'string') {
+      return m;
+    }
+    if (Array.isArray(m)) {
+      return m.map(String).join('; ');
+    }
+    if (typeof body.error === 'string') {
+      return body.error;
+    }
+  }
+  return 'Internal server error';
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
@@ -19,23 +39,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    let message: any = 'Internal server error';
-    let data: any = undefined;
+    const rawMessage =
+      exception instanceof HttpException
+        ? exception.getResponse()
+        : exception instanceof Error
+          ? exception.message
+          : 'Internal server error';
 
-    if (exception instanceof HttpException) {
-      const exceptionResponse = exception.getResponse();
-      
-      if (typeof exceptionResponse === 'string') {
-        message = exceptionResponse;
-      } else {
-        const responseObj = exceptionResponse as any;
-        message = responseObj.message || 'An error occurred';
-        // Include both 'details' and 'errors' to cover all cases
-        data = responseObj.details || responseObj.errors || responseObj.error;
-      }
-    } else if (exception instanceof Error) {
-      message = exception.message;
-    }
+    let message = normalizeErrorMessage(
+      typeof rawMessage === 'string' || typeof rawMessage === 'object'
+        ? rawMessage
+        : 'Internal server error',
+    );
+    message = message.trim() || 'Internal server error';
 
     const errorResponse: any = {
       statusCode: status,
