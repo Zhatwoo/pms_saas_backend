@@ -46,6 +46,13 @@ export class UsersController {
     return this.usersService.update(id, updateUserDto);
   }
 
+  // NextJS Turbopack workaround using POST instead of PATCH/PUT
+  @Roles(Role.SUPER_ADMIN)
+  @Post(':id/update')
+  updatePost(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+    return this.usersService.update(id, updateUserDto);
+  }
+
   @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {

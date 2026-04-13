@@ -17,6 +17,10 @@ export class AuthService {
 
   constructor(private supabaseService: SupabaseService) {}
 
+  private isActiveBranchStatus(status: string | null | undefined): boolean {
+    return status?.trim().toLowerCase() === 'active';
+  }
+
   async register(registerDto: RegisterDto) {
     try {
       return await this.registerInternal(registerDto);
@@ -35,6 +39,8 @@ export class AuthService {
   private async registerInternal(registerDto: RegisterDto) {
     const client = this.supabaseService.getClient();
     const email = registerDto.email.trim().toLowerCase();
+    const fullName = registerDto.fullName.trim();
+    const normalizedRole = registerDto.role === 'admin' ? 'admin' : 'employee';
 
     const { data: branch, error: branchError } = await client
       .from('branches')
@@ -42,7 +48,11 @@ export class AuthService {
       .eq('id', registerDto.branchId)
       .maybeSingle<{ id: string; status: string }>();
 
-    if (branchError || !branch || branch.status !== 'Active') {
+    if (
+      branchError ||
+      !branch ||
+      !this.isActiveBranchStatus(branch.status)
+    ) {
       throw new BadRequestException('Invalid or inactive branch');
     }
 
@@ -51,7 +61,11 @@ export class AuthService {
         email,
         password: registerDto.password,
         email_confirm: true,
-        user_metadata: { full_name: registerDto.fullName.trim() },
+        user_metadata: { full_name: fullName },
+        app_metadata: {
+          role: normalizedRole,
+          branch_id: registerDto.branchId,
+        },
       });
 
     if (authError || !authData.user) {
@@ -67,8 +81,8 @@ export class AuthService {
     const row = {
       auth_id: authId,
       email,
-      full_name: registerDto.fullName.trim(),
-      role: registerDto.role,
+      full_name: fullName,
+      role: normalizedRole,
       branch_id: registerDto.branchId,
       account_status: 'pending' as const,
     };

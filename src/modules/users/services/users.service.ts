@@ -34,6 +34,10 @@ export class UsersService {
     return UUID_PARAM_RE.test(value.trim());
   }
 
+  private isActiveBranchStatus(status: string | null | undefined): boolean {
+    return status?.trim().toLowerCase() === 'active';
+  }
+
   private formatSupabaseError(err: {
     message?: string;
     code?: string;
@@ -189,6 +193,8 @@ export class UsersService {
   async create(dto: CreateUserDto) {
     const client = this.supabaseService.getClient();
     const email = dto.email.trim().toLowerCase();
+    const fullName = dto.fullName.trim();
+    const normalizedRole = this.normalizeStoredRole(dto.role);
 
     const { data: branch, error: branchError } = await client
       .from('branches')
@@ -196,7 +202,11 @@ export class UsersService {
       .eq('id', dto.branchId)
       .maybeSingle<{ id: string; status: string; name: string }>();
 
-    if (branchError || !branch || branch.status !== 'Active') {
+    if (
+      branchError ||
+      !branch ||
+      !this.isActiveBranchStatus(branch.status)
+    ) {
       throw new BadRequestException('Invalid or inactive branch');
     }
 
@@ -205,7 +215,11 @@ export class UsersService {
         email,
         password: dto.password,
         email_confirm: true,
-        user_metadata: { full_name: dto.fullName.trim() },
+        user_metadata: { full_name: fullName },
+        app_metadata: {
+          role: normalizedRole,
+          branch_id: dto.branchId,
+        },
       });
 
     if (authError || !authData.user) {
@@ -218,24 +232,64 @@ export class UsersService {
 
     const authId = authData.user.id;
 
-    const { data: inserted, error: insertError } = await client
-      .from('users')
-      .insert({
-        auth_id: authId,
+    const { error: syncAuthError } = await client.auth.admin.updateUserById(
+      authId,
+      {
         email,
-        full_name: dto.fullName.trim(),
-        role: dto.role,
+        user_metadata: { full_name: fullName },
+        app_metadata: {
+          role: normalizedRole,
+          branch_id: dto.branchId,
+        },
+      },
+    );
+
+    if (syncAuthError) {
+      await client.auth.admin.deleteUser(authId);
+      throw new InternalServerErrorException(syncAuthError.message);
+    }
+
+    const { data: updatedRows, error: updateError } = await client
+      .from('users')
+      .update({
+        email,
+        full_name: fullName,
+        role: normalizedRole,
         branch_id: dto.branchId,
         account_status: 'active',
       })
+      .eq('auth_id', authId)
       .select(
         'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
-      )
-      .single<UserRow>();
+      );
 
-    if (insertError) {
+    if (updateError) {
       await client.auth.admin.deleteUser(authId);
-      throw new InternalServerErrorException(insertError.message);
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(updateError),
+      );
+    }
+
+    let inserted = (updatedRows ?? [])[0] as UserRow | undefined;
+    if (!inserted) {
+      const { data: fetchedRow, error: fetchError } = await client
+        .from('users')
+        .select(
+          'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
+        )
+        .eq('auth_id', authId)
+        .maybeSingle<UserRow>();
+
+      if (fetchError || !fetchedRow) {
+        await client.auth.admin.deleteUser(authId);
+        throw new InternalServerErrorException(
+          fetchError
+            ? this.formatSupabaseError(fetchError)
+            : 'Failed to load created user profile',
+        );
+      }
+
+      inserted = fetchedRow;
     }
 
     return this.mapToResponse(inserted, branch.name);
@@ -318,7 +372,11 @@ export class UsersService {
           .eq('id', dto.branchId)
           .maybeSingle<{ id: string; status: string }>();
 
-        if (branchError || !branch || branch.status !== 'Active') {
+        if (
+          branchError ||
+          !branch ||
+          !this.isActiveBranchStatus(branch.status)
+        ) {
           throw new BadRequestException('Invalid or inactive branch');
         }
         payload.branch_id = dto.branchId;
