@@ -1,18 +1,32 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
+import {
+  assertResourceBranch,
+  effectiveBranchIdForQuery,
+  requireUserBranchId,
+} from '../../../common/utils/branch-scope.util';
+import { Role } from '../../../common/enums';
 
 @Injectable()
 export class TransactionsService {
   constructor(private supabase: SupabaseService) {}
 
-  async create(createTransactionDto: any) {
-    const { branch_id, cash_in, cash_out } = createTransactionDto;
+  async create(user: UserWithBranch, createTransactionDto: any) {
+    const payload =
+      user.role === Role.SUPER_ADMIN
+        ? { ...createTransactionDto }
+        : {
+            ...createTransactionDto,
+            branch_id: requireUserBranchId(user),
+          };
+    const { branch_id, cash_in, cash_out } = payload;
     const client = this.supabase.getClient();
-    
+
     // 1. Insert Transaction
     const { data, error } = await client
       .from('transactions')
-      .insert([createTransactionDto])
+      .insert([payload])
       .select()
       .single();
 
@@ -42,14 +56,18 @@ export class TransactionsService {
     return data;
   }
 
-  async findAll(branchId?: string) {
+  async findAll(user: UserWithBranch, branchQuery?: string) {
     const client = this.supabase.getClient();
-    let query = client.from('transactions').select('*').order('created_at', { ascending: false });
-    
-    if (branchId && branchId !== 'All Branches') {
-      query = query.eq('branch_id', branchId);
+    let query = client
+      .from('transactions')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    const scoped = effectiveBranchIdForQuery(user, branchQuery);
+    if (scoped) {
+      query = query.eq('branch_id', scoped);
     }
-    
+
     const { data: transactions, error } = await query;
     if (error) throw new InternalServerErrorException(error.message);
     
@@ -57,10 +75,15 @@ export class TransactionsService {
     return transactions;
   }
 
-  async findOne(id: string) {
+  async findOne(user: UserWithBranch, id: string) {
     const client = this.supabase.getClient();
-    const { data, error } = await client.from('transactions').select('*').eq('id', id).single();
+    const { data, error } = await client
+      .from('transactions')
+      .select('*')
+      .eq('id', id)
+      .single();
     if (error) throw new InternalServerErrorException(error.message);
+    assertResourceBranch(user, data?.branch_id);
     return data;
   }
 }

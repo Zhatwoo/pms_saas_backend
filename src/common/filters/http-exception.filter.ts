@@ -4,8 +4,29 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
+
+function normalizeErrorMessage(payload: string | object): string {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (payload && typeof payload === 'object') {
+    const body = payload as Record<string, unknown>;
+    const m = body.message;
+    if (typeof m === 'string') {
+      return m;
+    }
+    if (Array.isArray(m)) {
+      return m.map(String).join('; ');
+    }
+    if (typeof body.error === 'string') {
+      return body.error;
+    }
+  }
+  return 'Internal server error';
+}
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -18,15 +39,39 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const message =
+    const rawMessage =
       exception instanceof HttpException
         ? exception.getResponse()
-        : 'Internal server error';
+        : exception instanceof Error
+          ? exception.message
+          : 'Internal server error';
 
-    response.status(status).json({
+    let message = normalizeErrorMessage(
+      typeof rawMessage === 'string' || typeof rawMessage === 'object'
+        ? rawMessage
+        : 'Internal server error',
+    );
+    message = message.trim() || 'Internal server error';
+
+    const errorResponse: Record<string, unknown> = {
       statusCode: status,
-      message: typeof message === 'string' ? message : (message as any).message,
+      message,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    if (
+      exception instanceof HttpException &&
+      typeof rawMessage === 'object' &&
+      rawMessage !== null &&
+      !Array.isArray(rawMessage)
+    ) {
+      const body = rawMessage as Record<string, unknown>;
+      if (body.data !== undefined) {
+        errorResponse.data = body.data;
+      }
+    }
+
+    console.error(`[HttpExceptionFilter] ${status}:`, errorResponse);
+    response.status(status).json(errorResponse);
   }
 }
