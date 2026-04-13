@@ -23,9 +23,49 @@ interface UserRow {
   created_at: string;
 }
 
+const UUID_PARAM_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class UsersService {
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  private isUuidParam(value: string): boolean {
+    return UUID_PARAM_RE.test(value.trim());
+  }
+
+  private formatSupabaseError(err: {
+    message?: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+  }): string {
+    const parts = [err.message, err.code, err.details, err.hint].filter(
+      (p): p is string => Boolean(p && String(p).trim()),
+    );
+    return parts.length > 0 ? parts.join(' | ') : 'Database request failed';
+  }
+
+  /** Match `public.users.id` or `auth.users` id stored in `auth_id`. */
+  private async fetchUserRowByIdOrAuthId(
+    client: ReturnType<SupabaseService['getClient']>,
+    idParam: string,
+  ): Promise<{ row: UserRow | null; error: { message?: string } | null }> {
+    const trimmed = idParam.trim();
+    if (!this.isUuidParam(trimmed)) {
+      return { row: null, error: null };
+    }
+
+    const { data, error } = await client
+      .from('users')
+      .select(
+        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
+      )
+      .or(`id.eq.${trimmed},auth_id.eq.${trimmed}`)
+      .maybeSingle<UserRow>();
+
+    return { row: data ?? null, error };
+  }
 
   private normalizeStoredRole(role: string): string {
     if (role === 'superadmin') {
@@ -113,16 +153,10 @@ export class UsersService {
   async findOne(id: string, viewer?: AuthenticatedUserProfile) {
     const client = this.supabaseService.getClient();
 
-    const { data: row, error } = await client
-      .from('users')
-      .select(
-        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
-      )
-      .eq('id', id)
-      .maybeSingle<UserRow>();
+    const { row, error } = await this.fetchUserRowByIdOrAuthId(client, id);
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    if (error?.message) {
+      throw new InternalServerErrorException(this.formatSupabaseError(error));
     }
 
     if (!row) {
@@ -218,16 +252,13 @@ export class UsersService {
 
     const client = this.supabaseService.getClient();
 
-    const { data: existing, error: findError } = await client
-      .from('users')
-      .select(
-        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
-      )
-      .eq('id', id)
-      .maybeSingle<UserRow>();
+    const { row: existing, error: findError } =
+      await this.fetchUserRowByIdOrAuthId(client, id);
 
-    if (findError) {
-      throw new InternalServerErrorException(findError.message);
+    if (findError?.message) {
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(findError),
+      );
     }
 
     if (!existing) {
@@ -275,17 +306,25 @@ export class UsersService {
       }
     }
 
-    const { data: updated, error: updateError } = await client
+    const { data: updatedRows, error: updateError } = await client
       .from('users')
       .update(payload)
-      .eq('id', id)
+      .eq('id', existing.id)
       .select(
         'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
-      )
-      .single<UserRow>();
+      );
 
     if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(updateError),
+      );
+    }
+
+    const updated = (updatedRows ?? [])[0] as UserRow | undefined;
+    if (!updated) {
+      throw new InternalServerErrorException(
+        'User update returned no row (id mismatch or database policy).',
+      );
     }
 
     let branchName: string | null = null;
@@ -304,19 +343,24 @@ export class UsersService {
   async remove(id: string) {
     const client = this.supabaseService.getClient();
 
-    const { data: existing, error: findError } = await client
-      .from('users')
-      .select('id, auth_id, role')
-      .eq('id', id)
-      .maybeSingle<{ id: string; auth_id: string; role: string | null }>();
+    const { row: existingRow, error: findError } =
+      await this.fetchUserRowByIdOrAuthId(client, id);
 
-    if (findError) {
-      throw new InternalServerErrorException(findError.message);
+    if (findError?.message) {
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(findError),
+      );
     }
 
-    if (!existing) {
+    if (!existingRow) {
       throw new NotFoundException('User not found');
     }
+
+    const existing = {
+      id: existingRow.id,
+      auth_id: existingRow.auth_id,
+      role: existingRow.role,
+    };
 
     const roleNorm = (existing.role ?? '').toLowerCase();
     if (roleNorm === 'super_admin' || roleNorm === 'superadmin') {
