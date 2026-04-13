@@ -2,3 +2,1266 @@
 > pms_backend@0.0.1 start:dev
 > nest start --watch
 
+[2J[3J[H[[90m10:42:42 AM[0m] Starting compilation in watch mode...
+
+[96msrc/modules/users/controllers/users.controller.ts[0m:[93m44[0m:[93m4[0m - [91merror[0m[90m TS2304: [0mCannot find name 'Patch'.
+
+[7m44[0m   @Patch(':id')
+[7m  [0m [91m   ~~~~~[0m
+
+[[90m10:42:45 AM[0m] Found 1 error. Watching for file changes.
+
+[2J[3J[H[[90m10:43:24 AM[0m] File change detected. Starting incremental compilation...
+
+[[90m10:43:24 AM[0m] Found 0 errors. Watching for file changes.
+
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPassportModule dependencies initialized[39m[38;5;3m +8ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mItemsModule dependencies initialized[39m[38;5;3m +14ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mCategoriesModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mReportsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDashboardModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mSupabaseModule dependencies initialized[39m[38;5;3m +2ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJwtModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mBranchesModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mUsersModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTransactionsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mInventoryModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuthModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/api/auth}:[39m[38;5;3m +21ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/auth/signup/branches, GET} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/auth/register, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/auth/login, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/auth/me, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mBranchesController {/api/branches}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/branches/public, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/branches, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/branches/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/branches, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/branches/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/branches/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mUsersController {/api/users}:[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/users, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/users, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/users/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/users/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/users/:id/update, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/users/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mItemsController {/api/items}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/items, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/items, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/items/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/items/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/items/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mTransactionsController {/api/transactions}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/transactions, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/transactions, GET} route[39m[38;5;3m +3ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/transactions/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mCategoriesController {/api/categories}:[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/categories, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/categories, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/categories/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/categories/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/categories/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mReportsController {/api/reports}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/reports/system, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/reports/branch-summary, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/reports/transactions, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mDashboardController {/api/dashboard}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/dashboard, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mInventoryController {/api/inventory}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned/:id, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned/:id, DELETE} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned/:id/renew, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned/:id/remarks, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned/:id/expire, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/pawned/qr-tally, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/for-sale, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/for-sale/:id/mark-sold, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/for-sale/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/for-sale/:id, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/inventory/for-sale/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 14740  - [39m04/13/2026, 10:43:25 AM [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +2ms[39m
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"d4-g4SS37ePMKQF8mzwb1bAxXpIGqo\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"570-YDwO49Dh3QGoIcgyUzjY3SyIjXg\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"b72-Kf7TF0ac2FeJGzLkKsLzOGDJB0M\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"b72-Kf7TF0ac2FeJGzLkKsLzOGDJB0M\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"570-YDwO49Dh3QGoIcgyUzjY3SyIjXg\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"570-YDwO49Dh3QGoIcgyUzjY3SyIjXg\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "content-length": "26",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "origin": "http://localhost:3000",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users/3a11991b-6a8b-4b81-822d-340190678acb/update',
+  method: 'POST',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "content-length": "60",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "origin": "http://localhost:3000",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/login?redirect=%2F",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[HttpExceptionFilter] 401: {
+  statusCode: 401,
+  message: 'Invalid login credentials',
+  timestamp: '2026-04-13T02:44:50.562Z'
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "content-length": "60",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "origin": "http://localhost:3000",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/login?redirect=%2F",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/login?redirect=%2F",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"508-N0lQswvg92TcASVg/Bmserh5tVk\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "content-type": "application/json",
+  "user-agent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.7920",
+  "host": "localhost:4000",
+  "content-length": "56",
+  "expect": "100-continue",
+  "connection": "close",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[HttpExceptionFilter] 401: {
+  statusCode: 401,
+  message: 'Invalid login credentials',
+  timestamp: '2026-04-13T02:46:52.722Z'
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"508-N0lQswvg92TcASVg/Bmserh5tVk\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"570-YDwO49Dh3QGoIcgyUzjY3SyIjXg\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"b72-Kf7TF0ac2FeJGzLkKsLzOGDJB0M\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"508-N0lQswvg92TcASVg/Bmserh5tVk\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"b66-87SF8uSqsNg40f+JijJZFr1rI9g\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"508-N0lQswvg92TcASVg/Bmserh5tVk\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"b66-87SF8uSqsNg40f+JijJZFr1rI9g\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"508-N0lQswvg92TcASVg/Bmserh5tVk\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"b66-87SF8uSqsNg40f+JijJZFr1rI9g\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/users',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/admin/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiIzMDFiMWI3YS04NWRkLTQ0MjQtYTc0Yy03MzJhYjlkM2YwZjYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxODkzLCJpYXQiOjE3NzYwNDgyOTMsImVtYWlsIjoibmRlbGF0b3JyZTA4MjUyMDAyQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWxfdmVyaWZpZWQiOnRydWUsImZ1bGxfbmFtZSI6Ik5lbyBEZWxhIFRvcnJlIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NzYwNDgyOTN9XSwic2Vzc2lvbl9pZCI6ImVhYTc3OWY0LWZmMzctNDgxNC1hMDQ3LTAyY2JmODc3NmFkMSIsImlzX2Fub255bW91cyI6ZmFsc2V9._xeVF5ohNhBcHNgGQp7yv5kwKg6-zR-Mfhgd1OmIdTyaaC8o1z7gM3tseHIhuCEMDRogpOklXXPW2NM97BqNhw",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+--- [JwtAuthGuard] Incoming Headers ---
+{
+  "host": "localhost:4000",
+  "connection": "close",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "authorization": "Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+  "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "accept": "*/*",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:3000/users",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "refresh_token=AMf-vBzv7ozav6kdJ8VJT5JNEmqdOVNvvmfqxR5IF4lelOkhnX2KzKphC72q1N2o4VCeOmHw57IF9s3ufeUacft3y6eXCnVrD2KXTD-pZDuUDGzaPyeVoAY6_SSUTgJzhZfuH2Gxrex6mhaP5z0Rxsm17CEXcm0OMr4OYnrIqxivEGv5VFmi2dKqNQhAjGdb4MoQ1ugPCEmfPzyF_rYpEBa8zUxW1Ad8Mw; __next_hmr_refresh_hash__=368; pms_token=eyJhbGciOiJFUzI1NiIsImtpZCI6IjQyMjU1YmZiLTBlMzAtNGRlZS05OTIxLTQ0Y2M4ZjViMzQyMCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL3NpeGJheWtjcm5qamxqYXRidWlhLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI5NzFhMDk3Yy1hZWNiLTRmMWQtODUwYy0wNjk2MGRmN2QyZWUiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzc2MDUxMzA4LCJpYXQiOjE3NzYwNDc3MDgsImVtYWlsIjoidGVzdEBnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc3NjA0NzcwOH1dLCJzZXNzaW9uX2lkIjoiZDhjZjYzYTYtNTIyZS00MDE1LThkOGMtNWMwMzZjODA2YzM3IiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.AAyh_5rFDBQa9uBRF4xwQyo0fe024eJ-pgueNQqjlfP2GCaxf3JynARaeBsI9aksYy-8fqGQjtQESP06C_U38g",
+  "if-none-match": "W/\"106-7Bj681Bu4Jc6x0kq7n6EowyE6ck\"",
+  "x-forwarded-host": "localhost:3000",
+  "x-forwarded-port": "3000",
+  "x-forwarded-proto": "http",
+  "x-forwarded-for": "::1"
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
+[RolesGuard] Check: {
+  path: '/api/branches',
+  method: 'GET',
+  userRole: 'super_admin',
+  requiredRoles: [ 'super_admin', 'admin', 'employee' ],
+  hasAccess: true
+}
