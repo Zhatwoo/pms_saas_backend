@@ -53,14 +53,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
     );
     message = message.trim() || 'Internal server error';
 
-    const errorResponse: any = {
+    const errorResponse: Record<string, unknown> = {
       statusCode: status,
       message,
       timestamp: new Date().toISOString(),
     };
 
-    if (data) {
-      errorResponse.data = data;
+    if (
+      exception instanceof HttpException &&
+      typeof rawMessage === 'object' &&
+      rawMessage !== null &&
+      !Array.isArray(rawMessage)
+    ) {
+      const body = rawMessage as Record<string, unknown>;
+      if (body.data !== undefined) {
+        errorResponse.data = body.data;
+      }
     }
 
     console.error(`[HttpExceptionFilter] ${status}:`, errorResponse);
