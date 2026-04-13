@@ -285,6 +285,17 @@ export class UsersService {
 
     const payload: Record<string, unknown> = {};
 
+    if (dto.fullName !== undefined) {
+      const trimmed = dto.fullName.trim();
+      if (trimmed) {
+        payload.full_name = trimmed;
+        // Keep Auth metadata in sync
+        await client.auth.admin.updateUserById(authId, {
+          user_metadata: { full_name: trimmed },
+        });
+      }
+    }
+
     if (dto.accountStatus !== undefined) {
       payload.account_status = dto.accountStatus;
     }
