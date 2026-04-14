@@ -14,6 +14,7 @@ interface UserRecord {
   branch_id: string | null;
   avatar_url: string | null;
   account_status: AccountStatus | null;
+  branches?: { name: string } | null;
 }
 
 export interface AuthenticatedUserProfile {
@@ -23,11 +24,12 @@ export interface AuthenticatedUserProfile {
   email: string;
   role: Role;
   branchId: string | null;
+  branchName: string | null;
   avatarUrl: string | null;
 }
 
 const USER_SELECT_COLUMNS =
-  'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status';
+  'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, branches(name)';
 
 @Injectable()
 export class SupabaseService {
@@ -83,6 +85,7 @@ export class SupabaseService {
       email: user.email,
       role,
       branchId: user.branch_id,
+      branchName: user.branches?.name ?? null,
       avatarUrl: user.avatar_url,
     };
   }
