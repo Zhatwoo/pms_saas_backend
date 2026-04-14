@@ -434,6 +434,78 @@ export class UsersService {
     return this.mapToResponse(updated, branchName);
   }
 
+  async transferBranch(id: string, targetBranchId: string) {
+    const client = this.supabaseService.getClient();
+
+    const { row: existing, error: findError } =
+      await this.fetchUserRowByIdOrAuthId(client, id);
+
+    if (findError?.message) {
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(findError),
+      );
+    }
+
+    if (!existing) {
+      throw new NotFoundException('User not found');
+    }
+
+    const roleNorm = (existing.role ?? '').toLowerCase();
+    if (roleNorm === 'super_admin' || roleNorm === 'superadmin') {
+      throw new ForbiddenException('Super Admin accounts cannot be transferred');
+    }
+
+    if (String(existing.branch_id) === String(targetBranchId)) {
+      throw new BadRequestException('User is already assigned to this branch');
+    }
+
+    const { data: targetBranch, error: targetBranchError } = await client
+      .from('branches')
+      .select('id, status, name')
+      .eq('id', targetBranchId)
+      .maybeSingle<{ id: string; status: string; name: string }>();
+
+    if (
+      targetBranchError ||
+      !targetBranch ||
+      !this.isActiveBranchStatus(targetBranch.status)
+    ) {
+      throw new BadRequestException('Invalid or inactive target branch');
+    }
+
+    const { data: updatedRows, error: updateError } = await client
+      .from('users')
+      .update({ branch_id: targetBranchId })
+      .eq('auth_id', existing.auth_id)
+      .select(
+        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
+      );
+
+    if (updateError) {
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(updateError),
+      );
+    }
+
+    const updated = (updatedRows ?? [])[0] as UserRow | undefined;
+    if (!updated) {
+      throw new InternalServerErrorException('Failed to update user branch assignment');
+    }
+
+    const appMetaUpdate = await client.auth.admin.updateUserById(existing.auth_id, {
+      app_metadata: {
+        role: updated.role,
+        branch_id: targetBranchId,
+      },
+    });
+
+    if (appMetaUpdate.error) {
+      throw new InternalServerErrorException(appMetaUpdate.error.message);
+    }
+
+    return this.mapToResponse(updated, targetBranch.name);
+  }
+
   async remove(id: string) {
     const client = this.supabaseService.getClient();
 
