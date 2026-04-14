@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import appConfig from './config/app.config';
 
@@ -15,6 +15,9 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
+
+import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
 @Module({
   imports: [
@@ -33,6 +36,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     ReportsModule,
     DashboardModule,
     InventoryModule,
+    ActivityLogsModule,
   ],
   providers: [
     {
@@ -42,6 +46,10 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ActivityLogInterceptor,
     },
   ],
 })
