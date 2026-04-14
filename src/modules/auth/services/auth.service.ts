@@ -42,11 +42,12 @@ export class AuthService {
     const fullName = registerDto.fullName.trim();
     const normalizedRole = registerDto.role === 'admin' ? 'admin' : 'employee';
 
-    const { data: branch, error: branchError } = await client
+    const { data: branches, error: branchError } = await client
       .from('branches')
       .select('id, status')
-      .eq('id', registerDto.branchId)
-      .maybeSingle<{ id: string; status: string }>();
+      .eq('id', registerDto.branchId);
+
+    const branch = branches?.[0];
 
     if (
       branchError ||
@@ -184,5 +185,21 @@ export class AuthService {
       branchId: user.branchId,
       avatarUrl: user.avatarUrl,
     };
+  }
+
+  async verifyPassword(authId: string, email: string, password: string) {
+    const supabase = this.supabaseService.getClient();
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      this.logger.warn(`Password verification failed for ${email}: ${error.message}`);
+      return false;
+    }
+
+    return true;
   }
 }

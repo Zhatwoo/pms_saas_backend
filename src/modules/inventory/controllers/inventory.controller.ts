@@ -57,6 +57,15 @@ export class InventoryController {
     return this.inventoryService.findOnePawned(req.user, id);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('item/:itemId')
+  findByItemId(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('itemId') itemId: string,
+  ) {
+    return this.inventoryService.findByItemId(req.user, itemId);
+  }
+
   @Roles(Role.ADMIN)
   @Put('pawned/:id')
   updatePawned(
