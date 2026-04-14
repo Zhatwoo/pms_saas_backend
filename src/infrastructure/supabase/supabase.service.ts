@@ -34,9 +34,12 @@ const USER_SELECT_COLUMNS =
 @Injectable()
 export class SupabaseService {
   private client: SupabaseClient;
+  private readonly url: string;
+  private readonly anonKey: string;
 
   constructor(private configService: ConfigService) {
     const url = this.configService.get<string>('supabase.url');
+    const anonKey = this.configService.get<string>('supabase.anonKey');
     const serviceRoleKey = this.configService.get<string>(
       'supabase.serviceRoleKey',
     );
@@ -47,6 +50,9 @@ export class SupabaseService {
       );
     }
 
+    this.url = url;
+    this.anonKey = anonKey || '';
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     this.client = createClient(url, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -54,6 +60,21 @@ export class SupabaseService {
 
   getClient(): SupabaseClient {
     return this.client;
+  }
+
+  getAuthClient(): SupabaseClient {
+    if (!this.url || !this.anonKey) {
+      throw new Error(
+        'Missing SUPABASE_URL or SUPABASE_ANON_KEY in environment',
+      );
+    }
+
+    // Return a fresh auth-scoped client so login does not mutate the shared
+    // service-role client session used by the rest of the backend.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+    return createClient(this.url, this.anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
   }
 
   private normalizeRole(role: string | null): Role | null {

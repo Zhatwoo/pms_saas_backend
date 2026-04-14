@@ -50,7 +50,9 @@ export class AuthService {
       .select('id, status')
       .eq('id', registerDto.branchId);
 
-    const branch = branches?.[0];
+    const branch = branches?.[0] as
+      | { id: string; status: string | null }
+      | undefined;
 
     if (branchError || !branch || !this.isActiveBranchStatus(branch.status)) {
       throw new BadRequestException('Invalid or inactive branch');
@@ -134,9 +136,9 @@ export class AuthService {
   }
 
   private async loginInternal(loginDto: LoginDto) {
-    const supabase = this.supabaseService.getClient();
+    const authClient = this.supabaseService.getAuthClient();
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await authClient.auth.signInWithPassword({
       email: loginDto.email,
       password: loginDto.password,
     });
@@ -185,9 +187,9 @@ export class AuthService {
   }
 
   async verifyPassword(authId: string, email: string, password: string) {
-    const supabase = this.supabaseService.getClient();
+    const authClient = this.supabaseService.getAuthClient();
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await authClient.auth.signInWithPassword({
       email,
       password,
     });

@@ -24,7 +24,7 @@ export class RolesGuard implements CanActivate {
 
     const { user } = context.switchToHttp().getRequest();
     const request = context.switchToHttp().getRequest();
-
+    
     console.log('[RolesGuard] Check:', {
       path: request.path,
       method: request.method,
@@ -34,10 +34,10 @@ export class RolesGuard implements CanActivate {
     });
 
     const hasAccess = requiredRoles.some((role) => user?.role === role);
-
+    
     if (!hasAccess) {
       throw new ForbiddenException(
-        `Access denied. Required roles: ${requiredRoles.join(', ')}, Your role: ${user?.role || 'none'}`,
+        `Access denied. Required roles: ${requiredRoles.join(', ')}`,
       );
     }
 

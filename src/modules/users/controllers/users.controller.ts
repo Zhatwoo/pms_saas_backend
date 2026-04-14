@@ -11,6 +11,7 @@ import {
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { TransferUserBranchDto } from '../dto/transfer-user-branch.dto';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -53,6 +54,15 @@ export class UsersController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     return this.usersService.update(id, updateUserDto);
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Patch(':id/transfer-branch')
+  transferBranch(
+    @Param('id') id: string,
+    @Body() transferDto: TransferUserBranchDto,
+  ) {
+    return this.usersService.transferBranch(id, transferDto.branchId);
   }
 
   // NextJS Turbopack workaround using POST instead of PATCH/PUT

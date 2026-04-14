@@ -65,9 +65,8 @@ export class BranchesService {
       .getClient()
       .from('branches')
       .insert([payload])
-      .select();
-
-    const created = data?.[0];
+      .select()
+      .single();
 
     // If client-side generated code is stale, retry once using the next free code.
     if (error?.code === '23505' || /branch_code/i.test(error?.message ?? '')) {
@@ -80,7 +79,8 @@ export class BranchesService {
         .getClient()
         .from('branches')
         .insert([payload])
-        .select();
+        .select()
+        .single();
 
       data = retryResult.data;
       error = retryResult.error;
@@ -90,7 +90,7 @@ export class BranchesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data?.[0];
+    return data;
   }
 
   async findAll() {
@@ -112,6 +112,7 @@ export class BranchesService {
     if (user.role === Role.SUPER_ADMIN) {
       return this.findAll();
     }
+
     const branchId = requireUserBranchId(user);
     const { data, error } = await this.supabaseService
       .getClient()
@@ -152,7 +153,7 @@ export class BranchesService {
       .from('branches')
       .select('*')
       .eq('id', id)
-      .maybeSingle();
+      .single();
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -162,15 +163,7 @@ export class BranchesService {
       throw new NotFoundException('Branch not found');
     }
 
-    if (!data) {
-      throw new NotFoundException('Branch not found');
-    }
-
-    if (!data || data.length === 0) {
-      return null;
-    }
-
-    return data[0];
+    return data;
   }
 
   async update(id: string, updateBranchDto: UpdateBranchDto) {
@@ -186,13 +179,14 @@ export class BranchesService {
       .from('branches')
       .update(payload)
       .eq('id', id)
-      .select();
+      .select()
+      .single();
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data?.[0];
+    return data;
   }
 
   async remove(id: string) {
