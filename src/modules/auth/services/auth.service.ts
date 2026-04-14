@@ -29,7 +29,10 @@ export class AuthService {
         throw err;
       }
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`register failed: ${msg}`, err instanceof Error ? err.stack : undefined);
+      this.logger.error(
+        `register failed: ${msg}`,
+        err instanceof Error ? err.stack : undefined,
+      );
       throw new InternalServerErrorException(
         msg?.trim() ? msg : 'Registration failed',
       );
@@ -47,13 +50,11 @@ export class AuthService {
       .select('id, status')
       .eq('id', registerDto.branchId);
 
-    const branch = branches?.[0];
+    const branch = branches?.[0] as
+      | { id: string; status: string | null }
+      | undefined;
 
-    if (
-      branchError ||
-      !branch ||
-      !this.isActiveBranchStatus(branch.status)
-    ) {
+    if (branchError || !branch || !this.isActiveBranchStatus(branch.status)) {
       throw new BadRequestException('Invalid or inactive branch');
     }
 
@@ -130,16 +131,14 @@ export class AuthService {
         `login failed: ${msg}`,
         err instanceof Error ? err.stack : undefined,
       );
-      throw new InternalServerErrorException(
-        msg?.trim() || 'Login failed',
-      );
+      throw new InternalServerErrorException(msg?.trim() || 'Login failed');
     }
   }
 
   private async loginInternal(loginDto: LoginDto) {
-    const supabase = this.supabaseService.getClient();
+    const authClient = this.supabaseService.getAuthClient();
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await authClient.auth.signInWithPassword({
       email: loginDto.email,
       password: loginDto.password,
     });
@@ -188,15 +187,17 @@ export class AuthService {
   }
 
   async verifyPassword(authId: string, email: string, password: string) {
-    const supabase = this.supabaseService.getClient();
+    const authClient = this.supabaseService.getAuthClient();
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await authClient.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
-      this.logger.warn(`Password verification failed for ${email}: ${error.message}`);
+      this.logger.warn(
+        `Password verification failed for ${email}: ${error.message}`,
+      );
       return false;
     }
 
