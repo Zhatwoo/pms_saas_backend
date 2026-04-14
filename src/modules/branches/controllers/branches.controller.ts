@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Param, Patch, Delete, Req } from '@nestjs/
 import { BranchesService } from '../services/branches.service';
 import { CreateBranchDto } from '../dto/create-branch.dto';
 import { UpdateBranchDto } from '../dto/update-branch.dto';
-import { Public, Roles } from '../../../common/decorators';
+import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { assertBranchRowAccess } from '../../../common/utils/branch-scope.util';
@@ -11,11 +11,10 @@ import { assertBranchRowAccess } from '../../../common/utils/branch-scope.util';
 export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
 
-  /** Static GET routes must come before @Get(':id') so "public" is not treated as an id. */
-  @Public()
-  @Get('public')
-  findAllPublic() {
-    return this.branchesService.findActiveSummaries();
+  @Roles(Role.SUPER_ADMIN)
+  @Post()
+  create(@Body() createBranchDto: CreateBranchDto) {
+    return this.branchesService.create(createBranchDto);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -34,15 +33,16 @@ export class BranchesController {
     return this.branchesService.findOne(id);
   }
 
-  @Roles(Role.SUPER_ADMIN)
-  @Post()
-  create(@Body() createBranchDto: CreateBranchDto) {
-    return this.branchesService.create(createBranchDto);
-  }
-
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateBranchDto: UpdateBranchDto) {
+  update(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() updateBranchDto: UpdateBranchDto,
+  ) {
+    if (req.user.role === Role.ADMIN) {
+      assertBranchRowAccess(req.user, id);
+    }
     return this.branchesService.update(id, updateBranchDto);
   }
 
