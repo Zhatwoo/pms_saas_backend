@@ -10,4 +10,3 @@ import { SupabaseModule } from '../../infrastructure/supabase/supabase.module';
   exports: [BranchesService],
 })
 export class BranchesModule {}
-

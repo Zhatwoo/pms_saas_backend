@@ -105,7 +105,9 @@ export class SupabaseService {
   ): Promise<UserRecord | null> {
     try {
       if (!value) {
-        console.warn(`[SupabaseService] fetchUserRow: missing value for column ${column}`);
+        console.warn(
+          `[SupabaseService] fetchUserRow: missing value for column ${column}`,
+        );
         return null;
       }
 
@@ -116,17 +118,25 @@ export class SupabaseService {
         .maybeSingle<UserRecord>();
 
       if (error) {
-        console.error(`[SupabaseService] fetchUserRow DB error (${column}=${value}):`, error);
+        console.error(
+          `[SupabaseService] fetchUserRow DB error (${column}=${value}):`,
+          error,
+        );
         return null;
       }
 
       if (!data) {
-        console.warn(`[SupabaseService] fetchUserRow: No user found for ${column}=${value}`);
+        console.warn(
+          `[SupabaseService] fetchUserRow: No user found for ${column}=${value}`,
+        );
       }
 
       return data;
     } catch (err) {
-      console.error(`[SupabaseService] fetchUserRow critical crash (${column}=${value}):`, err);
+      console.error(
+        `[SupabaseService] fetchUserRow critical crash (${column}=${value}):`,
+        err,
+      );
       return null;
     }
   }

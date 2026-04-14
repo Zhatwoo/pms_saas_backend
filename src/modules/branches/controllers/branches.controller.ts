@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+  Req,
+} from '@nestjs/common';
 import { BranchesService } from '../services/branches.service';
 import { CreateBranchDto } from '../dto/create-branch.dto';
 import { UpdateBranchDto } from '../dto/update-branch.dto';

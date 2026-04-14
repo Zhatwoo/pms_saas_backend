@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 
 export interface CreateActivityLogDto {
@@ -16,16 +20,18 @@ export class ActivityLogsService {
 
   async createLog(dto: CreateActivityLogDto) {
     const client = this.supabaseService.getClient();
-    
+
     // We do this silently to not interrupt main business flows
-    const { error } = await client
-      .from('activity_logs')
-      .insert({
-        user_id: dto.userId,
-        branch_id: dto.branchId || null,
-        action: dto.action,
-        details: dto.details ? (typeof dto.details === 'string' ? dto.details : JSON.stringify(dto.details)) : null,
-      });
+    const { error } = await client.from('activity_logs').insert({
+      user_id: dto.userId,
+      branch_id: dto.branchId || null,
+      action: dto.action,
+      details: dto.details
+        ? typeof dto.details === 'string'
+          ? dto.details
+          : JSON.stringify(dto.details)
+        : null,
+    });
 
     if (error) {
       this.logger.error(`Failed to insert activity log: ${error.message}`);
@@ -36,7 +42,8 @@ export class ActivityLogsService {
     const client = this.supabaseService.getClient();
     let query = client
       .from('activity_logs')
-      .select(`
+      .select(
+        `
         id,
         user_id,
         branch_id,
@@ -45,17 +52,20 @@ export class ActivityLogsService {
         created_at,
         users ( full_name, email, role ),
         branches ( name )
-      `)
+      `,
+      )
       .order('created_at', { ascending: false });
 
     if (role === 'admin' || role === 'employee' || role === 'branch') {
-        if (!branchId) {
-            throw new InternalServerErrorException('Branch ID is required for non-superadmin logs');
-        }
-        query = query.eq('branch_id', branchId);
+      if (!branchId) {
+        throw new InternalServerErrorException(
+          'Branch ID is required for non-superadmin logs',
+        );
+      }
+      query = query.eq('branch_id', branchId);
     } else if (branchId) {
-        // Super admin filtering by branch
-        query = query.eq('branch_id', branchId);
+      // Super admin filtering by branch
+      query = query.eq('branch_id', branchId);
     }
 
     const { data, error } = await query;

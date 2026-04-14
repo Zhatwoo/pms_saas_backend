@@ -126,16 +126,27 @@ export class InventoryService {
   async findByItemId(user: UserWithBranch, itemId: string) {
     const client = this.supabase.getClient();
     const cleanId = itemId.trim().toUpperCase();
-    
+    const scopedBranchId =
+      user.role === Role.SUPER_ADMIN ? null : requireUserBranchId(user);
+
     // 1. Try Pawned Items
-    const { data: pawnedData, error: pawnedError } = await client
+    let pawnedQuery = client
       .from('pawned_items')
       .select('*, item_renewals(*)')
-      .ilike('item_id', cleanId)
-      .maybeSingle();
+      .ilike('item_id', cleanId);
+
+    if (scopedBranchId) {
+      pawnedQuery = pawnedQuery.eq('branch_id', scopedBranchId);
+    }
+
+    const { data: pawnedRows, error: pawnedError } = await pawnedQuery.limit(1);
+    const pawnedData = Array.isArray(pawnedRows) ? pawnedRows[0] : null;
 
     if (pawnedError) {
-      console.error(`[InventoryService] Error fetching pawned item ${cleanId}:`, pawnedError);
+      console.error(
+        `[InventoryService] Error fetching pawned item ${cleanId}:`,
+        pawnedError,
+      );
     }
 
     if (pawnedData) {
@@ -149,19 +160,28 @@ export class InventoryService {
         pawnDate: pawnedData.pawn_date,
         status: pawnedData.status,
         originalPhoto: pawnedData.original_photo || '',
-        type: 'PAWNED'
+        type: 'PAWNED',
       };
     }
 
     // 2. Try Sale Items
-    const { data: saleData, error: saleError } = await client
+    let saleQuery = client
       .from('sale_items')
       .select('*')
-      .ilike('item_id', cleanId)
-      .maybeSingle();
+      .ilike('item_id', cleanId);
+
+    if (scopedBranchId) {
+      saleQuery = saleQuery.eq('branch_id', scopedBranchId);
+    }
+
+    const { data: saleRows, error: saleError } = await saleQuery.limit(1);
+    const saleData = Array.isArray(saleRows) ? saleRows[0] : null;
 
     if (saleError) {
-      console.error(`[InventoryService] Error fetching sale item ${cleanId}:`, saleError);
+      console.error(
+        `[InventoryService] Error fetching sale item ${cleanId}:`,
+        saleError,
+      );
     }
 
     if (saleData) {
@@ -175,11 +195,13 @@ export class InventoryService {
         pawnDate: saleData.available_date,
         status: saleData.status,
         originalPhoto: saleData.image_url || '',
-        type: 'SALE'
+        type: 'SALE',
       };
     }
 
-    throw new NotFoundException(`Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`);
+    throw new NotFoundException(
+      `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
+    );
   }
 
   async updatePawned(user: UserWithBranch, id: string, dto: any) {
@@ -416,8 +438,7 @@ export class InventoryService {
       await client
         .from('daily_balances')
         .update({
-          ending_balance:
-            parseFloat(balanceData.ending_balance) + soldPrice,
+          ending_balance: parseFloat(balanceData.ending_balance) + soldPrice,
         })
         .eq('branch_id', branchId)
         .eq('record_date', today);

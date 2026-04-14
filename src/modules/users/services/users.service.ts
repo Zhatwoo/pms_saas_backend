@@ -99,7 +99,7 @@ export class UsersService {
    * Super admin: all users, all branches.
    * Branch admin: only `admin`, `employee`, `branch` roles in that branch (no super admins).
    */
-  async findAll(scope?: { branchId: string; forBranchAdmin: true } | undefined) {
+  async findAll(scope?: { branchId: string; forBranchAdmin: true }) {
     const client = this.supabaseService.getClient();
 
     let q = client
@@ -124,9 +124,7 @@ export class UsersService {
     const rows = (users ?? []) as UserRow[];
     const branchIds = [
       ...new Set(
-        rows
-          .map((u) => u.branch_id)
-          .filter((id): id is string => Boolean(id)),
+        rows.map((u) => u.branch_id).filter((id): id is string => Boolean(id)),
       ),
     ];
 
@@ -149,7 +147,7 @@ export class UsersService {
     return rows.map((row) =>
       this.mapToResponse(
         row,
-        row.branch_id ? branchMap.get(row.branch_id) ?? null : null,
+        row.branch_id ? (branchMap.get(row.branch_id) ?? null) : null,
       ),
     );
   }
@@ -173,7 +171,9 @@ export class UsersService {
         throw new ForbiddenException('You cannot access Super Admin accounts');
       }
       if (String(row.branch_id) !== String(viewer.branchId)) {
-        throw new ForbiddenException('You cannot access users outside your branch');
+        throw new ForbiddenException(
+          'You cannot access users outside your branch',
+        );
       }
     }
 
@@ -202,11 +202,7 @@ export class UsersService {
       .eq('id', dto.branchId)
       .maybeSingle<{ id: string; status: string; name: string }>();
 
-    if (
-      branchError ||
-      !branch ||
-      !this.isActiveBranchStatus(branch.status)
-    ) {
+    if (branchError || !branch || !this.isActiveBranchStatus(branch.status)) {
       throw new BadRequestException('Invalid or inactive branch');
     }
 
@@ -328,10 +324,7 @@ export class UsersService {
     }
 
     const roleNorm = (existing.role ?? '').toLowerCase();
-    if (
-      roleNorm === 'super_admin' ||
-      roleNorm === 'superadmin'
-    ) {
+    if (roleNorm === 'super_admin' || roleNorm === 'superadmin') {
       if (dto.accountStatus === 'rejected') {
         throw new ForbiddenException('Cannot reject a Super Admin account');
       }
@@ -356,8 +349,14 @@ export class UsersService {
 
     if (dto.role !== undefined) {
       const next = this.normalizeStoredRole(dto.role);
-      if (next === 'super_admin' && roleNorm !== 'super_admin' && roleNorm !== 'superadmin') {
-        throw new ForbiddenException('Cannot assign Super Admin via this endpoint');
+      if (
+        next === 'super_admin' &&
+        roleNorm !== 'super_admin' &&
+        roleNorm !== 'superadmin'
+      ) {
+        throw new ForbiddenException(
+          'Cannot assign Super Admin via this endpoint',
+        );
       }
       payload.role = next;
     }
@@ -387,7 +386,7 @@ export class UsersService {
       'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at';
 
     // Prefer auth_id: unique, stable, and matches the auth user even if public `id` drifts in clients.
-    let { data: updatedRows, error: updateError } = await client
+    const { data: updatedRows, error: updateError } = await client
       .from('users')
       .update(payload)
       .eq('auth_id', authId)

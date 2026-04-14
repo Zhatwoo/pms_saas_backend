@@ -35,19 +35,21 @@ export class TransactionsService {
     // 2. Adjust daily balance real time
     if (branch_id && (cash_in || cash_out)) {
       const today = new Date().toISOString().split('T')[0];
-      
+
       const { data: balanceData } = await client
         .from('daily_balances')
         .select('ending_balance')
         .eq('branch_id', branch_id)
         .eq('record_date', today)
         .single();
-        
+
       if (balanceData) {
-        const netChange = (parseFloat(cash_in || 0) - parseFloat(cash_out || 0));
+        const netChange = parseFloat(cash_in || 0) - parseFloat(cash_out || 0);
         await client
           .from('daily_balances')
-          .update({ ending_balance: parseFloat(balanceData.ending_balance) + netChange })
+          .update({
+            ending_balance: parseFloat(balanceData.ending_balance) + netChange,
+          })
           .eq('branch_id', branch_id)
           .eq('record_date', today);
       }
@@ -70,7 +72,7 @@ export class TransactionsService {
 
     const { data: transactions, error } = await query;
     if (error) throw new InternalServerErrorException(error.message);
-    
+
     // Compute quick dashboard stats
     return transactions;
   }

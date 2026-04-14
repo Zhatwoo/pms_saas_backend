@@ -1,4 +1,11 @@
-import { Controller, Post, Get, Body, Req, UnauthorizedException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Req,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from '../services/auth.service';
 import { BranchesService } from '../../branches/services/branches.service';
 import { LoginDto } from '../dto/login.dto';

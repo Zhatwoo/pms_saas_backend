@@ -26,7 +26,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwksRequestsPerMinute: 5,
       jwksUri: `${supabaseUrl}/auth/v1/.well-known/jwks.json`,
     });
-    
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -64,7 +64,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         }
       },
     });
-
   }
 
   async validate(payload: JwtPayload) {
@@ -74,12 +73,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     try {
-      const user = await this.supabaseService.assertSessionUserByAuthId(payload.sub);
+      const user = await this.supabaseService.assertSessionUserByAuthId(
+        payload.sub,
+      );
       return user;
     } catch (err) {
-      console.error(`[JWT Strategy] Validation failed for ${payload.sub}:`, err instanceof Error ? err.message : err);
+      console.error(
+        `[JWT Strategy] Validation failed for ${payload.sub}:`,
+        err instanceof Error ? err.message : err,
+      );
       throw err;
     }
   }
 }
-

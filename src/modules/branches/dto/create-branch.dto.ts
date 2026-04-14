@@ -24,4 +24,3 @@ export class CreateBranchDto {
   @IsEnum(BranchStatus)
   status?: BranchStatus = BranchStatus.ACTIVE;
 }
-

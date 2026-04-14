@@ -29,7 +29,10 @@ export class AuthService {
         throw err;
       }
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`register failed: ${msg}`, err instanceof Error ? err.stack : undefined);
+      this.logger.error(
+        `register failed: ${msg}`,
+        err instanceof Error ? err.stack : undefined,
+      );
       throw new InternalServerErrorException(
         msg?.trim() ? msg : 'Registration failed',
       );
@@ -49,11 +52,7 @@ export class AuthService {
 
     const branch = branches?.[0];
 
-    if (
-      branchError ||
-      !branch ||
-      !this.isActiveBranchStatus(branch.status)
-    ) {
+    if (branchError || !branch || !this.isActiveBranchStatus(branch.status)) {
       throw new BadRequestException('Invalid or inactive branch');
     }
 
@@ -130,9 +129,7 @@ export class AuthService {
         `login failed: ${msg}`,
         err instanceof Error ? err.stack : undefined,
       );
-      throw new InternalServerErrorException(
-        msg?.trim() || 'Login failed',
-      );
+      throw new InternalServerErrorException(msg?.trim() || 'Login failed');
     }
   }
 
@@ -196,7 +193,9 @@ export class AuthService {
     });
 
     if (error) {
-      this.logger.warn(`Password verification failed for ${email}: ${error.message}`);
+      this.logger.warn(
+        `Password verification failed for ${email}: ${error.message}`,
+      );
       return false;
     }
 
