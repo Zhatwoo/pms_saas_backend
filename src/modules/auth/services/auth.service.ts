@@ -118,6 +118,24 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
+    try {
+      return await this.loginInternal(loginDto);
+    } catch (err) {
+      if (err instanceof HttpException) {
+        throw err;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `login failed: ${msg}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        msg?.trim() || 'Login failed',
+      );
+    }
+  }
+
+  private async loginInternal(loginDto: LoginDto) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -126,7 +144,13 @@ export class AuthService {
     });
 
     if (error) {
-      throw new UnauthorizedException(error.message);
+      throw new UnauthorizedException(error.message || 'Invalid credentials');
+    }
+
+    if (!data?.session?.access_token || !data?.user?.id) {
+      throw new InternalServerErrorException(
+        'Supabase returned an incomplete session',
+      );
     }
 
     const user = await this.supabaseService.assertSessionUserByAuthId(
