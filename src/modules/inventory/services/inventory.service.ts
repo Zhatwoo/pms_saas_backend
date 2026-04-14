@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -25,6 +26,43 @@ interface QueryFilters {
 @Injectable()
 export class InventoryService {
   constructor(private supabase: SupabaseService) {}
+
+  private async adjustDailyBalance(
+    branchId: string,
+    delta: number,
+  ): Promise<void> {
+    if (!branchId || !Number.isFinite(delta) || delta === 0) {
+      return;
+    }
+
+    const client = this.supabase.getClient();
+    const today = new Date().toISOString().split('T')[0];
+    const { data: balanceRow, error: balanceError } = await client
+      .from('daily_balances')
+      .select('ending_balance')
+      .eq('branch_id', branchId)
+      .eq('record_date', today)
+      .maybeSingle<{ ending_balance: number | string }>();
+
+    if (balanceError) {
+      throw new InternalServerErrorException(balanceError.message);
+    }
+
+    if (!balanceRow) {
+      return;
+    }
+
+    const currentBalance = Number(balanceRow.ending_balance ?? 0);
+    const { error: updateError } = await client
+      .from('daily_balances')
+      .update({ ending_balance: currentBalance + delta })
+      .eq('branch_id', branchId)
+      .eq('record_date', today);
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+  }
 
   // ═══════════════════════════════════════════════════════════
   // PAWNED ITEMS
@@ -126,7 +164,7 @@ export class InventoryService {
   async findByItemId(user: UserWithBranch, itemId: string) {
     const client = this.supabase.getClient();
     const cleanId = itemId.trim().toUpperCase();
-    
+
     // 1. Try Pawned Items
     const { data: pawnedData, error: pawnedError } = await client
       .from('pawned_items')
@@ -135,7 +173,10 @@ export class InventoryService {
       .maybeSingle();
 
     if (pawnedError) {
-      console.error(`[InventoryService] Error fetching pawned item ${cleanId}:`, pawnedError);
+      console.error(
+        `[InventoryService] Error fetching pawned item ${cleanId}:`,
+        pawnedError,
+      );
     }
 
     if (pawnedData) {
@@ -149,7 +190,7 @@ export class InventoryService {
         pawnDate: pawnedData.pawn_date,
         status: pawnedData.status,
         originalPhoto: pawnedData.original_photo || '',
-        type: 'PAWNED'
+        type: 'PAWNED',
       };
     }
 
@@ -161,7 +202,10 @@ export class InventoryService {
       .maybeSingle();
 
     if (saleError) {
-      console.error(`[InventoryService] Error fetching sale item ${cleanId}:`, saleError);
+      console.error(
+        `[InventoryService] Error fetching sale item ${cleanId}:`,
+        saleError,
+      );
     }
 
     if (saleData) {
@@ -175,11 +219,13 @@ export class InventoryService {
         pawnDate: saleData.available_date,
         status: saleData.status,
         originalPhoto: saleData.image_url || '',
-        type: 'SALE'
+        type: 'SALE',
       };
     }
 
-    throw new NotFoundException(`Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`);
+    throw new NotFoundException(
+      `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
+    );
   }
 
   async updatePawned(user: UserWithBranch, id: string, dto: any) {
@@ -253,6 +299,35 @@ export class InventoryService {
     }
     assertResourceBranch(user, pawnedItem.branch_id);
 
+    const { data: existingSaleItem, error: existingSaleItemError } =
+      await client
+        .from('sale_items')
+        .select('*')
+        .eq('original_pawn_id', pawnedItem.id)
+        .maybeSingle();
+
+    if (existingSaleItemError) {
+      throw new InternalServerErrorException(existingSaleItemError.message);
+    }
+
+    if (existingSaleItem) {
+      if (pawnedItem.status !== 'Expired') {
+        const { error: syncStatusError } = await client
+          .from('pawned_items')
+          .update({ status: 'Expired' })
+          .eq('id', itemId);
+
+        if (syncStatusError) {
+          throw new InternalServerErrorException(syncStatusError.message);
+        }
+      }
+
+      return {
+        message: 'Item was already transferred to Items for Sale',
+        saleItem: existingSaleItem,
+      };
+    }
+
     const { error: updateErr } = await client
       .from('pawned_items')
       .update({ status: 'Expired' })
@@ -278,6 +353,11 @@ export class InventoryService {
       .select()
       .single();
     if (insertErr) {
+      if (/duplicate|unique/i.test(insertErr.message)) {
+        throw new ConflictException(
+          'Item was already transferred to Items for Sale',
+        );
+      }
       throw new InternalServerErrorException(insertErr.message);
     }
 
@@ -391,6 +471,13 @@ export class InventoryService {
     branchIdParam: string | number,
   ) {
     const item = await this.findOneForSale(user, itemId);
+
+    if (item.status === 'Sold') {
+      return {
+        message: 'Item was already marked as sold',
+      };
+    }
+
     const branchId = String(item.branch_id ?? branchIdParam);
     assertResourceBranch(user, branchId);
 
@@ -404,24 +491,7 @@ export class InventoryService {
       throw new InternalServerErrorException(updateErr.message);
     }
 
-    const today = new Date().toISOString().split('T')[0];
-    const { data: balanceData } = await client
-      .from('daily_balances')
-      .select('ending_balance')
-      .eq('branch_id', branchId)
-      .eq('record_date', today)
-      .single();
-
-    if (balanceData) {
-      await client
-        .from('daily_balances')
-        .update({
-          ending_balance:
-            parseFloat(balanceData.ending_balance) + soldPrice,
-        })
-        .eq('branch_id', branchId)
-        .eq('record_date', today);
-    }
+    await this.adjustDailyBalance(branchId, soldPrice);
 
     return {
       message: 'Item marked as sold, amount added to branch balance',

@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateBranchDto } from '../dto/create-branch.dto';
 import { UpdateBranchDto } from '../dto/update-branch.dto';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
@@ -155,6 +159,10 @@ export class BranchesService {
       throw new InternalServerErrorException(error.message);
     }
 
+    if (!data) {
+      throw new NotFoundException('Branch not found');
+    }
+
     return data;
   }
 
@@ -195,4 +203,3 @@ export class BranchesService {
     return { deleted: true };
   }
 }
-
