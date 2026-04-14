@@ -61,8 +61,9 @@ export class BranchesService {
       .getClient()
       .from('branches')
       .insert([payload])
-      .select()
-      .single();
+      .select();
+
+    const created = data?.[0];
 
     // If client-side generated code is stale, retry once using the next free code.
     if (error?.code === '23505' || /branch_code/i.test(error?.message ?? '')) {
@@ -75,8 +76,7 @@ export class BranchesService {
         .getClient()
         .from('branches')
         .insert([payload])
-        .select()
-        .single();
+        .select();
 
       data = retryResult.data;
       error = retryResult.error;
@@ -86,7 +86,7 @@ export class BranchesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    return data?.[0];
   }
 
   async findAll() {
@@ -147,14 +147,17 @@ export class BranchesService {
       .getClient()
       .from('branches')
       .select('*')
-      .eq('id', id)
-      .single();
+      .eq('id', id);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    if (!data || data.length === 0) {
+      return null;
+    }
+
+    return data[0];
   }
 
   async update(id: string, updateBranchDto: UpdateBranchDto) {
@@ -170,14 +173,13 @@ export class BranchesService {
       .from('branches')
       .update(payload)
       .eq('id', id)
-      .select()
-      .single();
+      .select();
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    return data?.[0];
   }
 
   async remove(id: string) {

@@ -123,6 +123,56 @@ export class InventoryService {
     return data;
   }
 
+  async findByItemId(user: UserWithBranch, itemId: string) {
+    const client = this.supabase.getClient();
+    
+    // 1. Try Pawned Items
+    const { data: pawnedData, error: pawnedError } = await client
+      .from('pawned_items')
+      .select('*, item_renewals(*)')
+      .eq('item_id', itemId)
+      .maybeSingle();
+
+    if (pawnedData) {
+      assertResourceBranch(user, pawnedData.branch_id);
+      return {
+        id: pawnedData.id,
+        itemId: pawnedData.item_id,
+        itemName: pawnedData.item_name,
+        category: pawnedData.category,
+        branch: pawnedData.branch,
+        pawnDate: pawnedData.pawn_date,
+        status: pawnedData.status,
+        originalPhoto: pawnedData.original_photo || '',
+        type: 'PAWNED'
+      };
+    }
+
+    // 2. Try Sale Items
+    const { data: saleData, error: saleError } = await client
+      .from('sale_items')
+      .select('*')
+      .eq('item_id', itemId)
+      .maybeSingle();
+
+    if (saleData) {
+      assertResourceBranch(user, saleData.branch_id);
+      return {
+        id: saleData.id,
+        itemId: saleData.item_id,
+        itemName: saleData.item_name,
+        category: saleData.category,
+        branch: saleData.branch,
+        pawnDate: saleData.available_date,
+        status: saleData.status,
+        originalPhoto: saleData.image_url || '',
+        type: 'SALE'
+      };
+    }
+
+    throw new NotFoundException(`Item with ID ${itemId} not found in pawned or sale inventory`);
+  }
+
   async updatePawned(user: UserWithBranch, id: string, dto: any) {
     await this.findOnePawned(user, id);
     const client = this.supabase.getClient();
