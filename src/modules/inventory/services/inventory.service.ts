@@ -125,13 +125,18 @@ export class InventoryService {
 
   async findByItemId(user: UserWithBranch, itemId: string) {
     const client = this.supabase.getClient();
+    const cleanId = itemId.trim().toUpperCase();
     
     // 1. Try Pawned Items
     const { data: pawnedData, error: pawnedError } = await client
       .from('pawned_items')
       .select('*, item_renewals(*)')
-      .eq('item_id', itemId)
+      .ilike('item_id', cleanId)
       .maybeSingle();
+
+    if (pawnedError) {
+      console.error(`[InventoryService] Error fetching pawned item ${cleanId}:`, pawnedError);
+    }
 
     if (pawnedData) {
       assertResourceBranch(user, pawnedData.branch_id);
@@ -152,8 +157,12 @@ export class InventoryService {
     const { data: saleData, error: saleError } = await client
       .from('sale_items')
       .select('*')
-      .eq('item_id', itemId)
+      .ilike('item_id', cleanId)
       .maybeSingle();
+
+    if (saleError) {
+      console.error(`[InventoryService] Error fetching sale item ${cleanId}:`, saleError);
+    }
 
     if (saleData) {
       assertResourceBranch(user, saleData.branch_id);
@@ -170,7 +179,7 @@ export class InventoryService {
       };
     }
 
-    throw new NotFoundException(`Item with ID ${itemId} not found in pawned or sale inventory`);
+    throw new NotFoundException(`Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`);
   }
 
   async updatePawned(user: UserWithBranch, id: string, dto: any) {

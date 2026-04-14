@@ -100,17 +100,32 @@ export class SupabaseService {
     column: 'id' | 'auth_id',
     value: string,
   ): Promise<UserRecord | null> {
-    const { data, error } = await this.client
-      .from('users')
-      .select(USER_SELECT_COLUMNS)
-      .eq(column, value)
-      .maybeSingle<UserRecord>();
+    try {
+      if (!value) {
+        console.warn(`[SupabaseService] fetchUserRow: missing value for column ${column}`);
+        return null;
+      }
 
-    if (error || !data) {
+      const { data, error } = await this.client
+        .from('users')
+        .select(USER_SELECT_COLUMNS)
+        .eq(column, value)
+        .maybeSingle<UserRecord>();
+
+      if (error) {
+        console.error(`[SupabaseService] fetchUserRow DB error (${column}=${value}):`, error);
+        return null;
+      }
+
+      if (!data) {
+        console.warn(`[SupabaseService] fetchUserRow: No user found for ${column}=${value}`);
+      }
+
+      return data;
+    } catch (err) {
+      console.error(`[SupabaseService] fetchUserRow critical crash (${column}=${value}):`, err);
       return null;
     }
-
-    return data;
   }
 
   /**

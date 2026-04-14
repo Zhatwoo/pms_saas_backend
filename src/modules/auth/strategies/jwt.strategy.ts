@@ -73,9 +73,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Invalid token payload');
     }
 
-    // console.log(`[JWT Strategy] Validating user: ${payload.email} (${payload.sub})`);
-
-    return this.supabaseService.assertSessionUserByAuthId(payload.sub);
+    try {
+      const user = await this.supabaseService.assertSessionUserByAuthId(payload.sub);
+      return user;
+    } catch (err) {
+      console.error(`[JWT Strategy] Validation failed for ${payload.sub}:`, err instanceof Error ? err.message : err);
+      throw err;
+    }
   }
 }
 

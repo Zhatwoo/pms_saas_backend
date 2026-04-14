@@ -4,28 +4,29 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
-  BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
 
-function normalizeErrorMessage(payload: string | object): string {
-  if (typeof payload === 'string') {
-    return payload;
+function extractMessage(payload: unknown): string {
+  if (typeof payload === 'string' && payload.trim()) {
+    return payload.trim();
   }
-  if (payload && typeof payload === 'object') {
+
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
     const body = payload as Record<string, unknown>;
-    const m = body.message;
-    if (typeof m === 'string') {
-      return m;
+
+    if (typeof body.message === 'string' && body.message.trim()) {
+      return body.message.trim();
     }
-    if (Array.isArray(m)) {
-      return m.map(String).join('; ');
+    if (Array.isArray(body.message) && body.message.length > 0) {
+      return body.message.map(String).join('; ');
     }
-    if (typeof body.error === 'string') {
-      return body.error;
+    if (typeof body.error === 'string' && body.error.trim()) {
+      return body.error.trim();
     }
   }
-  return 'Internal server error';
+
+  return '';
 }
 
 @Catch()
@@ -34,24 +35,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
-    const status =
-      exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let message = 'Internal server error';
+    let extraData: unknown = undefined;
 
-    const rawMessage =
-      exception instanceof HttpException
-        ? exception.getResponse()
-        : exception instanceof Error
-          ? exception.message
-          : 'Internal server error';
+    if (exception instanceof HttpException) {
+      status = exception.getStatus();
+      const raw = exception.getResponse();
+      const extracted = extractMessage(raw);
+      message = extracted || exception.message || 'Internal server error';
 
-    let message = normalizeErrorMessage(
-      typeof rawMessage === 'string' || typeof rawMessage === 'object'
-        ? rawMessage
-        : 'Internal server error',
-    );
-    message = message.trim() || 'Internal server error';
+      if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+        const body = raw as Record<string, unknown>;
+        if (body.data !== undefined) {
+          extraData = body.data;
+        }
+        if (body.details !== undefined) {
+          extraData = body.details;
+        }
+      }
+    } else if (exception instanceof Error) {
+      message = exception.message?.trim() || 'Internal server error';
+    }
 
     const errorResponse: Record<string, unknown> = {
       statusCode: status,
@@ -59,19 +64,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
     };
 
-    if (
-      exception instanceof HttpException &&
-      typeof rawMessage === 'object' &&
-      rawMessage !== null &&
-      !Array.isArray(rawMessage)
-    ) {
-      const body = rawMessage as Record<string, unknown>;
-      if (body.data !== undefined) {
-        errorResponse.data = body.data;
-      }
+    if (extraData !== undefined) {
+      errorResponse.data = extraData;
     }
 
-    console.error(`[HttpExceptionFilter] ${status}:`, errorResponse);
+    console.error(
+      `[HttpExceptionFilter] ${status}:`,
+      message,
+      exception instanceof Error && !(exception instanceof HttpException)
+        ? exception.stack
+        : '',
+    );
+
     response.status(status).json(errorResponse);
   }
 }
