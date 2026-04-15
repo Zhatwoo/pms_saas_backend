@@ -451,7 +451,9 @@ export class UsersService {
 
     const roleNorm = (existing.role ?? '').toLowerCase();
     if (roleNorm === 'super_admin' || roleNorm === 'superadmin') {
-      throw new ForbiddenException('Super Admin accounts cannot be transferred');
+      throw new ForbiddenException(
+        'Super Admin accounts cannot be transferred',
+      );
     }
 
     if (String(existing.branch_id) === String(targetBranchId)) {
@@ -488,15 +490,20 @@ export class UsersService {
 
     const updated = (updatedRows ?? [])[0] as UserRow | undefined;
     if (!updated) {
-      throw new InternalServerErrorException('Failed to update user branch assignment');
+      throw new InternalServerErrorException(
+        'Failed to update user branch assignment',
+      );
     }
 
-    const appMetaUpdate = await client.auth.admin.updateUserById(existing.auth_id, {
-      app_metadata: {
-        role: updated.role,
-        branch_id: targetBranchId,
+    const appMetaUpdate = await client.auth.admin.updateUserById(
+      existing.auth_id,
+      {
+        app_metadata: {
+          role: updated.role,
+          branch_id: targetBranchId,
+        },
       },
-    });
+    );
 
     if (appMetaUpdate.error) {
       throw new InternalServerErrorException(appMetaUpdate.error.message);
