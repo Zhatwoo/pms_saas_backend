@@ -12,6 +12,7 @@ import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { ConfirmFundRequestDto } from '../dto/confirm-fund-request.dto';
+import { CreateDirectTransferDto } from '../dto/create-direct-transfer.dto';
 import { CreateFundRequestDto } from '../dto/create-fund-request.dto';
 import { ListFundRequestsDto } from '../dto/list-fund-requests.dto';
 import { ReviewFundRequestDto } from '../dto/review-fund-request.dto';
@@ -22,7 +23,7 @@ import { FundRequestsService } from '../services/fund-requests.service';
 export class FundRequestsController {
   constructor(private readonly fundRequestsService: FundRequestsService) {}
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post()
   create(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -31,7 +32,7 @@ export class FundRequestsController {
     return this.fundRequestsService.create(req.user, createFundRequestDto);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get()
   findAll(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -40,13 +41,22 @@ export class FundRequestsController {
     return this.fundRequestsService.findAll(req.user, query);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get(':id')
   findOne(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
   ) {
     return this.fundRequestsService.findOne(req.user, id);
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Post('direct-transfer')
+  createDirectTransfer(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: CreateDirectTransferDto,
+  ) {
+    return this.fundRequestsService.createDirectTransfer(req.user, dto);
   }
 
   @Roles(Role.SUPER_ADMIN)
@@ -78,7 +88,7 @@ export class FundRequestsController {
     return this.fundRequestsService.cancel(req.user, id);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Patch(':id/confirm')
   confirm(
     @Req() req: { user: AuthenticatedUserProfile },

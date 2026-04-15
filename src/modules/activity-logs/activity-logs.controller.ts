@@ -11,15 +11,15 @@ export class ActivityLogsController {
   constructor(private readonly activityLogsService: ActivityLogsService) {}
 
   @Get()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN) // Include admin so they can view branch logs
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   async getLogs(@Request() req: any, @Query('branchId') qBranchId?: string) {
     const user = req.user; // contains id, role, branchId
 
     // Normalize role string format to match DB if needed
     const roleNorm = user.role.toLowerCase();
 
-    if (roleNorm === 'admin') {
-      return this.activityLogsService.getLogs(user.branchId, 'admin');
+    if (roleNorm === 'admin' || roleNorm === 'employee') {
+      return this.activityLogsService.getLogs(user.branchId, roleNorm);
     }
 
     // For superadmin, they can filter by branchId or get all
