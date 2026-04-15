@@ -1,0 +1,90 @@
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
+import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+
+export interface CreateActivityLogDto {
+  userId: string;
+  branchId?: string | null;
+  action: string;
+  details?: string | Record<string, any> | null;
+}
+
+@Injectable()
+export class ActivityLogsService {
+  private readonly logger = new Logger(ActivityLogsService.name);
+
+  constructor(private readonly supabaseService: SupabaseService) {}
+
+  async createLog(dto: CreateActivityLogDto) {
+    const client = this.supabaseService.getClient();
+
+    // We do this silently to not interrupt main business flows
+    const { error } = await client.from('activity_logs').insert({
+      user_id: dto.userId,
+      branch_id: dto.branchId || null,
+      action: dto.action,
+      details: dto.details
+        ? typeof dto.details === 'string'
+          ? dto.details
+          : JSON.stringify(dto.details)
+        : null,
+    });
+
+    if (error) {
+      this.logger.error(`Failed to insert activity log: ${error.message}`);
+    }
+  }
+
+  async getLogs(branchId?: string, role?: string) {
+    const client = this.supabaseService.getClient();
+    let query = client
+      .from('activity_logs')
+      .select(
+        `
+        id,
+        user_id,
+        branch_id,
+        action,
+        details,
+        created_at,
+        users ( full_name, email, role ),
+        branches ( name )
+      `,
+      )
+      .order('created_at', { ascending: false });
+
+    if (role === 'admin' || role === 'employee' || role === 'branch') {
+      if (!branchId) {
+        throw new InternalServerErrorException(
+          'Branch ID is required for non-superadmin logs',
+        );
+      }
+      query = query.eq('branch_id', branchId);
+    } else if (branchId) {
+      // Super admin filtering by branch
+      query = query.eq('branch_id', branchId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      this.logger.error(`Failed to fetch logs: ${error.message}`);
+      throw new InternalServerErrorException('Failed to fetch activity logs');
+    }
+
+    return (data || []).map((log: any) => ({
+      id: log.id,
+      userId: log.user_id,
+      branchId: log.branch_id,
+      action: log.action,
+      details: log.details,
+      createdAt: log.created_at,
+      userFullName: log.users?.full_name || log.users?.email || 'Unknown User',
+      userRole: log.users?.role || 'Unknown Role',
+      branchName: log.branches?.name || 'All Branches',
+    }));
+  }
+}

@@ -1,25 +1,33 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import appConfig from './config/app.config';
 
-import { RolesGuard } from './common/guards';
+import { JwtAuthGuard, RolesGuard } from './common/guards';
 
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { BranchesModule } from './branches/branches.module';
-import { ItemsModule } from './items/items.module';
-import { TransactionsModule } from './transactions/transactions.module';
-import { CategoriesModule } from './categories/categories.module';
-import { ReportsModule } from './reports/reports.module';
-import { DashboardModule } from './dashboard/dashboard.module';
+import { SupabaseModule } from './infrastructure/supabase/supabase.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { BranchesModule } from './modules/branches/branches.module';
+import { ItemsModule } from './modules/items/items.module';
+import { TransactionsModule } from './modules/transactions/transactions.module';
+import { CategoriesModule } from './modules/categories/categories.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
+import { FundRequestsModule } from './modules/fund-requests/fund-requests.module';
+
+import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       load: [appConfig],
+      envFilePath: '.env',
     }),
+    SupabaseModule,
     AuthModule,
     UsersModule,
     BranchesModule,
@@ -28,11 +36,22 @@ import { DashboardModule } from './dashboard/dashboard.module';
     CategoriesModule,
     ReportsModule,
     DashboardModule,
+    InventoryModule,
+    ActivityLogsModule,
+    FundRequestsModule,
   ],
   providers: [
     {
       provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ActivityLogInterceptor,
     },
   ],
 })
