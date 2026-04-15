@@ -165,6 +165,9 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const cleanId = itemId.trim().toUpperCase();
 
+    const scopedBranchId =
+      user.role === Role.SUPER_ADMIN ? null : requireUserBranchId(user);
+
     // 1. Try Pawned Items
     let pawnedQuery = client
       .from('pawned_items')
@@ -179,7 +182,10 @@ export class InventoryService {
     const pawnedData = Array.isArray(pawnedRows) ? pawnedRows[0] : null;
 
     if (pawnedError) {
-      console.error(`[InventoryService] Error fetching pawned item ${cleanId}:`, pawnedError);
+      console.error(
+        `[InventoryService] Error fetching pawned item ${cleanId}:`,
+        pawnedError,
+      );
     }
 
     if (pawnedData) {
@@ -215,6 +221,10 @@ export class InventoryService {
         `[InventoryService] Error fetching sale item ${cleanId}:`,
         saleError,
       );
+      console.error(
+        `[InventoryService] Error fetching sale item ${cleanId}:`,
+        saleError,
+      );
     }
 
     if (saleData) {
@@ -232,6 +242,9 @@ export class InventoryService {
       };
     }
 
+    throw new NotFoundException(
+      `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
+    );
     throw new NotFoundException(
       `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
     );
@@ -512,8 +525,7 @@ export class InventoryService {
       await client
         .from('daily_balances')
         .update({
-          ending_balance:
-            parseFloat(balanceData.ending_balance) + soldPrice,
+          ending_balance: parseFloat(balanceData.ending_balance) + soldPrice,
         })
         .eq('branch_id', branchId)
         .eq('record_date', today);
