@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 
 export class TransferFundRequestDto {
   @IsOptional()
@@ -15,4 +22,12 @@ export class TransferFundRequestDto {
   @IsOptional()
   @IsString()
   transferNotes?: string;
+
+  @IsOptional()
+  @IsUUID()
+  receiverUserId?: string;
+
+  @IsOptional()
+  @IsIn(['admin', 'employee'])
+  receiverRole?: 'admin' | 'employee';
 }
