@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+} from '@nestjs/common';
 import { CategoriesService } from '../services/categories.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';

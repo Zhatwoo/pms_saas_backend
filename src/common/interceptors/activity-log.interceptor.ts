@@ -15,13 +15,13 @@ export class ActivityLogInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const method = request.method;
-    
+
     // We only log mutating actions automatically
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
       const user = request.user;
-      
+
       const { url, body, params, query } = request;
-      
+
       return next.handle().pipe(
         tap({
           next: () => {
@@ -32,17 +32,23 @@ export class ActivityLogInterceptor implements NestInterceptor {
                 userId: user.id || user.sub,
                 branchId: user.branchId || null,
                 action: action,
-                details: { method, url, body: this.sanitize(body), params, query },
+                details: {
+                  method,
+                  url,
+                  body: this.sanitize(body),
+                  params,
+                  query,
+                },
               });
             }
           },
           error: (err) => {
             // We could also log failures, but usually activity log is for successful changes
-          }
+          },
         }),
       );
     }
-    
+
     return next.handle();
   }
 

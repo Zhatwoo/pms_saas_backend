@@ -35,4 +35,3 @@ export class TransactionsController {
     return this.transactionsService.findOne(req.user, id);
   }
 }
-

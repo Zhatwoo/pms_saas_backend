@@ -14,9 +14,9 @@ export function createValidationPipe() {
           errors: messages,
         };
       });
-      
+
       console.error('[ValidationPipe] Validation errors:', formattedErrors);
-      
+
       return new BadRequestException({
         message: 'Validation failed',
         details: formattedErrors,
