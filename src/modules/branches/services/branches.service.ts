@@ -30,6 +30,18 @@ export class BranchesService {
     return `${normalizedBase} Branch`;
   }
 
+  private resolveContactNumber(
+    value?: string,
+    fallback?: string,
+  ): string {
+    const candidate = value ?? fallback;
+    if (!candidate) {
+      throw new InternalServerErrorException('Branch contact number is required');
+    }
+
+    return candidate.trim();
+  }
+
   private async getNextAvailableBranchCode(): Promise<string> {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -59,6 +71,10 @@ export class BranchesService {
       ...createBranchDto,
       name: this.normalizeBranchName(createBranchDto.name),
       branch_code: createBranchDto.branch_code.trim(),
+      contact_number: this.resolveContactNumber(
+        createBranchDto.contact_number,
+        createBranchDto.contactNumber,
+      ),
     };
 
     let { data, error } = await this.supabaseService
@@ -171,6 +187,14 @@ export class BranchesService {
       ...updateBranchDto,
       ...(updateBranchDto.name
         ? { name: this.normalizeBranchName(updateBranchDto.name) }
+        : {}),
+      ...(updateBranchDto.contact_number || updateBranchDto.contactNumber
+        ? {
+            contact_number: this.resolveContactNumber(
+              updateBranchDto.contact_number,
+              updateBranchDto.contactNumber,
+            ),
+          }
         : {}),
     };
 
