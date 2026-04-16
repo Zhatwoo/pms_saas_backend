@@ -39,7 +39,7 @@ export class InventoryController {
     });
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post('pawned')
   createPawned(
     @Req() req: { user: AuthenticatedUserProfile },

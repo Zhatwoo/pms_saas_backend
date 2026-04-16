@@ -1,30 +1,30 @@
-import { Controller, Get, Post, Body, Param, Query, Req } from '@nestjs/common';
-import { TransactionsService } from '../services/transactions.service';
+import { Controller, Post, Body, Req, Get, Query, Param } from '@nestjs/common';
+import { CustomersService } from '../services/customers.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { CreateCustomerDto } from '../dto/create-customer.dto';
 
-@Controller('transactions')
-export class TransactionsController {
-  constructor(private readonly transactionsService: TransactionsService) {}
+@Controller('customers')
+export class CustomersController {
+  constructor(private readonly customersService: CustomersService) {}
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post()
   create(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() createTransactionDto: any,
+    @Body() createCustomerDto: CreateCustomerDto,
   ) {
-    return this.transactionsService.create(req.user, createTransactionDto);
+    return this.customersService.create(req.user, createCustomerDto);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get()
   findAll(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Query('branch') branch?: string,
-    @Query('date') date?: string,
+    @Query('branchId') branchId?: string,
   ) {
-    return this.transactionsService.findAll(req.user, branch, date);
+    return this.customersService.findAll(req.user, branchId);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -33,6 +33,6 @@ export class TransactionsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
   ) {
-    return this.transactionsService.findOne(req.user, id);
+    return this.customersService.findOne(req.user, id);
   }
 }

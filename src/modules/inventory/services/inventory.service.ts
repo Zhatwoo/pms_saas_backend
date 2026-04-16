@@ -88,8 +88,9 @@ export class InventoryService {
         })),
         remarks: item.remarks || '',
         qrCode: item.qr_code || '',
-        originalPhoto: item.original_photo || '',
+        originalPhoto: item.profile_photo || '',
         conditionReport: item.condition_report || '',
+        amount: item.amount || 0,
       })),
       total: count || 0,
     };
@@ -166,7 +167,7 @@ export class InventoryService {
         branch: pawnedData.branch,
         pawnDate: pawnedData.pawn_date,
         status: pawnedData.status,
-        originalPhoto: pawnedData.original_photo || '',
+        originalPhoto: pawnedData.profile_photo || '',
         type: 'PAWNED',
       };
     }
