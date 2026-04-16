@@ -43,6 +43,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     PawnTicketsModule,
     ActivityLogsModule,
     FundRequestsModule,
+    BranchFinanceModule,
   ],
   providers: [
     {
