@@ -437,8 +437,79 @@ export class DashboardService {
           },
         };
       }
-      case Role.EMPLOYEE:
-        return { view: 'employee', data: 'Own branch transactions and items' };
+      case Role.EMPLOYEE: {
+        const branchId = requireUserBranchId(user);
+        const today = new Date().toISOString().split('T')[0];
+        const [
+          branchResult,
+          latestBalanceResult,
+          todayTransactionsResult,
+          fundRowsResult,
+        ] = await Promise.all([
+          client
+            .from('branches')
+            .select('id, name, branch_code, location, status')
+            .eq('id', branchId)
+            .maybeSingle(),
+          client
+            .from('daily_balances')
+            .select('ending_balance, starting_balance, record_date')
+            .eq('branch_id', branchId)
+            .order('record_date', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from('transactions')
+            .select('id, purpose, cash_in, cash_out, unit, created_at')
+            .eq('branch_id', branchId)
+            .eq('transaction_date', today)
+            .order('created_at', { ascending: false })
+            .limit(20),
+          client
+            .from('fund_requests')
+            .select(
+              'status, amount_requested, approved_amount, amount_transferred',
+            )
+            .eq('branch_id', branchId),
+        ]);
+
+        const errors = [
+          branchResult.error,
+          latestBalanceResult.error,
+          todayTransactionsResult.error,
+          fundRowsResult.error,
+        ].filter(Boolean);
+
+        if (errors.length > 0) {
+          throw new InternalServerErrorException(errors[0]?.message);
+        }
+
+        const todayTx = todayTransactionsResult.data ?? [];
+        let todayCashIn = 0;
+        let todayCashOut = 0;
+        for (const tx of todayTx) {
+          todayCashIn += this.toMoney(tx.cash_in);
+          todayCashOut += this.toMoney(tx.cash_out);
+        }
+
+        return {
+          view: 'employee',
+          branch: branchResult.data,
+          currentBalance: this.toMoney(
+            latestBalanceResult.data?.ending_balance,
+          ),
+          startingBalance: this.toMoney(
+            latestBalanceResult.data?.starting_balance,
+          ),
+          todaySummary: {
+            totalTransactions: todayTx.length,
+            cashIn: Number(todayCashIn.toFixed(2)),
+            cashOut: Number(todayCashOut.toFixed(2)),
+            net: Number((todayCashIn - todayCashOut).toFixed(2)),
+          },
+          fundRequests: this.summarizeFundRequests(fundRowsResult.data ?? []),
+        };
+      }
       default:
         return { view: 'guest', data: null };
     }
