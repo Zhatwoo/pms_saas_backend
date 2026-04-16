@@ -12,6 +12,7 @@ import {
   inventoryBranchFilters,
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
+import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
 
 interface QueryFilters {
   branch?: string;
@@ -27,41 +28,8 @@ interface QueryFilters {
 export class InventoryService {
   constructor(private supabase: SupabaseService) {}
 
-  private async adjustDailyBalance(
-    branchId: string,
-    delta: number,
-  ): Promise<void> {
-    if (!branchId || !Number.isFinite(delta) || delta === 0) {
-      return;
-    }
-
-    const client = this.supabase.getClient();
-    const today = new Date().toISOString().split('T')[0];
-    const { data: balanceRow, error: balanceError } = await client
-      .from('daily_balances')
-      .select('ending_balance')
-      .eq('branch_id', branchId)
-      .eq('record_date', today)
-      .maybeSingle<{ ending_balance: number | string }>();
-
-    if (balanceError) {
-      throw new InternalServerErrorException(balanceError.message);
-    }
-
-    if (!balanceRow) {
-      return;
-    }
-
-    const currentBalance = Number(balanceRow.ending_balance ?? 0);
-    const { error: updateError } = await client
-      .from('daily_balances')
-      .update({ ending_balance: currentBalance + delta })
-      .eq('branch_id', branchId)
-      .eq('record_date', today);
-
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
-    }
+  private async adjustBalance(branchId: string, delta: number): Promise<void> {
+    await adjustDailyBalance(this.supabase.getClient(), branchId, delta);
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -491,7 +459,7 @@ export class InventoryService {
       throw new InternalServerErrorException(updateErr.message);
     }
 
-    await this.adjustDailyBalance(branchId, soldPrice);
+    await this.adjustBalance(branchId, soldPrice);
 
     return {
       message: 'Item marked as sold, amount added to branch balance',
