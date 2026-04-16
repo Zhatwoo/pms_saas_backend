@@ -12,7 +12,7 @@ import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 
 @Injectable()
 export class BranchesService {
-  constructor(private readonly supabaseService: SupabaseService) { }
+  constructor(private readonly supabaseService: SupabaseService) {}
 
   private toTitleCase(value: string): string {
     return value

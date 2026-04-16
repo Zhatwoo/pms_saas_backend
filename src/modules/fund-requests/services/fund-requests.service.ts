@@ -6,21 +6,25 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Role } from '../../../common/enums';
+import { ActivityLogsService } from '../../activity-logs/activity-logs.service';
 import {
   assertResourceBranch,
   effectiveBranchIdForQuery,
   requireUserBranchId,
   superAdminBranchNameFilter,
 } from '../../../common/utils/branch-scope.util';
+import { adjustDailyBalance as sharedAdjustDailyBalance } from '../../../common/utils/daily-balance.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ConfirmFundRequestDto } from '../dto/confirm-fund-request.dto';
+import { CreateDirectTransferDto } from '../dto/create-direct-transfer.dto';
 import { CreateFundRequestDto } from '../dto/create-fund-request.dto';
 import { ListFundRequestsDto } from '../dto/list-fund-requests.dto';
 import {
   FundRequestReviewDecision,
   ReviewFundRequestDto,
 } from '../dto/review-fund-request.dto';
+import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.dto';
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
 
 interface BranchRow {
@@ -35,6 +39,8 @@ interface UserSummaryRow {
   id: string;
   full_name: string | null;
   email: string | null;
+  role?: string | null;
+  branch_id?: string | null;
 }
 
 interface FundRequestRow {
@@ -55,16 +61,37 @@ interface FundRequestRow {
   transferred_at: string | null;
   transfer_reference: string | null;
   transfer_notes: string | null;
+  transfer_mode: string | null;
+  flow_type: string | null;
+  receiver_user_id: string | null;
+  source_branch_id: string | null;
+  source_confirmed_by_user_id: string | null;
+  source_confirmed_at: string | null;
+  source_confirmation_notes: string | null;
+  source_confirmed_amount: number | string | null;
+  source_confirmation_proof_url: string | null;
+  receiver_role: string | null;
+  confirmed_received_amount: number | string | null;
+  confirmation_note: string | null;
+  transfer_reference_no: string | null;
   confirmed_by_user_id: string | null;
   confirmed_at: string | null;
   confirmation_notes: string | null;
+  confirmation_proof_url: string | null;
+  destination_confirmed_by_user_id: string | null;
+  destination_confirmed_at: string | null;
+  destination_confirmation_notes: string | null;
+  destination_received_amount: number | string | null;
+  destination_confirmation_proof_url: string | null;
   related_transaction_id: string | null;
   created_at: string;
   updated_at: string;
   branches?: BranchRow | BranchRow[] | null;
+  source_branch?: BranchRow | BranchRow[] | null;
   requested_by?: UserSummaryRow | UserSummaryRow[] | null;
   reviewed_by?: UserSummaryRow | UserSummaryRow[] | null;
   transferred_by?: UserSummaryRow | UserSummaryRow[] | null;
+  source_confirmed_by?: UserSummaryRow | UserSummaryRow[] | null;
   confirmed_by?: UserSummaryRow | UserSummaryRow[] | null;
 }
 
@@ -86,22 +113,45 @@ const FUND_REQUEST_SELECT = `
   transferred_at,
   transfer_reference,
   transfer_notes,
-  confirmed_by_user_id,
+  transfer_mode,
+  flow_type,
+  receiver_user_id,
+  source_branch_id,
+  source_confirmed_by_user_id,
+  source_confirmed_at,
+  source_confirmation_notes,
+  source_confirmed_amount,
+  source_confirmation_proof_url,
+  receiver_role,
+  confirmed_received_amount,
+  confirmation_note,
+  transfer_reference_no,
+  confirmation_proof_url,
   confirmed_at,
   confirmation_notes,
+  destination_confirmed_by_user_id,
+  destination_confirmed_at,
+  destination_confirmation_notes,
+  destination_received_amount,
+  destination_confirmation_proof_url,
   related_transaction_id,
   created_at,
   updated_at,
-  branches(id, name, branch_code, location),
+  branches:branches!branch_id(id, name, branch_code, location),
+  source_branch:source_branch_id(id, name, branch_code, location),
   requested_by:requested_by_user_id(id, full_name, email),
   reviewed_by:reviewed_by_user_id(id, full_name, email),
   transferred_by:transferred_by_user_id(id, full_name, email),
+  source_confirmed_by:source_confirmed_by_user_id(id, full_name, email),
   confirmed_by:confirmed_by_user_id(id, full_name, email)
 `;
 
 @Injectable()
 export class FundRequestsService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly activityLogsService: ActivityLogsService,
+  ) {}
 
   private toDatePart(date: Date): string {
     return date.toISOString().split('T')[0];
@@ -138,6 +188,59 @@ export class FundRequestsService {
     return status?.trim().toLowerCase() === 'active';
   }
 
+  private toReceiverRole(role: Role): 'admin' | 'employee' {
+    return role === Role.ADMIN ? 'admin' : 'employee';
+  }
+
+  private isPendingConfirmationRow(
+    row: Pick<
+      FundRequestRow,
+      'status' | 'transferred_at' | 'amount_transferred' | 'confirmed_at'
+    >,
+  ): boolean {
+    if (row.status === 'pending_confirmation') {
+      return true;
+    }
+    // Backward compatibility: some DBs still reject pending_confirmation in status check.
+    return (
+      row.status === 'approved' &&
+      !!row.transferred_at &&
+      this.toMoneyOrNull(row.amount_transferred) != null &&
+      !row.confirmed_at
+    );
+  }
+
+  private isPendingSourceConfirmationRow(
+    row: Pick<
+      FundRequestRow,
+      'status' | 'source_branch_id' | 'transferred_at' | 'source_confirmed_at'
+    >,
+  ): boolean {
+    if (row.status === 'pending_source_confirmation') {
+      return !!row.source_branch_id;
+    }
+    return (
+      row.status === 'approved' &&
+      !!row.source_branch_id &&
+      !!row.transferred_at &&
+      !row.source_confirmed_at
+    );
+  }
+
+  private isStatusConstraintError(errorMessage: string): boolean {
+    return (
+      errorMessage.includes('fund_requests_status_check') &&
+      errorMessage.includes('violates check constraint')
+    );
+  }
+
+  private isTransactionsPurposeConstraintError(errorMessage: string): boolean {
+    return (
+      errorMessage.includes('transactions_purpose_check') &&
+      errorMessage.includes('violates check constraint')
+    );
+  }
+
   private async getBranchById(branchId: string): Promise<BranchRow> {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -155,6 +258,39 @@ export class FundRequestsService {
     }
 
     return data;
+  }
+
+  private async getUserById(userId: string): Promise<UserSummaryRow> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('users')
+      .select('id, full_name, email, role, branch_id')
+      .eq('id', userId)
+      .maybeSingle<UserSummaryRow>();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+    if (!data) {
+      throw new NotFoundException('Receiver user not found');
+    }
+    return data;
+  }
+
+  private async getLatestBranchBalance(branchId: string): Promise<number> {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('daily_balances')
+      .select('ending_balance')
+      .eq('branch_id', branchId)
+      .order('record_date', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ ending_balance: number | string }>();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+    return Number(data?.ending_balance ?? 0);
   }
 
   private async getNextCode(
@@ -231,6 +367,9 @@ export class FundRequestsService {
     const branch = Array.isArray(row.branches)
       ? (row.branches[0] ?? null)
       : (row.branches ?? null);
+    const sourceBranch = Array.isArray(row.source_branch)
+      ? (row.source_branch[0] ?? null)
+      : (row.source_branch ?? null);
     const requestedBy = Array.isArray(row.requested_by)
       ? (row.requested_by[0] ?? null)
       : (row.requested_by ?? null);
@@ -240,6 +379,9 @@ export class FundRequestsService {
     const transferredBy = Array.isArray(row.transferred_by)
       ? (row.transferred_by[0] ?? null)
       : (row.transferred_by ?? null);
+    const sourceConfirmedBy = Array.isArray(row.source_confirmed_by)
+      ? (row.source_confirmed_by[0] ?? null)
+      : (row.source_confirmed_by ?? null);
     const confirmedBy = Array.isArray(row.confirmed_by)
       ? (row.confirmed_by[0] ?? null)
       : (row.confirmed_by ?? null);
@@ -252,7 +394,11 @@ export class FundRequestsService {
       amountRequested: this.toMoneyOrNull(row.amount_requested) ?? 0,
       purpose: row.purpose,
       notes: row.notes,
-      status: row.status,
+      status: this.isPendingSourceConfirmationRow(row)
+        ? 'pending_source_confirmation'
+        : this.isPendingConfirmationRow(row)
+          ? 'pending_confirmation'
+          : row.status,
       approvedAmount: this.toMoneyOrNull(row.approved_amount),
       reviewedAt: row.reviewed_at,
       reviewNotes: row.review_notes,
@@ -260,8 +406,51 @@ export class FundRequestsService {
       transferredAt: row.transferred_at,
       transferReference: row.transfer_reference,
       transferNotes: row.transfer_notes,
+      transferMode: row.transfer_mode,
+      flowType: row.flow_type ?? 'request_based',
+      receiverUserId: row.receiver_user_id,
+      sourceBranchId: row.source_branch_id,
+      sourceBranch: sourceBranch
+        ? {
+            id: sourceBranch.id,
+            name: sourceBranch.name,
+            branchCode: sourceBranch.branch_code,
+            location: sourceBranch.location,
+          }
+        : null,
+      sourceConfirmedBy: sourceConfirmedBy
+        ? {
+            id: sourceConfirmedBy.id,
+            fullName: sourceConfirmedBy.full_name,
+            email: sourceConfirmedBy.email,
+          }
+        : null,
+      sourceConfirmedAt: row.source_confirmed_at,
+      sourceConfirmationNotes: row.source_confirmation_notes,
+      sourceConfirmedAmount: this.toMoneyOrNull(row.source_confirmed_amount),
+      sourceConfirmationProofUrl: row.source_confirmation_proof_url,
+      receiverRole: row.receiver_role,
+      confirmedReceivedAmount: this.toMoneyOrNull(
+        row.confirmed_received_amount,
+      ),
+      confirmationNote: row.confirmation_note,
+      transferReferenceNo: row.transfer_reference_no,
+      confirmationProofUrl: row.confirmation_proof_url,
       confirmedAt: row.confirmed_at,
       confirmationNotes: row.confirmation_notes,
+      destinationConfirmedBy: confirmedBy
+        ? {
+            id: confirmedBy.id,
+            fullName: confirmedBy.full_name,
+            email: confirmedBy.email,
+          }
+        : null,
+      destinationConfirmedAt: row.destination_confirmed_at,
+      destinationConfirmationNotes: row.destination_confirmation_notes,
+      destinationReceivedAmount: this.toMoneyOrNull(
+        row.destination_received_amount,
+      ),
+      destinationConfirmationProofUrl: row.destination_confirmation_proof_url,
       relatedTransactionId: row.related_transaction_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -308,58 +497,11 @@ export class FundRequestsService {
     branchId: string,
     delta: number,
   ): Promise<void> {
-    const amount = Number(delta.toFixed(2));
-    const today = this.toDatePart(new Date());
-    const client = this.supabaseService.getClient();
-
-    const { data: existing, error: existingError } = await client
-      .from('daily_balances')
-      .select('id, ending_balance')
-      .eq('branch_id', branchId)
-      .eq('record_date', today)
-      .maybeSingle<{ id: string; ending_balance: number | string }>();
-
-    if (existingError) {
-      throw new InternalServerErrorException(existingError.message);
-    }
-
-    if (existing) {
-      const endingBalance = Number(existing.ending_balance ?? 0);
-      const { error: updateError } = await client
-        .from('daily_balances')
-        .update({ ending_balance: Number((endingBalance + amount).toFixed(2)) })
-        .eq('id', existing.id);
-
-      if (updateError) {
-        throw new InternalServerErrorException(updateError.message);
-      }
-
-      return;
-    }
-
-    const { data: lastBalance, error: lastBalanceError } = await client
-      .from('daily_balances')
-      .select('ending_balance')
-      .eq('branch_id', branchId)
-      .order('record_date', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ ending_balance: number | string }>();
-
-    if (lastBalanceError) {
-      throw new InternalServerErrorException(lastBalanceError.message);
-    }
-
-    const startingBalance = Number(lastBalance?.ending_balance ?? 0);
-    const { error: insertError } = await client.from('daily_balances').insert({
-      branch_id: branchId,
-      record_date: today,
-      starting_balance: Number(startingBalance.toFixed(2)),
-      ending_balance: Number((startingBalance + amount).toFixed(2)),
-    });
-
-    if (insertError) {
-      throw new InternalServerErrorException(insertError.message);
-    }
+    await sharedAdjustDailyBalance(
+      this.supabaseService.getClient(),
+      branchId,
+      delta,
+    );
   }
 
   private async createTransferTransaction(params: {
@@ -368,6 +510,8 @@ export class FundRequestsService {
     amount: number;
     transferReference: string | null;
     transferNotes: string | null;
+    direction: 'in' | 'out';
+    counterpartBranchName?: string | null;
   }): Promise<{ id: string }> {
     const now = new Date();
     const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
@@ -376,12 +520,23 @@ export class FundRequestsService {
       'transaction_no',
       prefix,
     );
-    const detailsParts = [
-      `Fund transfer for ${params.request.request_no}`,
-      params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
-      params.transferReference ? `Reference: ${params.transferReference}` : '',
-      params.transferNotes ? `Notes: ${params.transferNotes}` : '',
-    ].filter(Boolean);
+    const isInbound = params.direction === 'in';
+    const detailsParts = isInbound
+      ? [
+          `Fund transfer for ${params.request.request_no}`,
+          params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
+          params.transferReference ? `Reference: ${params.transferReference}` : '',
+          params.transferNotes ? `Notes: ${params.transferNotes}` : '',
+        ].filter(Boolean)
+      : [
+          `Transfer out for ${params.request.request_no}`,
+          params.counterpartBranchName
+            ? `Destination: ${params.counterpartBranchName}`
+            : '',
+          params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
+          params.transferReference ? `Reference: ${params.transferReference}` : '',
+          params.transferNotes ? `Notes: ${params.transferNotes}` : '',
+        ].filter(Boolean);
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -393,10 +548,10 @@ export class FundRequestsService {
         purpose: 'Fund Transfer',
         transaction_date: this.toDatePart(now),
         transaction_time: this.toTimePart(now),
-        cash_in: params.amount,
-        cash_out: 0,
+        cash_in: isInbound ? params.amount : 0,
+        cash_out: isInbound ? 0 : params.amount,
         return_amount: 0,
-        unit: 'fund_transfer',
+        unit: isInbound ? 'fund_transfer' : 'fund_transfer_out',
         unit_code: params.request.request_no,
         pawn_amount: 0,
         storage_fee: 0,
@@ -412,10 +567,121 @@ export class FundRequestsService {
     return data;
   }
 
+  private async createTransferTransactions(params: {
+    request: FundRequestRow;
+    destinationBranch: BranchRow;
+    amount: number;
+    transferReference: string | null;
+    transferNotes: string | null;
+    sourceBranch?: BranchRow | null;
+  }): Promise<{
+    inboundTransactionId: string;
+    outboundTransactionId: string | null;
+  }> {
+    let outboundId: string | null = null;
+    if (params.sourceBranch) {
+      const now = new Date();
+      const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+      const transactionNo = await this.getNextCode(
+        'transactions',
+        'transaction_no',
+        prefix,
+      );
+      const { data, error } = await this.supabaseService
+        .getClient()
+        .from('transactions')
+        .insert({
+          transaction_no: transactionNo,
+          branch_id: params.sourceBranch.id,
+          branch: params.sourceBranch.name,
+          purpose: 'Fund Transfer',
+          transaction_date: this.toDatePart(now),
+          transaction_time: this.toTimePart(now),
+          cash_in: 0,
+          cash_out: params.amount,
+          return_amount: 0,
+          unit: 'fund_transfer_out',
+          unit_code: params.request.request_no,
+          pawn_amount: 0,
+          storage_fee: 0,
+          details: `Transfer out to ${params.destinationBranch.name} | Ref: ${params.transferReference ?? 'N/A'} | Notes: ${params.transferNotes ?? '-'}`,
+        })
+        .select('id')
+        .single<{ id: string }>();
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+      outboundId = data.id;
+    }
+
+    const inbound = await this.createTransferTransaction({
+      branch: params.destinationBranch,
+      request: params.request,
+      amount: params.amount,
+      transferReference: params.transferReference,
+      transferNotes: params.transferNotes,
+      direction: 'in',
+    });
+
+    return {
+      inboundTransactionId: inbound.id,
+      outboundTransactionId: outboundId,
+    };
+  }
+
+  private async writeFundLog(params: {
+    user: AuthenticatedUserProfile;
+    branchId: string | null;
+    action: string;
+    details: Record<string, unknown>;
+  }) {
+    await this.activityLogsService.createLog({
+      userId: params.user.id,
+      branchId: params.branchId,
+      action: params.action,
+      details: params.details,
+    });
+  }
+
+  private async resolveReceiver(dto: {
+    receiverUserId?: string;
+    receiverRole?: 'admin' | 'employee';
+    branchId: string;
+  }): Promise<{ receiverUserId: string | null; receiverRole: string | null }> {
+    if (!dto.receiverUserId && !dto.receiverRole) {
+      return { receiverUserId: null, receiverRole: null };
+    }
+
+    if (dto.receiverUserId) {
+      const receiver = await this.getUserById(dto.receiverUserId);
+      if (receiver.branch_id !== dto.branchId) {
+        throw new BadRequestException(
+          'Receiver user must belong to the same destination branch',
+        );
+      }
+      const role = (receiver.role ?? '').toLowerCase();
+      if (role !== 'admin' && role !== 'employee') {
+        throw new BadRequestException(
+          'Receiver user must be either admin or employee',
+        );
+      }
+      return {
+        receiverUserId: receiver.id,
+        receiverRole: role,
+      };
+    }
+
+    return {
+      receiverUserId: null,
+      receiverRole: dto.receiverRole ?? null,
+    };
+  }
+
   async create(user: AuthenticatedUserProfile, dto: CreateFundRequestDto) {
-    if (user.role !== Role.ADMIN) {
+    if (user.role !== Role.ADMIN && user.role !== Role.EMPLOYEE) {
       throw new ForbiddenException(
-        'Only branch admins can create fund requests',
+        'Only branch users can create fund requests',
       );
     }
 
@@ -426,6 +692,12 @@ export class FundRequestsService {
         'Inactive branches cannot submit fund requests',
       );
     }
+
+    const receiver = await this.resolveReceiver({
+      branchId: branch.id,
+      receiverRole: dto.receiverRole,
+      receiverUserId: dto.receiverUserId,
+    });
 
     const now = new Date();
     const requestNo = await this.getNextCode(
@@ -444,6 +716,9 @@ export class FundRequestsService {
         amount_requested: this.normalizeMoney(dto.amountRequested),
         purpose: dto.purpose.trim(),
         notes: this.compactText(dto.notes),
+        flow_type: 'request_based',
+        receiver_user_id: receiver.receiverUserId,
+        receiver_role: receiver.receiverRole,
         status: 'pending',
       })
       .select(FUND_REQUEST_SELECT)
@@ -453,7 +728,158 @@ export class FundRequestsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return this.mapFundRequest(data);
+    const mapped = this.mapFundRequest(data);
+    await this.writeFundLog({
+      user,
+      branchId: branch.id,
+      action: 'FUND_REQUEST_CREATED',
+      details: {
+        requestNo: mapped.requestNo,
+        amountRequested: mapped.amountRequested,
+        receiverRole: mapped.receiverRole,
+        flowType: mapped.flowType,
+      },
+    });
+    return mapped;
+  }
+
+  async createDirectTransfer(
+    user: AuthenticatedUserProfile,
+    dto: CreateDirectTransferDto,
+  ) {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only super admins can create direct transfers',
+      );
+    }
+
+    const destinationBranch = await this.getBranchById(dto.toBranchId);
+    if (!this.isActiveBranch(destinationBranch.status)) {
+      throw new BadRequestException(
+        'Cannot transfer funds to an inactive branch',
+      );
+    }
+
+    const sourceBranch = dto.fromBranchId
+      ? await this.getBranchById(dto.fromBranchId)
+      : null;
+    if (sourceBranch && sourceBranch.id === destinationBranch.id) {
+      throw new BadRequestException(
+        'Source and destination branch cannot be the same',
+      );
+    }
+
+    const receiver = await this.resolveReceiver({
+      branchId: destinationBranch.id,
+      receiverRole: dto.receiverRole,
+      receiverUserId: dto.receiverUserId,
+    });
+
+    const now = new Date();
+    const requestNo = await this.getNextCode(
+      'fund_requests',
+      'request_no',
+      `DF-${this.toDatePart(now).replace(/-/g, '')}-`,
+    );
+    const amount = this.normalizeMoney(dto.amount);
+    const transferMode = dto.transferMode ?? 'cash';
+    if (sourceBranch) {
+      const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+      if (sourceBalance < amount) {
+        throw new BadRequestException(
+          `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
+        );
+      }
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('fund_requests')
+      .insert({
+        request_no: requestNo,
+        branch_id: destinationBranch.id,
+        requested_by_user_id: user.id,
+        amount_requested: amount,
+        purpose: this.compactText(dto.purpose) ?? 'Direct cash transfer',
+        notes: this.compactText(dto.notes),
+        flow_type: 'direct_push',
+        receiver_user_id: receiver.receiverUserId,
+        source_branch_id: sourceBranch?.id ?? null,
+        receiver_role: receiver.receiverRole,
+        status: sourceBranch ? 'pending_source_confirmation' : 'pending_confirmation',
+        approved_amount: amount,
+        reviewed_by_user_id: user.id,
+        reviewed_at: now.toISOString(),
+        amount_transferred: amount,
+        transferred_by_user_id: user.id,
+        transferred_at: now.toISOString(),
+        transfer_reference: this.compactText(dto.transferReference),
+        transfer_notes: this.compactText(dto.notes),
+        transfer_mode: transferMode,
+        transfer_reference_no: this.compactText(dto.transferReference),
+      })
+      .select(FUND_REQUEST_SELECT)
+      .single<FundRequestRow>();
+
+    let createdData = data;
+    if (error) {
+      if (!this.isStatusConstraintError(error.message)) {
+        throw new InternalServerErrorException(error.message);
+      }
+      const fallback = await this.supabaseService
+        .getClient()
+        .from('fund_requests')
+        .insert({
+          request_no: requestNo,
+          branch_id: destinationBranch.id,
+          requested_by_user_id: user.id,
+          amount_requested: amount,
+          purpose: this.compactText(dto.purpose) ?? 'Direct cash transfer',
+          notes: this.compactText(dto.notes),
+          flow_type: 'direct_push',
+          receiver_user_id: receiver.receiverUserId,
+          source_branch_id: sourceBranch?.id ?? null,
+          receiver_role: receiver.receiverRole,
+          // Legacy DB compatibility: represent "awaiting confirmation" while status check is outdated.
+          status: 'approved',
+          approved_amount: amount,
+          reviewed_by_user_id: user.id,
+          reviewed_at: now.toISOString(),
+          amount_transferred: amount,
+          transferred_by_user_id: user.id,
+          transferred_at: now.toISOString(),
+          transfer_reference: this.compactText(dto.transferReference),
+          transfer_notes: this.compactText(dto.notes),
+          transfer_mode: transferMode,
+          transfer_reference_no: this.compactText(dto.transferReference),
+        })
+        .select(FUND_REQUEST_SELECT)
+        .single<FundRequestRow>();
+      if (fallback.error) {
+        throw new InternalServerErrorException(fallback.error.message);
+      }
+      createdData = fallback.data;
+    }
+
+    if (!createdData) {
+      throw new InternalServerErrorException('Failed to create fund transfer');
+    }
+    const mapped = this.mapFundRequest(createdData);
+    await this.writeFundLog({
+      user,
+      branchId: destinationBranch.id,
+      action: 'FUND_TRANSFER_RELEASED',
+      details: {
+        requestNo: mapped.requestNo,
+        flowType: mapped.flowType,
+        amountTransferred: mapped.amountTransferred,
+        transferMode,
+        sourceBranchId: sourceBranch?.id ?? null,
+        destinationBranchId: destinationBranch.id,
+        awaitingSourceConfirmation: !!sourceBranch,
+      },
+    });
+    return mapped;
   }
 
   async findAll(user: AuthenticatedUserProfile, queryDto: ListFundRequestsDto) {
@@ -473,7 +899,15 @@ export class FundRequestsService {
         : requireUserBranchId(user);
 
     if (branchId) {
-      query = query.eq('branch_id', branchId);
+      if (user.role === Role.SUPER_ADMIN) {
+        query = query.or(
+          `branch_id.eq.${branchId},source_branch_id.eq.${branchId}`,
+        );
+      } else {
+        query = query.or(
+          `branch_id.eq.${branchId},source_branch_id.eq.${branchId}`,
+        );
+      }
     } else if (matchingBranchIds) {
       if (matchingBranchIds.length === 0) {
         return [];
@@ -505,7 +939,15 @@ export class FundRequestsService {
 
   async findOne(user: AuthenticatedUserProfile, id: string) {
     const fundRequest = await this.getFundRequestById(id);
-    assertResourceBranch(user, fundRequest.branch_id);
+    if (user.role !== Role.SUPER_ADMIN) {
+      const branchId = requireUserBranchId(user);
+      if (
+        fundRequest.branch_id !== branchId &&
+        fundRequest.source_branch_id !== branchId
+      ) {
+        throw new ForbiddenException('You cannot access data from another branch');
+      }
+    }
     return this.mapFundRequest(fundRequest);
   }
 
@@ -562,7 +1004,18 @@ export class FundRequestsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return this.mapFundRequest(data);
+    const mapped = this.mapFundRequest(data);
+    await this.writeFundLog({
+      user,
+      branchId: mapped.branchId,
+      action: 'FUND_REQUEST_REVIEWED',
+      details: {
+        requestNo: mapped.requestNo,
+        decision: dto.decision,
+        approvedAmount: mapped.approvedAmount,
+      },
+    });
+    return mapped;
   }
 
   async transfer(
@@ -596,11 +1049,26 @@ export class FundRequestsService {
       );
     }
 
-    const branch = Array.isArray(existing.branches)
+    const destinationBranch = Array.isArray(existing.branches)
       ? (existing.branches[0] ?? null)
       : (existing.branches ?? null);
-    const resolvedBranch =
-      branch ?? (await this.getBranchById(existing.branch_id));
+    const resolvedDestinationBranch =
+      destinationBranch ?? (await this.getBranchById(existing.branch_id));
+    const sourceBranch = dto.sourceBranchId
+      ? await this.getBranchById(dto.sourceBranchId)
+      : existing.source_branch_id
+        ? await this.getBranchById(existing.source_branch_id)
+        : null;
+
+    if (
+      sourceBranch &&
+      sourceBranch.id === resolvedDestinationBranch.id
+    ) {
+      throw new BadRequestException(
+        'Source and destination branch cannot be the same',
+      );
+    }
+
     const fallbackAmount =
       this.toMoneyOrNull(existing.approved_amount) ??
       this.toMoneyOrNull(existing.amount_requested) ??
@@ -614,11 +1082,32 @@ export class FundRequestsService {
       );
     }
 
+    if (sourceBranch) {
+      const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+      if (sourceBalance < transferAmount) {
+        throw new BadRequestException(
+          `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
+        );
+      }
+    }
+
+    const receiver = await this.resolveReceiver({
+      branchId: existing.branch_id,
+      receiverRole: dto.receiverRole,
+      receiverUserId: dto.receiverUserId,
+    });
+
+    const transferMode = dto.transferMode ?? existing.transfer_mode ?? 'cash';
+    const now = new Date();
+    const status = sourceBranch
+      ? 'pending_source_confirmation'
+      : 'pending_confirmation';
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('fund_requests')
       .update({
-        status: 'pending_confirmation',
+        status,
         approved_amount:
           this.toMoneyOrNull(existing.approved_amount) ?? transferAmount,
         reviewed_by_user_id: existing.reviewed_by_user_id ?? user.id,
@@ -626,9 +1115,159 @@ export class FundRequestsService {
         review_notes: this.compactText(existing.review_notes),
         amount_transferred: transferAmount,
         transferred_by_user_id: user.id,
-        transferred_at: new Date().toISOString(),
+        transferred_at: now.toISOString(),
         transfer_reference: this.compactText(dto.transferReference),
         transfer_notes: this.compactText(dto.transferNotes),
+        transfer_reference_no: this.compactText(dto.transferReference),
+        transfer_mode: transferMode,
+        source_branch_id: sourceBranch?.id ?? existing.source_branch_id,
+        receiver_user_id: receiver.receiverUserId,
+        receiver_role: receiver.receiverRole,
+      })
+      .eq('id', id)
+      .select(FUND_REQUEST_SELECT)
+      .single<FundRequestRow>();
+
+    let updatedData = data;
+    if (error) {
+      if (!this.isStatusConstraintError(error.message)) {
+        throw new InternalServerErrorException(error.message);
+      }
+      const fallback = await this.supabaseService
+        .getClient()
+        .from('fund_requests')
+        .update({
+          status: 'approved',
+          approved_amount:
+            this.toMoneyOrNull(existing.approved_amount) ?? transferAmount,
+          reviewed_by_user_id: existing.reviewed_by_user_id ?? user.id,
+          reviewed_at: existing.reviewed_at ?? new Date().toISOString(),
+          review_notes: this.compactText(existing.review_notes),
+          amount_transferred: transferAmount,
+          transferred_by_user_id: user.id,
+          transferred_at: now.toISOString(),
+          transfer_reference: this.compactText(dto.transferReference),
+          transfer_notes: this.compactText(dto.transferNotes),
+          transfer_reference_no: this.compactText(dto.transferReference),
+          transfer_mode: transferMode,
+          source_branch_id: sourceBranch?.id ?? existing.source_branch_id,
+          receiver_user_id: receiver.receiverUserId,
+          receiver_role: receiver.receiverRole,
+        })
+        .eq('id', id)
+        .select(FUND_REQUEST_SELECT)
+        .single<FundRequestRow>();
+      if (fallback.error) {
+        throw new InternalServerErrorException(fallback.error.message);
+      }
+      updatedData = fallback.data;
+    }
+
+    if (!updatedData) {
+      throw new InternalServerErrorException('Failed to update fund transfer');
+    }
+    const mapped = this.mapFundRequest(updatedData);
+    await this.writeFundLog({
+      user,
+      branchId: mapped.branchId,
+      action: 'FUND_TRANSFER_RELEASED',
+      details: {
+        requestNo: mapped.requestNo,
+        amountTransferred: mapped.amountTransferred,
+        receiverRole: mapped.receiverRole,
+        transferMode,
+        sourceBranchId: sourceBranch?.id ?? null,
+        destinationBranchId: resolvedDestinationBranch.id,
+        awaitingSourceConfirmation: !!sourceBranch,
+      },
+    });
+    return mapped;
+  }
+
+  async sourceConfirm(
+    user: AuthenticatedUserProfile,
+    id: string,
+    dto: SourceConfirmFundRequestDto,
+  ) {
+    if (user.role !== Role.ADMIN && user.role !== Role.EMPLOYEE) {
+      throw new ForbiddenException(
+        'Only branch admins or employees can confirm source deductions',
+      );
+    }
+
+    const existing = await this.getFundRequestById(id);
+    if (!existing.source_branch_id) {
+      throw new BadRequestException(
+        'This transfer is not routed through another branch',
+      );
+    }
+
+    assertResourceBranch(user, existing.source_branch_id);
+
+    if (!this.isPendingSourceConfirmationRow(existing)) {
+      throw new BadRequestException(
+        'Only pending source confirmation requests can be confirmed',
+      );
+    }
+
+    const sourceBranch = await this.getBranchById(existing.source_branch_id);
+    const destinationBranch = await this.getBranchById(existing.branch_id);
+    const sentAmount = this.normalizeMoney(
+      dto.sentAmount ??
+        this.toMoneyOrNull(existing.amount_transferred) ??
+        this.toMoneyOrNull(existing.approved_amount) ??
+        this.toMoneyOrNull(existing.amount_requested) ??
+        0,
+    );
+
+    const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+    if (sourceBalance < sentAmount) {
+      throw new BadRequestException(
+        `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
+      );
+    }
+
+    const transferReference =
+      this.compactText(existing.transfer_reference_no) ??
+      this.compactText(existing.transfer_reference);
+
+    let outboundTransactionId: string | null = null;
+    try {
+      const outboundTransaction = await this.createTransferTransaction({
+        branch: sourceBranch,
+        request: existing,
+        amount: sentAmount,
+        transferReference,
+        transferNotes:
+          this.compactText(dto.confirmationNotes) ??
+          this.compactText(existing.transfer_notes),
+        direction: 'out',
+        counterpartBranchName: destinationBranch.name,
+      });
+      outboundTransactionId = outboundTransaction.id;
+      await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err ?? '');
+      if (this.isTransactionsPurposeConstraintError(errorMessage)) {
+        await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+      } else {
+        throw err;
+      }
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('fund_requests')
+      .update({
+        status: 'pending_confirmation',
+        amount_transferred: sentAmount,
+        source_confirmed_by_user_id: user.id,
+        source_confirmed_at: new Date().toISOString(),
+        source_confirmation_notes: this.compactText(dto.confirmationNotes),
+        source_confirmed_amount: sentAmount,
+        source_confirmation_proof_url: this.compactText(dto.proofUrl),
+        transfer_mode: existing.transfer_mode,
+        related_transaction_id: outboundTransactionId,
       })
       .eq('id', id)
       .select(FUND_REQUEST_SELECT)
@@ -638,7 +1277,21 @@ export class FundRequestsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return this.mapFundRequest(data);
+    const mapped = this.mapFundRequest(data);
+    await this.writeFundLog({
+      user,
+      branchId: sourceBranch.id,
+      action: 'FUND_TRANSFER_SOURCE_CONFIRMED',
+      details: {
+        requestNo: mapped.requestNo,
+        sourceBranchId: sourceBranch.id,
+        destinationBranchId: destinationBranch.id,
+        sentAmount,
+        transferMode: existing.transfer_mode,
+        relatedTransactionId: outboundTransactionId,
+      },
+    });
+    return mapped;
   }
 
   async confirm(
@@ -646,48 +1299,75 @@ export class FundRequestsService {
     id: string,
     dto: ConfirmFundRequestDto,
   ) {
-    if (user.role !== Role.ADMIN) {
+    if (user.role !== Role.ADMIN && user.role !== Role.EMPLOYEE) {
       throw new ForbiddenException(
-        'Only branch admins can confirm pending fund transfers',
+        'Only branch admins or employees can confirm pending fund transfers',
       );
     }
 
     const existing = await this.getFundRequestById(id);
     assertResourceBranch(user, existing.branch_id);
 
-    if (existing.status !== 'pending_confirmation') {
+    if (!this.isPendingConfirmationRow(existing)) {
+      if (existing.receiver_user_id && existing.receiver_user_id !== user.id) {
+        throw new ForbiddenException(
+          'This transfer is assigned to another receiver',
+        );
+      }
+      if (
+        existing.receiver_role &&
+        existing.receiver_role !== this.toReceiverRole(user.role)
+      ) {
+        throw new ForbiddenException(
+          'Your role is not allowed to confirm this transfer',
+        );
+      }
+
       throw new BadRequestException(
         'Only pending confirmation requests can be confirmed',
       );
     }
 
-    const branch = Array.isArray(existing.branches)
+    const destinationBranch = Array.isArray(existing.branches)
       ? (existing.branches[0] ?? null)
       : (existing.branches ?? null);
-    const resolvedBranch =
-      branch ?? (await this.getBranchById(existing.branch_id));
-    const confirmedAmount =
+    const resolvedDestinationBranch =
+      destinationBranch ?? (await this.getBranchById(existing.branch_id));
+    const transferAmount =
       this.toMoneyOrNull(existing.amount_transferred) ??
       this.toMoneyOrNull(existing.approved_amount) ??
       this.toMoneyOrNull(existing.amount_requested);
+    const confirmedAmount = this.normalizeMoney(
+      dto.receivedAmount ?? transferAmount ?? 0,
+    );
 
-    if (!confirmedAmount || confirmedAmount <= 0) {
-      throw new BadRequestException(
-        'Confirmed transfer amount is missing or invalid',
-      );
+    let inboundTransactionId: string | null = null;
+    try {
+      const inboundTransaction = await this.createTransferTransaction({
+        branch: resolvedDestinationBranch,
+        request: existing,
+        amount: confirmedAmount,
+        transferReference:
+          this.compactText(existing.transfer_reference_no) ??
+          this.compactText(existing.transfer_reference),
+        transferNotes:
+          this.compactText(dto.confirmationNotes) ??
+          this.compactText(existing.transfer_notes),
+        direction: 'in',
+      });
+      inboundTransactionId = inboundTransaction.id;
+      await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : String(err ?? '');
+      if (this.isTransactionsPurposeConstraintError(errorMessage)) {
+        // Allow confirmation to proceed even if legacy transactions purpose
+        // constraint rejects fund-transfer journal entries.
+        await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
+      } else {
+        throw err;
+      }
     }
-
-    const transaction = await this.createTransferTransaction({
-      branch: resolvedBranch,
-      request: existing,
-      amount: confirmedAmount,
-      transferReference: this.compactText(existing.transfer_reference),
-      transferNotes:
-        this.compactText(dto.confirmationNotes) ??
-        this.compactText(existing.transfer_notes),
-    });
-
-    await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -696,8 +1376,16 @@ export class FundRequestsService {
         status: 'transferred',
         confirmed_by_user_id: user.id,
         confirmed_at: new Date().toISOString(),
+        confirmed_received_amount: confirmedAmount,
         confirmation_notes: this.compactText(dto.confirmationNotes),
-        related_transaction_id: transaction.id,
+        confirmation_note: this.compactText(dto.confirmationNotes),
+        confirmation_proof_url: this.compactText(dto.proofUrl),
+        destination_confirmed_by_user_id: user.id,
+        destination_confirmed_at: new Date().toISOString(),
+        destination_confirmation_notes: this.compactText(dto.confirmationNotes),
+        destination_received_amount: confirmedAmount,
+        destination_confirmation_proof_url: this.compactText(dto.proofUrl),
+        related_transaction_id: inboundTransactionId,
       })
       .eq('id', id)
       .select(FUND_REQUEST_SELECT)
@@ -707,7 +1395,30 @@ export class FundRequestsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return this.mapFundRequest(data);
+    const mapped = this.mapFundRequest(data);
+    await this.writeFundLog({
+      user,
+      branchId: mapped.branchId,
+      action: 'FUND_TRANSFER_CONFIRMED',
+      details: {
+        requestNo: mapped.requestNo,
+        confirmedReceivedAmount: mapped.confirmedReceivedAmount,
+        confirmedByRole: user.role,
+        destinationBranchId: resolvedDestinationBranch.id,
+        sourceBranchId: mapped.sourceBranchId,
+        confirmationProofUrl: mapped.confirmationProofUrl,
+      },
+    });
+    await this.writeFundLog({
+      user,
+      branchId: mapped.branchId,
+      action: 'BRANCH_CASH_ON_HAND_UPDATED',
+      details: {
+        requestNo: mapped.requestNo,
+        delta: mapped.confirmedReceivedAmount,
+      },
+    });
+    return mapped;
   }
 
   async cancel(user: AuthenticatedUserProfile, id: string) {

@@ -1,0 +1,429 @@
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Role } from '../../common/enums';
+import type { UserWithBranch } from '../../common/utils/branch-scope.util';
+import {
+  effectiveBranchIdForQuery,
+  requireUserBranchId,
+} from '../../common/utils/branch-scope.util';
+import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+
+interface TransactionRow {
+  id: string;
+  transaction_no: string | null;
+  branch_id: string;
+  branch: string | null;
+  purpose: string | null;
+  transaction_date: string | null;
+  transaction_time: string | null;
+  cash_in: number | string | null;
+  cash_out: number | string | null;
+  unit: string | null;
+  unit_code: string | null;
+  details: string | null;
+  pawn_amount: number | string | null;
+  storage_fee: number | string | null;
+  return_amount: number | string | null;
+  created_at: string;
+}
+
+interface DailyBalanceRow {
+  branch_id: string;
+  record_date: string;
+  starting_balance: number | string | null;
+  ending_balance: number | string | null;
+}
+
+interface BranchRow {
+  id: string;
+  name: string;
+  branch_code: string | null;
+  status: string | null;
+}
+
+export type LedgerEntryType =
+  | 'pawn'
+  | 'buy_back'
+  | 'renewal'
+  | 'sale'
+  | 'fund_transfer_in'
+  | 'fund_transfer_out'
+  | 'start'
+  | 'other';
+
+export interface LedgerEntry {
+  id: string;
+  date: string;
+  time: string | null;
+  type: LedgerEntryType;
+  description: string;
+  itemName: string | null;
+  cashIn: number;
+  cashOut: number;
+  branchId: string;
+  branchName: string | null;
+  reference: string | null;
+}
+
+export interface BranchFinanceSummary {
+  branchId: string;
+  branchName: string;
+  branchCode: string | null;
+  status: string | null;
+  currentBalance: number;
+  startingBalance: number;
+  todayCashIn: number;
+  todayCashOut: number;
+  breakdown: {
+    pawnOut: number;
+    buyBackIn: number;
+    renewalIn: number;
+    saleIn: number;
+    fundTransferIn: number;
+    fundTransferOut: number;
+    startBalance: number;
+    other: number;
+  };
+  fundRequests: {
+    pending: number;
+    approved: number;
+    transferred: number;
+  };
+}
+
+@Injectable()
+export class BranchFinanceService {
+  constructor(private readonly supabaseService: SupabaseService) {}
+
+  private toMoney(value: number | string | null | undefined): number {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
+  }
+
+  private classifyTransaction(row: TransactionRow): LedgerEntryType {
+    const purpose = (row.purpose ?? '').toLowerCase().trim();
+    const unit = (row.unit ?? '').toLowerCase().trim();
+
+    if (unit === 'fund_transfer' || purpose === 'cash transfer') {
+      return 'fund_transfer_in';
+    }
+    if (unit === 'fund_transfer_out') {
+      return 'fund_transfer_out';
+    }
+    if (purpose === 'pawn' || purpose === 'new pawn') {
+      return 'pawn';
+    }
+    if (purpose === 'buy back') {
+      return 'buy_back';
+    }
+    if (purpose === 'renew' || purpose === 'renewal') {
+      return 'renewal';
+    }
+    if (
+      purpose === 'sold item' ||
+      purpose === 'sale' ||
+      purpose === 'sales transfer'
+    ) {
+      return 'sale';
+    }
+    if (purpose === 'start') {
+      return 'start';
+    }
+    return 'other';
+  }
+
+  private buildDescription(row: TransactionRow, type: LedgerEntryType): string {
+    const parts: string[] = [];
+
+    switch (type) {
+      case 'pawn':
+        parts.push('New Pawn');
+        break;
+      case 'buy_back':
+        parts.push('Buy Back');
+        break;
+      case 'renewal':
+        parts.push('Renewal');
+        break;
+      case 'sale':
+        parts.push('Sold Item');
+        break;
+      case 'fund_transfer_in':
+        parts.push('Fund Transfer In');
+        break;
+      case 'fund_transfer_out':
+        parts.push('Fund Transfer Out');
+        break;
+      case 'start':
+        parts.push('Opening Balance');
+        break;
+      default:
+        parts.push(row.purpose ?? 'Transaction');
+    }
+
+    if (row.unit_code) {
+      parts.push(`[${row.unit_code}]`);
+    }
+
+    if (row.details) {
+      const truncated =
+        row.details.length > 80
+          ? row.details.slice(0, 80) + '...'
+          : row.details;
+      parts.push(`- ${truncated}`);
+    }
+
+    return parts.join(' ');
+  }
+
+  private getItemName(row: TransactionRow): string | null {
+    if (!row.unit) return null;
+    const lower = row.unit.toLowerCase().trim();
+    if (lower === 'fund_transfer' || lower === 'fund_transfer_out') return null;
+    return row.unit;
+  }
+
+  private mapToLedgerEntry(row: TransactionRow): LedgerEntry {
+    const type = this.classifyTransaction(row);
+    return {
+      id: row.id,
+      date: row.transaction_date ?? row.created_at.split('T')[0],
+      time: row.transaction_time ?? null,
+      type,
+      description: this.buildDescription(row, type),
+      itemName: this.getItemName(row),
+      cashIn: this.toMoney(row.cash_in),
+      cashOut: this.toMoney(row.cash_out),
+      branchId: row.branch_id,
+      branchName: row.branch ?? null,
+      reference: row.unit_code ?? row.transaction_no ?? null,
+    };
+  }
+
+  async getSummary(
+    user: UserWithBranch,
+    branchQuery?: string,
+  ): Promise<BranchFinanceSummary[]> {
+    const client = this.supabaseService.getClient();
+    const today = new Date().toISOString().split('T')[0];
+
+    const branchId =
+      user.role === Role.SUPER_ADMIN
+        ? effectiveBranchIdForQuery(user, branchQuery)
+        : requireUserBranchId(user);
+
+    let branchesQuery = client
+      .from('branches')
+      .select('id, name, branch_code, status')
+      .order('name', { ascending: true });
+
+    if (branchId) {
+      branchesQuery = branchesQuery.eq('id', branchId);
+    }
+
+    const { data: branches, error: branchesErr } = await branchesQuery;
+    if (branchesErr) {
+      throw new InternalServerErrorException(branchesErr.message);
+    }
+
+    if (!branches || branches.length === 0) {
+      return [];
+    }
+
+    const branchIds = (branches as BranchRow[]).map((b) => b.id);
+
+    let balancesQuery = client
+      .from('daily_balances')
+      .select('branch_id, record_date, starting_balance, ending_balance')
+      .in('branch_id', branchIds)
+      .order('record_date', { ascending: false });
+
+    let todayTxQuery = client
+      .from('transactions')
+      .select(
+        'branch_id, purpose, unit, cash_in, cash_out, pawn_amount, storage_fee',
+      )
+      .in('branch_id', branchIds)
+      .eq('transaction_date', today);
+
+    let fundReqQuery = client
+      .from('fund_requests')
+      .select('branch_id, status')
+      .in('branch_id', branchIds)
+      .in('status', ['pending', 'approved', 'transferred']);
+
+    const [balancesResult, todayTxResult, fundReqResult] = await Promise.all([
+      balancesQuery,
+      todayTxQuery,
+      fundReqQuery,
+    ]);
+
+    if (balancesResult.error) {
+      throw new InternalServerErrorException(balancesResult.error.message);
+    }
+    if (todayTxResult.error) {
+      throw new InternalServerErrorException(todayTxResult.error.message);
+    }
+    if (fundReqResult.error) {
+      throw new InternalServerErrorException(fundReqResult.error.message);
+    }
+
+    const latestBalanceMap = new Map<string, DailyBalanceRow>();
+    for (const row of (balancesResult.data ?? []) as DailyBalanceRow[]) {
+      if (!latestBalanceMap.has(row.branch_id)) {
+        latestBalanceMap.set(row.branch_id, row);
+      }
+    }
+
+    const summaries: BranchFinanceSummary[] = (branches as BranchRow[]).map(
+      (branch) => {
+        const balance = latestBalanceMap.get(branch.id);
+        const branchTx = (todayTxResult.data ?? []).filter(
+          (t: any) => t.branch_id === branch.id,
+        );
+        const branchFundReqs = (fundReqResult.data ?? []).filter(
+          (f: any) => f.branch_id === branch.id,
+        );
+
+        const breakdown = {
+          pawnOut: 0,
+          buyBackIn: 0,
+          renewalIn: 0,
+          saleIn: 0,
+          fundTransferIn: 0,
+          fundTransferOut: 0,
+          startBalance: 0,
+          other: 0,
+        };
+
+        let todayCashIn = 0;
+        let todayCashOut = 0;
+
+        for (const tx of branchTx) {
+          const ci = this.toMoney(tx.cash_in);
+          const co = this.toMoney(tx.cash_out);
+          todayCashIn += ci;
+          todayCashOut += co;
+
+          const type = this.classifyTransaction(tx as TransactionRow);
+          switch (type) {
+            case 'pawn':
+              breakdown.pawnOut += co;
+              break;
+            case 'buy_back':
+              breakdown.buyBackIn += ci;
+              break;
+            case 'renewal':
+              breakdown.renewalIn += ci;
+              break;
+            case 'sale':
+              breakdown.saleIn += ci;
+              break;
+            case 'fund_transfer_in':
+              breakdown.fundTransferIn += ci;
+              break;
+            case 'fund_transfer_out':
+              breakdown.fundTransferOut += co;
+              break;
+            case 'start':
+              breakdown.startBalance += ci;
+              break;
+            default:
+              breakdown.other += ci - co;
+          }
+        }
+
+        const fundReqSummary = { pending: 0, approved: 0, transferred: 0 };
+        for (const fr of branchFundReqs) {
+          if (fr.status === 'pending') fundReqSummary.pending++;
+          else if (fr.status === 'approved') fundReqSummary.approved++;
+          else if (fr.status === 'transferred') fundReqSummary.transferred++;
+        }
+
+        return {
+          branchId: branch.id,
+          branchName: branch.name,
+          branchCode: branch.branch_code,
+          status: branch.status,
+          currentBalance: this.toMoney(balance?.ending_balance),
+          startingBalance: this.toMoney(balance?.starting_balance),
+          todayCashIn: Number(todayCashIn.toFixed(2)),
+          todayCashOut: Number(todayCashOut.toFixed(2)),
+          breakdown: {
+            pawnOut: Number(breakdown.pawnOut.toFixed(2)),
+            buyBackIn: Number(breakdown.buyBackIn.toFixed(2)),
+            renewalIn: Number(breakdown.renewalIn.toFixed(2)),
+            saleIn: Number(breakdown.saleIn.toFixed(2)),
+            fundTransferIn: Number(breakdown.fundTransferIn.toFixed(2)),
+            fundTransferOut: Number(breakdown.fundTransferOut.toFixed(2)),
+            startBalance: Number(breakdown.startBalance.toFixed(2)),
+            other: Number(breakdown.other.toFixed(2)),
+          },
+          fundRequests: fundReqSummary,
+        };
+      },
+    );
+
+    return summaries;
+  }
+
+  async getLedger(
+    user: UserWithBranch,
+    query: {
+      branch?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      type?: string;
+      page?: number;
+      limit?: number;
+    },
+  ): Promise<{ entries: LedgerEntry[]; total: number }> {
+    const client = this.supabaseService.getClient();
+
+    const branchId =
+      user.role === Role.SUPER_ADMIN
+        ? effectiveBranchIdForQuery(user, query.branch)
+        : requireUserBranchId(user);
+
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query.limit ?? 50));
+    const from = (page - 1) * limit;
+
+    let dbQuery = client
+      .from('transactions')
+      .select('*', { count: 'exact' })
+      .order('transaction_date', { ascending: false })
+      .order('transaction_time', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (branchId) {
+      dbQuery = dbQuery.eq('branch_id', branchId);
+    }
+    if (query.dateFrom) {
+      dbQuery = dbQuery.gte('transaction_date', query.dateFrom);
+    }
+    if (query.dateTo) {
+      dbQuery = dbQuery.lte('transaction_date', query.dateTo);
+    }
+
+    dbQuery = dbQuery.range(from, from + limit - 1);
+
+    const { data, error, count } = await dbQuery;
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    let entries = (data ?? []).map((row: any) =>
+      this.mapToLedgerEntry(row as TransactionRow),
+    );
+
+    if (query.type) {
+      const filterTypes = query.type.split(',').map((t) => t.trim());
+      entries = entries.filter((e) => filterTypes.includes(e.type));
+    }
+
+    return {
+      entries,
+      total: count ?? entries.length,
+    };
+  }
+}

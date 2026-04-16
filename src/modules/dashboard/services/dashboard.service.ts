@@ -90,6 +90,7 @@ export class DashboardService {
 
         switch (row.status) {
           case 'pending':
+          case 'pending_source_confirmation':
             summary.pending += 1;
             break;
           case 'approved':
@@ -150,7 +151,9 @@ export class DashboardService {
       };
       transferredSummaryByBranch.set(row.branch_id, {
         totalAdded: Number(
-          (current.totalAdded + this.toMoney(row.amount_transferred)).toFixed(2),
+          (current.totalAdded + this.toMoney(row.amount_transferred)).toFixed(
+            2,
+          ),
         ),
         lastTransferredAt: current.lastTransferredAt ?? row.transferred_at,
       });
@@ -159,6 +162,10 @@ export class DashboardService {
     return params.branches.map((branch) => {
       const latestBalance = latestBalanceByBranch.get(branch.id);
       const transferred = transferredSummaryByBranch.get(branch.id);
+      const startingBalance = this.toMoney(latestBalance?.starting_balance);
+      const computedCurrentBalance = Number(
+        (startingBalance + (transferred?.totalAdded ?? 0)).toFixed(2),
+      );
 
       return {
         branchId: branch.id,
@@ -166,8 +173,10 @@ export class DashboardService {
         name: branch.name,
         location: branch.location ?? null,
         status: branch.status ?? 'Unknown',
-        startingBalance: this.toMoney(latestBalance?.starting_balance),
-        currentBalance: this.toMoney(latestBalance?.ending_balance),
+        startingBalance,
+        currentBalance: latestBalance
+          ? this.toMoney(latestBalance?.ending_balance)
+          : computedCurrentBalance,
         totalAdded: transferred?.totalAdded ?? 0,
         totalTransferred: 0,
         lastUpdated:
@@ -181,11 +190,11 @@ export class DashboardService {
 
   private mapDashboardFundRequest(row: DashboardFundRequestListRow) {
     const branch = Array.isArray(row.branches)
-      ? row.branches[0] ?? null
-      : row.branches ?? null;
+      ? (row.branches[0] ?? null)
+      : (row.branches ?? null);
     const requestedBy = Array.isArray(row.requested_by)
-      ? row.requested_by[0] ?? null
-      : row.requested_by ?? null;
+      ? (row.requested_by[0] ?? null)
+      : (row.requested_by ?? null);
 
     return {
       id: row.id,
@@ -277,7 +286,7 @@ export class DashboardService {
                 purpose,
                 created_at,
                 transferred_at,
-                branches(id, name, branch_code),
+                branches:branches!fund_requests_branch_id_fkey(id, name, branch_code),
                 requested_by:requested_by_user_id(id, full_name, email)
               `,
             )
@@ -296,7 +305,7 @@ export class DashboardService {
                 purpose,
                 created_at,
                 transferred_at,
-                branches(id, name, branch_code),
+                branches:branches!fund_requests_branch_id_fkey(id, name, branch_code),
                 requested_by:requested_by_user_id(id, full_name, email)
               `,
             )
@@ -340,9 +349,10 @@ export class DashboardService {
           },
           branchBalances: this.buildBranchFinanceSummaries({
             branches: (branchesResult.data ?? []) as BranchRecord[],
-            latestBalances: (latestBalancesResult.data ?? []) as DailyBalanceRow[],
-            transferredFunds:
-              (transferredFundsResult.data ?? []) as TransferredFundRow[],
+            latestBalances: (latestBalancesResult.data ??
+              []) as DailyBalanceRow[],
+            transferredFunds: (transferredFundsResult.data ??
+              []) as TransferredFundRow[],
           }),
           recentFundRequests: (recentRequestsResult.data ?? []).map((row) =>
             this.mapDashboardFundRequest(row),
@@ -359,17 +369,16 @@ export class DashboardService {
           fundRowsResult,
           latestBalanceResult,
           transferredFundsResult,
-        ] =
-          await Promise.all([
-            client
-              .from('branches')
-              .select('id, name, branch_code, location, status')
-              .eq('id', branchId)
-              .maybeSingle(),
-            client
-              .from('fund_requests')
-              .select(
-                `
+        ] = await Promise.all([
+          client
+            .from('branches')
+            .select('id, name, branch_code, location, status')
+            .eq('id', branchId)
+            .maybeSingle(),
+          client
+            .from('fund_requests')
+            .select(
+              `
                   id,
                   request_no,
                   status,
@@ -379,25 +388,25 @@ export class DashboardService {
                   purpose,
                   created_at,
                   transferred_at,
-                  branches(id, name, branch_code),
+                  branches:branches!fund_requests_branch_id_fkey(id, name, branch_code),
                   requested_by:requested_by_user_id(id, full_name, email)
                 `,
-              )
-              .eq('branch_id', branchId)
-              .order('created_at', { ascending: false }),
-            client
-              .from('daily_balances')
-              .select('ending_balance, record_date')
-              .eq('branch_id', branchId)
-              .order('record_date', { ascending: false })
-              .limit(1)
-              .maybeSingle(),
-            client
-              .from('fund_requests')
-              .select('branch_id, amount_transferred, transferred_at')
-              .eq('branch_id', branchId)
-              .eq('status', 'transferred'),
-          ]);
+            )
+            .eq('branch_id', branchId)
+            .order('created_at', { ascending: false }),
+          client
+            .from('daily_balances')
+            .select('ending_balance, record_date')
+            .eq('branch_id', branchId)
+            .order('record_date', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from('fund_requests')
+            .select('branch_id, amount_transferred, transferred_at')
+            .eq('branch_id', branchId)
+            .eq('status', 'transferred'),
+        ]);
 
         const errors = [
           branchResult.error,
@@ -413,14 +422,17 @@ export class DashboardService {
         return {
           view: 'admin',
           branch: branchResult.data,
-          branchFinance: this.buildBranchFinanceSummaries({
-            branches: branchResult.data ? [branchResult.data as BranchRecord] : [],
-            latestBalances: latestBalanceResult.data
-              ? [latestBalanceResult.data as DailyBalanceRow]
-              : [],
-            transferredFunds:
-              (transferredFundsResult.data ?? []) as TransferredFundRow[],
-          })[0] ?? null,
+          branchFinance:
+            this.buildBranchFinanceSummaries({
+              branches: branchResult.data
+                ? [branchResult.data as BranchRecord]
+                : [],
+              latestBalances: latestBalanceResult.data
+                ? [latestBalanceResult.data as DailyBalanceRow]
+                : [],
+              transferredFunds: (transferredFundsResult.data ??
+                []) as TransferredFundRow[],
+            })[0] ?? null,
           currentBalance: this.toMoney(
             latestBalanceResult.data?.ending_balance,
           ),
@@ -433,7 +445,86 @@ export class DashboardService {
         };
       }
       case Role.EMPLOYEE:
-        return { view: 'employee', data: 'Own branch transactions and items' };
+        const employeeBranchId = requireUserBranchId(user);
+        const [
+          employeeBranchResult,
+          employeeFundRowsResult,
+          employeeLatestBalanceResult,
+          employeeTransferredFundsResult,
+        ] = await Promise.all([
+          client
+            .from('branches')
+            .select('id, name, branch_code, location, status')
+            .eq('id', employeeBranchId)
+            .maybeSingle(),
+          client
+            .from('fund_requests')
+            .select(
+              `
+                id,
+                request_no,
+                status,
+                amount_requested,
+                approved_amount,
+                amount_transferred,
+                purpose,
+                created_at,
+                transferred_at,
+                branches:branches!fund_requests_branch_id_fkey(id, name, branch_code),
+                requested_by:requested_by_user_id(id, full_name, email)
+              `,
+            )
+            .eq('branch_id', employeeBranchId)
+            .order('created_at', { ascending: false }),
+          client
+            .from('daily_balances')
+            .select('ending_balance, record_date, starting_balance')
+            .eq('branch_id', employeeBranchId)
+            .order('record_date', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from('fund_requests')
+            .select('branch_id, amount_transferred, transferred_at')
+            .eq('branch_id', employeeBranchId)
+            .eq('status', 'transferred'),
+        ]);
+
+        const employeeErrors = [
+          employeeBranchResult.error,
+          employeeFundRowsResult.error,
+          employeeLatestBalanceResult.error,
+          employeeTransferredFundsResult.error,
+        ].filter(Boolean);
+
+        if (employeeErrors.length > 0) {
+          throw new InternalServerErrorException(employeeErrors[0]?.message);
+        }
+
+        return {
+          view: 'employee',
+          branch: employeeBranchResult.data,
+          branchFinance:
+            this.buildBranchFinanceSummaries({
+              branches: employeeBranchResult.data
+                ? [employeeBranchResult.data as BranchRecord]
+                : [],
+              latestBalances: employeeLatestBalanceResult.data
+                ? [employeeLatestBalanceResult.data as DailyBalanceRow]
+                : [],
+              transferredFunds: (employeeTransferredFundsResult.data ??
+                []) as TransferredFundRow[],
+            })[0] ?? null,
+          currentBalance: this.toMoney(
+            employeeLatestBalanceResult.data?.ending_balance,
+          ),
+          fundRequests: {
+            summary: this.summarizeFundRequests(employeeFundRowsResult.data ?? []),
+            recent: (employeeFundRowsResult.data ?? [])
+              .slice(0, 8)
+              .map((row) => this.mapDashboardFundRequest(row)),
+          },
+        };
       default:
         return { view: 'guest', data: null };
     }

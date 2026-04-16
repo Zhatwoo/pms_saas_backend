@@ -8,28 +8,34 @@ import {
   Min,
 } from 'class-validator';
 
-export class TransferFundRequestDto {
+export class CreateDirectTransferDto {
+  @IsUUID()
+  toBranchId: string;
+
   @IsOptional()
+  @IsUUID()
+  fromBranchId?: string;
+
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
-  amount?: number;
+  amount: number;
 
   @IsOptional()
   @IsIn(['cash', 'bank_transfer', 'ewallet', 'check', 'other'])
   transferMode?: 'cash' | 'bank_transfer' | 'ewallet' | 'check' | 'other';
 
   @IsOptional()
-  @IsUUID()
-  sourceBranchId?: string;
+  @IsString()
+  purpose?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 
   @IsOptional()
   @IsString()
   transferReference?: string;
-
-  @IsOptional()
-  @IsString()
-  transferNotes?: string;
 
   @IsOptional()
   @IsUUID()
