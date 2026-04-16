@@ -22,6 +22,10 @@ export class CreateDirectTransferDto {
   amount: number;
 
   @IsOptional()
+  @IsIn(['cash', 'bank_transfer', 'ewallet', 'check', 'other'])
+  transferMode?: 'cash' | 'bank_transfer' | 'ewallet' | 'check' | 'other';
+
+  @IsOptional()
   @IsString()
   purpose?: string;
 

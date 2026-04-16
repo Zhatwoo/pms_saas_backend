@@ -16,6 +16,7 @@ import { CreateDirectTransferDto } from '../dto/create-direct-transfer.dto';
 import { CreateFundRequestDto } from '../dto/create-fund-request.dto';
 import { ListFundRequestsDto } from '../dto/list-fund-requests.dto';
 import { ReviewFundRequestDto } from '../dto/review-fund-request.dto';
+import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.dto';
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
 import { FundRequestsService } from '../services/fund-requests.service';
 
@@ -77,6 +78,16 @@ export class FundRequestsController {
     @Body() transferDto: TransferFundRequestDto,
   ) {
     return this.fundRequestsService.transfer(req.user, id, transferDto);
+  }
+
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Patch(':id/source-confirm')
+  sourceConfirm(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: SourceConfirmFundRequestDto,
+  ) {
+    return this.fundRequestsService.sourceConfirm(req.user, id, dto);
   }
 
   @Roles(Role.ADMIN)
