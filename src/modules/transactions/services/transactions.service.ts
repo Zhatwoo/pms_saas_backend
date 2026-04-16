@@ -6,6 +6,7 @@ import {
   effectiveBranchIdForQuery,
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
+import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
 import { Role } from '../../../common/enums';
 
 @Injectable()
@@ -32,27 +33,9 @@ export class TransactionsService {
 
     if (error) throw new InternalServerErrorException(error.message);
 
-    // 2. Adjust daily balance real time
     if (branch_id && (cash_in || cash_out)) {
-      const today = new Date().toISOString().split('T')[0];
-
-      const { data: balanceData } = await client
-        .from('daily_balances')
-        .select('ending_balance')
-        .eq('branch_id', branch_id)
-        .eq('record_date', today)
-        .single();
-
-      if (balanceData) {
-        const netChange = parseFloat(cash_in || 0) - parseFloat(cash_out || 0);
-        await client
-          .from('daily_balances')
-          .update({
-            ending_balance: parseFloat(balanceData.ending_balance) + netChange,
-          })
-          .eq('branch_id', branch_id)
-          .eq('record_date', today);
-      }
+      const netChange = parseFloat(cash_in || 0) - parseFloat(cash_out || 0);
+      await adjustDailyBalance(client, branch_id, netChange);
     }
 
     return data;
