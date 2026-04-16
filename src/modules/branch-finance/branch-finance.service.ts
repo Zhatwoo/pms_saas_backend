@@ -56,6 +56,7 @@ export interface LedgerEntry {
   time: string | null;
   type: LedgerEntryType;
   description: string;
+  itemName: string | null;
   cashIn: number;
   cashOut: number;
   branchId: string;
@@ -174,6 +175,13 @@ export class BranchFinanceService {
     return parts.join(' ');
   }
 
+  private getItemName(row: TransactionRow): string | null {
+    if (!row.unit) return null;
+    const lower = row.unit.toLowerCase().trim();
+    if (lower === 'fund_transfer' || lower === 'fund_transfer_out') return null;
+    return row.unit;
+  }
+
   private mapToLedgerEntry(row: TransactionRow): LedgerEntry {
     const type = this.classifyTransaction(row);
     return {
@@ -182,6 +190,7 @@ export class BranchFinanceService {
       time: row.transaction_time ?? null,
       type,
       description: this.buildDescription(row, type),
+      itemName: this.getItemName(row),
       cashIn: this.toMoney(row.cash_in),
       cashOut: this.toMoney(row.cash_out),
       branchId: row.branch_id,
