@@ -24,6 +24,7 @@ import {
   FundRequestReviewDecision,
   ReviewFundRequestDto,
 } from '../dto/review-fund-request.dto';
+import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.dto';
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
 
 interface BranchRow {
@@ -60,9 +61,15 @@ interface FundRequestRow {
   transferred_at: string | null;
   transfer_reference: string | null;
   transfer_notes: string | null;
+  transfer_mode: string | null;
   flow_type: string | null;
   receiver_user_id: string | null;
   source_branch_id: string | null;
+  source_confirmed_by_user_id: string | null;
+  source_confirmed_at: string | null;
+  source_confirmation_notes: string | null;
+  source_confirmed_amount: number | string | null;
+  source_confirmation_proof_url: string | null;
   receiver_role: string | null;
   confirmed_received_amount: number | string | null;
   confirmation_note: string | null;
@@ -70,13 +77,21 @@ interface FundRequestRow {
   confirmed_by_user_id: string | null;
   confirmed_at: string | null;
   confirmation_notes: string | null;
+  confirmation_proof_url: string | null;
+  destination_confirmed_by_user_id: string | null;
+  destination_confirmed_at: string | null;
+  destination_confirmation_notes: string | null;
+  destination_received_amount: number | string | null;
+  destination_confirmation_proof_url: string | null;
   related_transaction_id: string | null;
   created_at: string;
   updated_at: string;
   branches?: BranchRow | BranchRow[] | null;
+  source_branch?: BranchRow | BranchRow[] | null;
   requested_by?: UserSummaryRow | UserSummaryRow[] | null;
   reviewed_by?: UserSummaryRow | UserSummaryRow[] | null;
   transferred_by?: UserSummaryRow | UserSummaryRow[] | null;
+  source_confirmed_by?: UserSummaryRow | UserSummaryRow[] | null;
   confirmed_by?: UserSummaryRow | UserSummaryRow[] | null;
 }
 
@@ -98,23 +113,37 @@ const FUND_REQUEST_SELECT = `
   transferred_at,
   transfer_reference,
   transfer_notes,
+  transfer_mode,
   flow_type,
   receiver_user_id,
   source_branch_id,
+  source_confirmed_by_user_id,
+  source_confirmed_at,
+  source_confirmation_notes,
+  source_confirmed_amount,
+  source_confirmation_proof_url,
   receiver_role,
   confirmed_received_amount,
   confirmation_note,
   transfer_reference_no,
+  confirmation_proof_url,
   confirmed_at,
   confirmation_notes,
+  destination_confirmed_by_user_id,
+  destination_confirmed_at,
+  destination_confirmation_notes,
+  destination_received_amount,
+  destination_confirmation_proof_url,
   related_transaction_id,
   created_at,
   updated_at,
   branches:branches!branch_id(id, name, branch_code, location),
+  source_branch:source_branch_id(id, name, branch_code, location),
   requested_by:requested_by_user_id(id, full_name, email),
   reviewed_by:reviewed_by_user_id(id, full_name, email),
   transferred_by:transferred_by_user_id(id, full_name, email),
-  confirmed_by_user_id
+  source_confirmed_by:source_confirmed_by_user_id(id, full_name, email),
+  confirmed_by:confirmed_by_user_id(id, full_name, email)
 `;
 
 @Injectable()
@@ -178,6 +207,23 @@ export class FundRequestsService {
       !!row.transferred_at &&
       this.toMoneyOrNull(row.amount_transferred) != null &&
       !row.confirmed_at
+    );
+  }
+
+  private isPendingSourceConfirmationRow(
+    row: Pick<
+      FundRequestRow,
+      'status' | 'source_branch_id' | 'transferred_at' | 'source_confirmed_at'
+    >,
+  ): boolean {
+    if (row.status === 'pending_source_confirmation') {
+      return !!row.source_branch_id;
+    }
+    return (
+      row.status === 'approved' &&
+      !!row.source_branch_id &&
+      !!row.transferred_at &&
+      !row.source_confirmed_at
     );
   }
 
@@ -321,6 +367,9 @@ export class FundRequestsService {
     const branch = Array.isArray(row.branches)
       ? (row.branches[0] ?? null)
       : (row.branches ?? null);
+    const sourceBranch = Array.isArray(row.source_branch)
+      ? (row.source_branch[0] ?? null)
+      : (row.source_branch ?? null);
     const requestedBy = Array.isArray(row.requested_by)
       ? (row.requested_by[0] ?? null)
       : (row.requested_by ?? null);
@@ -330,6 +379,9 @@ export class FundRequestsService {
     const transferredBy = Array.isArray(row.transferred_by)
       ? (row.transferred_by[0] ?? null)
       : (row.transferred_by ?? null);
+    const sourceConfirmedBy = Array.isArray(row.source_confirmed_by)
+      ? (row.source_confirmed_by[0] ?? null)
+      : (row.source_confirmed_by ?? null);
     const confirmedBy = Array.isArray(row.confirmed_by)
       ? (row.confirmed_by[0] ?? null)
       : (row.confirmed_by ?? null);
@@ -342,9 +394,11 @@ export class FundRequestsService {
       amountRequested: this.toMoneyOrNull(row.amount_requested) ?? 0,
       purpose: row.purpose,
       notes: row.notes,
-      status: this.isPendingConfirmationRow(row)
-        ? 'pending_confirmation'
-        : row.status,
+      status: this.isPendingSourceConfirmationRow(row)
+        ? 'pending_source_confirmation'
+        : this.isPendingConfirmationRow(row)
+          ? 'pending_confirmation'
+          : row.status,
       approvedAmount: this.toMoneyOrNull(row.approved_amount),
       reviewedAt: row.reviewed_at,
       reviewNotes: row.review_notes,
@@ -352,17 +406,51 @@ export class FundRequestsService {
       transferredAt: row.transferred_at,
       transferReference: row.transfer_reference,
       transferNotes: row.transfer_notes,
+      transferMode: row.transfer_mode,
       flowType: row.flow_type ?? 'request_based',
       receiverUserId: row.receiver_user_id,
       sourceBranchId: row.source_branch_id,
+      sourceBranch: sourceBranch
+        ? {
+            id: sourceBranch.id,
+            name: sourceBranch.name,
+            branchCode: sourceBranch.branch_code,
+            location: sourceBranch.location,
+          }
+        : null,
+      sourceConfirmedBy: sourceConfirmedBy
+        ? {
+            id: sourceConfirmedBy.id,
+            fullName: sourceConfirmedBy.full_name,
+            email: sourceConfirmedBy.email,
+          }
+        : null,
+      sourceConfirmedAt: row.source_confirmed_at,
+      sourceConfirmationNotes: row.source_confirmation_notes,
+      sourceConfirmedAmount: this.toMoneyOrNull(row.source_confirmed_amount),
+      sourceConfirmationProofUrl: row.source_confirmation_proof_url,
       receiverRole: row.receiver_role,
       confirmedReceivedAmount: this.toMoneyOrNull(
         row.confirmed_received_amount,
       ),
       confirmationNote: row.confirmation_note,
       transferReferenceNo: row.transfer_reference_no,
+      confirmationProofUrl: row.confirmation_proof_url,
       confirmedAt: row.confirmed_at,
       confirmationNotes: row.confirmation_notes,
+      destinationConfirmedBy: confirmedBy
+        ? {
+            id: confirmedBy.id,
+            fullName: confirmedBy.full_name,
+            email: confirmedBy.email,
+          }
+        : null,
+      destinationConfirmedAt: row.destination_confirmed_at,
+      destinationConfirmationNotes: row.destination_confirmation_notes,
+      destinationReceivedAmount: this.toMoneyOrNull(
+        row.destination_received_amount,
+      ),
+      destinationConfirmationProofUrl: row.destination_confirmation_proof_url,
       relatedTransactionId: row.related_transaction_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -422,6 +510,8 @@ export class FundRequestsService {
     amount: number;
     transferReference: string | null;
     transferNotes: string | null;
+    direction: 'in' | 'out';
+    counterpartBranchName?: string | null;
   }): Promise<{ id: string }> {
     const now = new Date();
     const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
@@ -430,12 +520,23 @@ export class FundRequestsService {
       'transaction_no',
       prefix,
     );
-    const detailsParts = [
-      `Fund transfer for ${params.request.request_no}`,
-      params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
-      params.transferReference ? `Reference: ${params.transferReference}` : '',
-      params.transferNotes ? `Notes: ${params.transferNotes}` : '',
-    ].filter(Boolean);
+    const isInbound = params.direction === 'in';
+    const detailsParts = isInbound
+      ? [
+          `Fund transfer for ${params.request.request_no}`,
+          params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
+          params.transferReference ? `Reference: ${params.transferReference}` : '',
+          params.transferNotes ? `Notes: ${params.transferNotes}` : '',
+        ].filter(Boolean)
+      : [
+          `Transfer out for ${params.request.request_no}`,
+          params.counterpartBranchName
+            ? `Destination: ${params.counterpartBranchName}`
+            : '',
+          params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
+          params.transferReference ? `Reference: ${params.transferReference}` : '',
+          params.transferNotes ? `Notes: ${params.transferNotes}` : '',
+        ].filter(Boolean);
 
     const { data, error } = await this.supabaseService
       .getClient()
@@ -444,13 +545,13 @@ export class FundRequestsService {
         transaction_no: transactionNo,
         branch_id: params.branch.id,
         branch: params.branch.name,
-        purpose: 'Cash Transfer',
+        purpose: 'Fund Transfer',
         transaction_date: this.toDatePart(now),
         transaction_time: this.toTimePart(now),
-        cash_in: params.amount,
-        cash_out: 0,
+        cash_in: isInbound ? params.amount : 0,
+        cash_out: isInbound ? 0 : params.amount,
         return_amount: 0,
-        unit: 'fund_transfer',
+        unit: isInbound ? 'fund_transfer' : 'fund_transfer_out',
         unit_code: params.request.request_no,
         pawn_amount: 0,
         storage_fee: 0,
@@ -493,7 +594,7 @@ export class FundRequestsService {
           transaction_no: transactionNo,
           branch_id: params.sourceBranch.id,
           branch: params.sourceBranch.name,
-          purpose: 'Cash Transfer',
+          purpose: 'Fund Transfer',
           transaction_date: this.toDatePart(now),
           transaction_time: this.toTimePart(now),
           cash_in: 0,
@@ -520,6 +621,7 @@ export class FundRequestsService {
       amount: params.amount,
       transferReference: params.transferReference,
       transferNotes: params.transferNotes,
+      direction: 'in',
     });
 
     return {
@@ -680,6 +782,7 @@ export class FundRequestsService {
       `DF-${this.toDatePart(now).replace(/-/g, '')}-`,
     );
     const amount = this.normalizeMoney(dto.amount);
+    const transferMode = dto.transferMode ?? 'cash';
     if (sourceBranch) {
       const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
       if (sourceBalance < amount) {
@@ -703,7 +806,7 @@ export class FundRequestsService {
         receiver_user_id: receiver.receiverUserId,
         source_branch_id: sourceBranch?.id ?? null,
         receiver_role: receiver.receiverRole,
-        status: 'pending_confirmation',
+        status: sourceBranch ? 'pending_source_confirmation' : 'pending_confirmation',
         approved_amount: amount,
         reviewed_by_user_id: user.id,
         reviewed_at: now.toISOString(),
@@ -712,6 +815,7 @@ export class FundRequestsService {
         transferred_at: now.toISOString(),
         transfer_reference: this.compactText(dto.transferReference),
         transfer_notes: this.compactText(dto.notes),
+        transfer_mode: transferMode,
         transfer_reference_no: this.compactText(dto.transferReference),
       })
       .select(FUND_REQUEST_SELECT)
@@ -746,6 +850,7 @@ export class FundRequestsService {
           transferred_at: now.toISOString(),
           transfer_reference: this.compactText(dto.transferReference),
           transfer_notes: this.compactText(dto.notes),
+          transfer_mode: transferMode,
           transfer_reference_no: this.compactText(dto.transferReference),
         })
         .select(FUND_REQUEST_SELECT)
@@ -768,8 +873,10 @@ export class FundRequestsService {
         requestNo: mapped.requestNo,
         flowType: mapped.flowType,
         amountTransferred: mapped.amountTransferred,
+        transferMode,
         sourceBranchId: sourceBranch?.id ?? null,
         destinationBranchId: destinationBranch.id,
+        awaitingSourceConfirmation: !!sourceBranch,
       },
     });
     return mapped;
@@ -792,7 +899,15 @@ export class FundRequestsService {
         : requireUserBranchId(user);
 
     if (branchId) {
-      query = query.eq('branch_id', branchId);
+      if (user.role === Role.SUPER_ADMIN) {
+        query = query.or(
+          `branch_id.eq.${branchId},source_branch_id.eq.${branchId}`,
+        );
+      } else {
+        query = query.or(
+          `branch_id.eq.${branchId},source_branch_id.eq.${branchId}`,
+        );
+      }
     } else if (matchingBranchIds) {
       if (matchingBranchIds.length === 0) {
         return [];
@@ -824,7 +939,15 @@ export class FundRequestsService {
 
   async findOne(user: AuthenticatedUserProfile, id: string) {
     const fundRequest = await this.getFundRequestById(id);
-    assertResourceBranch(user, fundRequest.branch_id);
+    if (user.role !== Role.SUPER_ADMIN) {
+      const branchId = requireUserBranchId(user);
+      if (
+        fundRequest.branch_id !== branchId &&
+        fundRequest.source_branch_id !== branchId
+      ) {
+        throw new ForbiddenException('You cannot access data from another branch');
+      }
+    }
     return this.mapFundRequest(fundRequest);
   }
 
@@ -926,11 +1049,26 @@ export class FundRequestsService {
       );
     }
 
-    const branch = Array.isArray(existing.branches)
+    const destinationBranch = Array.isArray(existing.branches)
       ? (existing.branches[0] ?? null)
       : (existing.branches ?? null);
-    const resolvedBranch =
-      branch ?? (await this.getBranchById(existing.branch_id));
+    const resolvedDestinationBranch =
+      destinationBranch ?? (await this.getBranchById(existing.branch_id));
+    const sourceBranch = dto.sourceBranchId
+      ? await this.getBranchById(dto.sourceBranchId)
+      : existing.source_branch_id
+        ? await this.getBranchById(existing.source_branch_id)
+        : null;
+
+    if (
+      sourceBranch &&
+      sourceBranch.id === resolvedDestinationBranch.id
+    ) {
+      throw new BadRequestException(
+        'Source and destination branch cannot be the same',
+      );
+    }
+
     const fallbackAmount =
       this.toMoneyOrNull(existing.approved_amount) ??
       this.toMoneyOrNull(existing.amount_requested) ??
@@ -944,17 +1082,32 @@ export class FundRequestsService {
       );
     }
 
+    if (sourceBranch) {
+      const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+      if (sourceBalance < transferAmount) {
+        throw new BadRequestException(
+          `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
+        );
+      }
+    }
+
     const receiver = await this.resolveReceiver({
       branchId: existing.branch_id,
       receiverRole: dto.receiverRole,
       receiverUserId: dto.receiverUserId,
     });
 
+    const transferMode = dto.transferMode ?? existing.transfer_mode ?? 'cash';
+    const now = new Date();
+    const status = sourceBranch
+      ? 'pending_source_confirmation'
+      : 'pending_confirmation';
+
     const { data, error } = await this.supabaseService
       .getClient()
       .from('fund_requests')
       .update({
-        status: 'pending_confirmation',
+        status,
         approved_amount:
           this.toMoneyOrNull(existing.approved_amount) ?? transferAmount,
         reviewed_by_user_id: existing.reviewed_by_user_id ?? user.id,
@@ -962,10 +1115,12 @@ export class FundRequestsService {
         review_notes: this.compactText(existing.review_notes),
         amount_transferred: transferAmount,
         transferred_by_user_id: user.id,
-        transferred_at: new Date().toISOString(),
+        transferred_at: now.toISOString(),
         transfer_reference: this.compactText(dto.transferReference),
         transfer_notes: this.compactText(dto.transferNotes),
         transfer_reference_no: this.compactText(dto.transferReference),
+        transfer_mode: transferMode,
+        source_branch_id: sourceBranch?.id ?? existing.source_branch_id,
         receiver_user_id: receiver.receiverUserId,
         receiver_role: receiver.receiverRole,
       })
@@ -990,10 +1145,12 @@ export class FundRequestsService {
           review_notes: this.compactText(existing.review_notes),
           amount_transferred: transferAmount,
           transferred_by_user_id: user.id,
-          transferred_at: new Date().toISOString(),
+          transferred_at: now.toISOString(),
           transfer_reference: this.compactText(dto.transferReference),
           transfer_notes: this.compactText(dto.transferNotes),
           transfer_reference_no: this.compactText(dto.transferReference),
+          transfer_mode: transferMode,
+          source_branch_id: sourceBranch?.id ?? existing.source_branch_id,
           receiver_user_id: receiver.receiverUserId,
           receiver_role: receiver.receiverRole,
         })
@@ -1018,6 +1175,120 @@ export class FundRequestsService {
         requestNo: mapped.requestNo,
         amountTransferred: mapped.amountTransferred,
         receiverRole: mapped.receiverRole,
+        transferMode,
+        sourceBranchId: sourceBranch?.id ?? null,
+        destinationBranchId: resolvedDestinationBranch.id,
+        awaitingSourceConfirmation: !!sourceBranch,
+      },
+    });
+    return mapped;
+  }
+
+  async sourceConfirm(
+    user: AuthenticatedUserProfile,
+    id: string,
+    dto: SourceConfirmFundRequestDto,
+  ) {
+    if (user.role !== Role.ADMIN && user.role !== Role.EMPLOYEE) {
+      throw new ForbiddenException(
+        'Only branch admins or employees can confirm source deductions',
+      );
+    }
+
+    const existing = await this.getFundRequestById(id);
+    if (!existing.source_branch_id) {
+      throw new BadRequestException(
+        'This transfer is not routed through another branch',
+      );
+    }
+
+    assertResourceBranch(user, existing.source_branch_id);
+
+    if (!this.isPendingSourceConfirmationRow(existing)) {
+      throw new BadRequestException(
+        'Only pending source confirmation requests can be confirmed',
+      );
+    }
+
+    const sourceBranch = await this.getBranchById(existing.source_branch_id);
+    const destinationBranch = await this.getBranchById(existing.branch_id);
+    const sentAmount = this.normalizeMoney(
+      dto.sentAmount ??
+        this.toMoneyOrNull(existing.amount_transferred) ??
+        this.toMoneyOrNull(existing.approved_amount) ??
+        this.toMoneyOrNull(existing.amount_requested) ??
+        0,
+    );
+
+    const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+    if (sourceBalance < sentAmount) {
+      throw new BadRequestException(
+        `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
+      );
+    }
+
+    const transferReference =
+      this.compactText(existing.transfer_reference_no) ??
+      this.compactText(existing.transfer_reference);
+
+    let outboundTransactionId: string | null = null;
+    try {
+      const outboundTransaction = await this.createTransferTransaction({
+        branch: sourceBranch,
+        request: existing,
+        amount: sentAmount,
+        transferReference,
+        transferNotes:
+          this.compactText(dto.confirmationNotes) ??
+          this.compactText(existing.transfer_notes),
+        direction: 'out',
+        counterpartBranchName: destinationBranch.name,
+      });
+      outboundTransactionId = outboundTransaction.id;
+      await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err ?? '');
+      if (this.isTransactionsPurposeConstraintError(errorMessage)) {
+        await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+      } else {
+        throw err;
+      }
+    }
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('fund_requests')
+      .update({
+        status: 'pending_confirmation',
+        amount_transferred: sentAmount,
+        source_confirmed_by_user_id: user.id,
+        source_confirmed_at: new Date().toISOString(),
+        source_confirmation_notes: this.compactText(dto.confirmationNotes),
+        source_confirmed_amount: sentAmount,
+        source_confirmation_proof_url: this.compactText(dto.proofUrl),
+        transfer_mode: existing.transfer_mode,
+        related_transaction_id: outboundTransactionId,
+      })
+      .eq('id', id)
+      .select(FUND_REQUEST_SELECT)
+      .single<FundRequestRow>();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const mapped = this.mapFundRequest(data);
+    await this.writeFundLog({
+      user,
+      branchId: sourceBranch.id,
+      action: 'FUND_TRANSFER_SOURCE_CONFIRMED',
+      details: {
+        requestNo: mapped.requestNo,
+        sourceBranchId: sourceBranch.id,
+        destinationBranchId: destinationBranch.id,
+        sentAmount,
+        transferMode: existing.transfer_mode,
+        relatedTransactionId: outboundTransactionId,
       },
     });
     return mapped;
@@ -1057,11 +1328,11 @@ export class FundRequestsService {
       );
     }
 
-    const branch = Array.isArray(existing.branches)
+    const destinationBranch = Array.isArray(existing.branches)
       ? (existing.branches[0] ?? null)
       : (existing.branches ?? null);
-    const resolvedBranch =
-      branch ?? (await this.getBranchById(existing.branch_id));
+    const resolvedDestinationBranch =
+      destinationBranch ?? (await this.getBranchById(existing.branch_id));
     const transferAmount =
       this.toMoneyOrNull(existing.amount_transferred) ??
       this.toMoneyOrNull(existing.approved_amount) ??
@@ -1071,13 +1342,9 @@ export class FundRequestsService {
     );
 
     let inboundTransactionId: string | null = null;
-    let outboundTransactionId: string | null = null;
-    const sourceBranch = existing.source_branch_id
-      ? await this.getBranchById(existing.source_branch_id)
-      : null;
     try {
-      const transferTx = await this.createTransferTransactions({
-        destinationBranch: resolvedBranch,
+      const inboundTransaction = await this.createTransferTransaction({
+        branch: resolvedDestinationBranch,
         request: existing,
         amount: confirmedAmount,
         transferReference:
@@ -1086,14 +1353,10 @@ export class FundRequestsService {
         transferNotes:
           this.compactText(dto.confirmationNotes) ??
           this.compactText(existing.transfer_notes),
-        sourceBranch,
+        direction: 'in',
       });
-      inboundTransactionId = transferTx.inboundTransactionId;
-      outboundTransactionId = transferTx.outboundTransactionId;
+      inboundTransactionId = inboundTransaction.id;
       await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
-      if (sourceBranch) {
-        await this.adjustDailyBalance(sourceBranch.id, -confirmedAmount);
-      }
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
@@ -1101,24 +1364,7 @@ export class FundRequestsService {
         // Allow confirmation to proceed even if legacy transactions purpose
         // constraint rejects fund-transfer journal entries.
         await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
-        if (sourceBranch) {
-          await this.adjustDailyBalance(sourceBranch.id, -confirmedAmount);
-        }
       } else {
-        if (inboundTransactionId) {
-          await this.supabaseService
-            .getClient()
-            .from('transactions')
-            .delete()
-            .eq('id', inboundTransactionId);
-        }
-        if (outboundTransactionId) {
-          await this.supabaseService
-            .getClient()
-            .from('transactions')
-            .delete()
-            .eq('id', outboundTransactionId);
-        }
         throw err;
       }
     }
@@ -1133,6 +1379,12 @@ export class FundRequestsService {
         confirmed_received_amount: confirmedAmount,
         confirmation_notes: this.compactText(dto.confirmationNotes),
         confirmation_note: this.compactText(dto.confirmationNotes),
+        confirmation_proof_url: this.compactText(dto.proofUrl),
+        destination_confirmed_by_user_id: user.id,
+        destination_confirmed_at: new Date().toISOString(),
+        destination_confirmation_notes: this.compactText(dto.confirmationNotes),
+        destination_received_amount: confirmedAmount,
+        destination_confirmation_proof_url: this.compactText(dto.proofUrl),
         related_transaction_id: inboundTransactionId,
       })
       .eq('id', id)
@@ -1152,8 +1404,9 @@ export class FundRequestsService {
         requestNo: mapped.requestNo,
         confirmedReceivedAmount: mapped.confirmedReceivedAmount,
         confirmedByRole: user.role,
-        relatedTransactionId: mapped.relatedTransactionId,
+        destinationBranchId: resolvedDestinationBranch.id,
         sourceBranchId: mapped.sourceBranchId,
+        confirmationProofUrl: mapped.confirmationProofUrl,
       },
     });
     await this.writeFundLog({
