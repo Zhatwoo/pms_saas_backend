@@ -41,7 +41,7 @@ export class TransactionsService {
     return data;
   }
 
-  async findAll(user: UserWithBranch, branchQuery?: string) {
+  async findAll(user: UserWithBranch, branchQuery?: string, date?: string) {
     const client = this.supabase.getClient();
     let query = client
       .from('transactions')
@@ -53,11 +53,22 @@ export class TransactionsService {
       query = query.eq('branch_id', scoped);
     }
 
+    // Default to today if no date provided, to satisfy "ngayon araw" request
+    const filterDate = date || new Date().toISOString().split('T')[0];
+    query = query.eq('transaction_date', filterDate);
+
     const { data: transactions, error } = await query;
     if (error) throw new InternalServerErrorException(error.message);
 
-    // Compute quick dashboard stats
-    return transactions;
+    // Compute stats for the requested date
+    const stats = {
+      pawnedToday: transactions.filter((t: any) => t.purpose === 'Pawn').length,
+      buyBack: transactions.filter((t: any) => t.purpose === 'Buy Back').length,
+      renewed: transactions.filter((t: any) => t.purpose === 'Renew').length,
+      soldItem: transactions.filter((t: any) => t.purpose === 'Sold Item').length,
+    };
+
+    return { transactions, stats };
   }
 
   async findOne(user: UserWithBranch, id: string) {
