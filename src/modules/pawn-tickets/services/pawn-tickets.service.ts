@@ -165,6 +165,58 @@ export class PawnTicketsService {
     };
   }
 
+  async generateNextUnitCode(user: AuthenticatedUserProfile) {
+    const client = this.supabase.getClient();
+    const branchId = requireUserBranchId(user);
+
+    // 1. Get branch code
+    const { data: branch, error: branchError } = await client
+      .from('branches')
+      .select('branch_code')
+      .eq('id', branchId)
+      .single();
+
+    if (branchError || !branch) {
+      throw new InternalServerErrorException(branchError?.message || 'Branch code not found');
+    }
+
+    // 2. Get the most recent items to find the highest sequence number
+    // We fetch the latest items for this branch to see what the last number used was.
+    const { data: items, error: itemsError } = await client
+      .from('pawned_items')
+      .select('item_id')
+      .eq('branch_id', branchId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (itemsError) {
+      throw new InternalServerErrorException(itemsError.message);
+    }
+
+    let maxNumber = 0;
+    
+    // Parse the item_id (unit_code) to find the numeric sequence part
+    // Format: [branch]-jclb-[number]
+    if (items && items.length > 0) {
+      items.forEach(item => {
+        const parts = item.item_id.split('-');
+        if (parts.length === 3) {
+          const numPart = parseInt(parts[2], 10);
+          if (!isNaN(numPart) && numPart > maxNumber) {
+            maxNumber = numPart;
+          }
+        }
+      });
+    }
+
+    const nextNumber = maxNumber + 1;
+    const formattedNumber = String(nextNumber).padStart(5, '0');
+    
+    return {
+      unitCode: `${branch.branch_code}-jclb-${formattedNumber}`
+    };
+  }
+
   private async uploadPhoto(
     base64: string,
     path: string,

@@ -45,7 +45,17 @@ export class TransactionsService {
     const client = this.supabase.getClient();
     let query = client
       .from('transactions')
-      .select('*')
+      .select(`
+        *,
+        pawned_item:pawned_items (
+          id,
+          customer:customers (
+            full_name,
+            address,
+            contact_number
+          )
+        )
+      `)
       .order('created_at', { ascending: false });
 
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
