@@ -17,6 +17,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
 import { FundRequestsModule } from './modules/fund-requests/fund-requests.module';
+import { BranchFinanceModule } from './modules/branch-finance/branch-finance.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
@@ -39,6 +40,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     InventoryModule,
     ActivityLogsModule,
     FundRequestsModule,
+    BranchFinanceModule,
   ],
   providers: [
     {

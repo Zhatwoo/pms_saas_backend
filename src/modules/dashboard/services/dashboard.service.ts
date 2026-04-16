@@ -150,7 +150,9 @@ export class DashboardService {
       };
       transferredSummaryByBranch.set(row.branch_id, {
         totalAdded: Number(
-          (current.totalAdded + this.toMoney(row.amount_transferred)).toFixed(2),
+          (current.totalAdded + this.toMoney(row.amount_transferred)).toFixed(
+            2,
+          ),
         ),
         lastTransferredAt: current.lastTransferredAt ?? row.transferred_at,
       });
@@ -181,11 +183,11 @@ export class DashboardService {
 
   private mapDashboardFundRequest(row: DashboardFundRequestListRow) {
     const branch = Array.isArray(row.branches)
-      ? row.branches[0] ?? null
-      : row.branches ?? null;
+      ? (row.branches[0] ?? null)
+      : (row.branches ?? null);
     const requestedBy = Array.isArray(row.requested_by)
-      ? row.requested_by[0] ?? null
-      : row.requested_by ?? null;
+      ? (row.requested_by[0] ?? null)
+      : (row.requested_by ?? null);
 
     return {
       id: row.id,
@@ -277,7 +279,7 @@ export class DashboardService {
                 purpose,
                 created_at,
                 transferred_at,
-                branches(id, name, branch_code),
+                branches:branches!fund_requests_branch_id_fkey(id, name, branch_code),
                 requested_by:requested_by_user_id(id, full_name, email)
               `,
             )
@@ -296,7 +298,7 @@ export class DashboardService {
                 purpose,
                 created_at,
                 transferred_at,
-                branches(id, name, branch_code),
+                branches:branches!fund_requests_branch_id_fkey(id, name, branch_code),
                 requested_by:requested_by_user_id(id, full_name, email)
               `,
             )
@@ -340,9 +342,10 @@ export class DashboardService {
           },
           branchBalances: this.buildBranchFinanceSummaries({
             branches: (branchesResult.data ?? []) as BranchRecord[],
-            latestBalances: (latestBalancesResult.data ?? []) as DailyBalanceRow[],
-            transferredFunds:
-              (transferredFundsResult.data ?? []) as TransferredFundRow[],
+            latestBalances: (latestBalancesResult.data ??
+              []) as DailyBalanceRow[],
+            transferredFunds: (transferredFundsResult.data ??
+              []) as TransferredFundRow[],
           }),
           recentFundRequests: (recentRequestsResult.data ?? []).map((row) =>
             this.mapDashboardFundRequest(row),
@@ -359,17 +362,16 @@ export class DashboardService {
           fundRowsResult,
           latestBalanceResult,
           transferredFundsResult,
-        ] =
-          await Promise.all([
-            client
-              .from('branches')
-              .select('id, name, branch_code, location, status')
-              .eq('id', branchId)
-              .maybeSingle(),
-            client
-              .from('fund_requests')
-              .select(
-                `
+        ] = await Promise.all([
+          client
+            .from('branches')
+            .select('id, name, branch_code, location, status')
+            .eq('id', branchId)
+            .maybeSingle(),
+          client
+            .from('fund_requests')
+            .select(
+              `
                   id,
                   request_no,
                   status,
@@ -379,25 +381,25 @@ export class DashboardService {
                   purpose,
                   created_at,
                   transferred_at,
-                  branches(id, name, branch_code),
+                  branches:branches!fund_requests_branch_id_fkey(id, name, branch_code),
                   requested_by:requested_by_user_id(id, full_name, email)
                 `,
-              )
-              .eq('branch_id', branchId)
-              .order('created_at', { ascending: false }),
-            client
-              .from('daily_balances')
-              .select('ending_balance, record_date')
-              .eq('branch_id', branchId)
-              .order('record_date', { ascending: false })
-              .limit(1)
-              .maybeSingle(),
-            client
-              .from('fund_requests')
-              .select('branch_id, amount_transferred, transferred_at')
-              .eq('branch_id', branchId)
-              .eq('status', 'transferred'),
-          ]);
+            )
+            .eq('branch_id', branchId)
+            .order('created_at', { ascending: false }),
+          client
+            .from('daily_balances')
+            .select('ending_balance, record_date')
+            .eq('branch_id', branchId)
+            .order('record_date', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from('fund_requests')
+            .select('branch_id, amount_transferred, transferred_at')
+            .eq('branch_id', branchId)
+            .eq('status', 'transferred'),
+        ]);
 
         const errors = [
           branchResult.error,
@@ -413,14 +415,17 @@ export class DashboardService {
         return {
           view: 'admin',
           branch: branchResult.data,
-          branchFinance: this.buildBranchFinanceSummaries({
-            branches: branchResult.data ? [branchResult.data as BranchRecord] : [],
-            latestBalances: latestBalanceResult.data
-              ? [latestBalanceResult.data as DailyBalanceRow]
-              : [],
-            transferredFunds:
-              (transferredFundsResult.data ?? []) as TransferredFundRow[],
-          })[0] ?? null,
+          branchFinance:
+            this.buildBranchFinanceSummaries({
+              branches: branchResult.data
+                ? [branchResult.data as BranchRecord]
+                : [],
+              latestBalances: latestBalanceResult.data
+                ? [latestBalanceResult.data as DailyBalanceRow]
+                : [],
+              transferredFunds: (transferredFundsResult.data ??
+                []) as TransferredFundRow[],
+            })[0] ?? null,
           currentBalance: this.toMoney(
             latestBalanceResult.data?.ending_balance,
           ),
@@ -432,8 +437,79 @@ export class DashboardService {
           },
         };
       }
-      case Role.EMPLOYEE:
-        return { view: 'employee', data: 'Own branch transactions and items' };
+      case Role.EMPLOYEE: {
+        const branchId = requireUserBranchId(user);
+        const today = new Date().toISOString().split('T')[0];
+        const [
+          branchResult,
+          latestBalanceResult,
+          todayTransactionsResult,
+          fundRowsResult,
+        ] = await Promise.all([
+          client
+            .from('branches')
+            .select('id, name, branch_code, location, status')
+            .eq('id', branchId)
+            .maybeSingle(),
+          client
+            .from('daily_balances')
+            .select('ending_balance, starting_balance, record_date')
+            .eq('branch_id', branchId)
+            .order('record_date', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          client
+            .from('transactions')
+            .select('id, purpose, cash_in, cash_out, unit, created_at')
+            .eq('branch_id', branchId)
+            .eq('transaction_date', today)
+            .order('created_at', { ascending: false })
+            .limit(20),
+          client
+            .from('fund_requests')
+            .select(
+              'status, amount_requested, approved_amount, amount_transferred',
+            )
+            .eq('branch_id', branchId),
+        ]);
+
+        const errors = [
+          branchResult.error,
+          latestBalanceResult.error,
+          todayTransactionsResult.error,
+          fundRowsResult.error,
+        ].filter(Boolean);
+
+        if (errors.length > 0) {
+          throw new InternalServerErrorException(errors[0]?.message);
+        }
+
+        const todayTx = todayTransactionsResult.data ?? [];
+        let todayCashIn = 0;
+        let todayCashOut = 0;
+        for (const tx of todayTx) {
+          todayCashIn += this.toMoney(tx.cash_in);
+          todayCashOut += this.toMoney(tx.cash_out);
+        }
+
+        return {
+          view: 'employee',
+          branch: branchResult.data,
+          currentBalance: this.toMoney(
+            latestBalanceResult.data?.ending_balance,
+          ),
+          startingBalance: this.toMoney(
+            latestBalanceResult.data?.starting_balance,
+          ),
+          todaySummary: {
+            totalTransactions: todayTx.length,
+            cashIn: Number(todayCashIn.toFixed(2)),
+            cashOut: Number(todayCashOut.toFixed(2)),
+            net: Number((todayCashIn - todayCashOut).toFixed(2)),
+          },
+          fundRequests: this.summarizeFundRequests(fundRowsResult.data ?? []),
+        };
+      }
       default:
         return { view: 'guest', data: null };
     }

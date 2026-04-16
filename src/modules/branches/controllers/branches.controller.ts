@@ -18,7 +18,7 @@ import { assertBranchRowAccess } from '../../../common/utils/branch-scope.util';
 
 @Controller('branches')
 export class BranchesController {
-  constructor(private readonly branchesService: BranchesService) { }
+  constructor(private readonly branchesService: BranchesService) {}
 
   @Roles(Role.SUPER_ADMIN)
   @Post()

@@ -8,18 +8,30 @@ import {
   Min,
 } from 'class-validator';
 
-export class CreateFundRequestDto {
+export class CreateDirectTransferDto {
+  @IsUUID()
+  toBranchId: string;
+
+  @IsOptional()
+  @IsUUID()
+  fromBranchId?: string;
+
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
-  amountRequested: number;
+  amount: number;
 
+  @IsOptional()
   @IsString()
-  purpose: string;
+  purpose?: string;
 
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  transferReference?: string;
 
   @IsOptional()
   @IsUUID()
