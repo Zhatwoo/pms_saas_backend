@@ -23,8 +23,9 @@ export class TransactionsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
     @Query('date') date?: string,
+    @Query('range') range?: string,
   ) {
-    return this.transactionsService.findAll(req.user, branch, date);
+    return this.transactionsService.findAll(req.user, branch, date, range);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
