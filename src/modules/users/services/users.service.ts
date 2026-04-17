@@ -532,6 +532,8 @@ export class UsersService {
       id: existingRow.id,
       auth_id: existingRow.auth_id,
       role: existingRow.role,
+      full_name: existingRow.full_name,
+      email: existingRow.email,
     };
 
     const roleNorm = (existing.role ?? '').toLowerCase();
@@ -547,6 +549,10 @@ export class UsersService {
       throw new InternalServerErrorException(authDeleteError.message);
     }
 
-    return { deleted: true };
+    return {
+      deleted: true,
+      targetUserId: existing.id,
+      targetUserName: existing.full_name?.trim() || existing.email,
+    };
   }
 }

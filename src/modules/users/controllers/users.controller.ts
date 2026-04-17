@@ -52,29 +52,64 @@ export class UsersController {
 
   @Roles(Role.SUPER_ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.update(id, updateUserDto);
+  async update(
+    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
+    @Param('id') id: string,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    const updated = await this.usersService.update(id, updateUserDto);
+    req.auditLogContext = {
+      targetUserId: updated.id,
+      targetUserName: updated.fullName ?? updated.email,
+      targetBranchName: updated.branchName ?? null,
+    };
+    return updated;
   }
 
   @Roles(Role.SUPER_ADMIN)
   @Patch(':id/transfer-branch')
-  transferBranch(
+  async transferBranch(
+    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
     @Param('id') id: string,
     @Body() transferDto: TransferUserBranchDto,
   ) {
-    return this.usersService.transferBranch(id, transferDto.branchId);
+    const updated = await this.usersService.transferBranch(id, transferDto.branchId);
+    req.auditLogContext = {
+      targetUserId: updated.id,
+      targetUserName: updated.fullName ?? updated.email,
+      targetBranchName: updated.branchName ?? null,
+    };
+    return updated;
   }
 
   // NextJS Turbopack workaround using POST instead of PATCH/PUT
   @Roles(Role.SUPER_ADMIN)
   @Post(':id/update')
-  updatePost(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.update(id, updateUserDto);
+  async updatePost(
+    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
+    @Param('id') id: string,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    const updated = await this.usersService.update(id, updateUserDto);
+    req.auditLogContext = {
+      targetUserId: updated.id,
+      targetUserName: updated.fullName ?? updated.email,
+      targetBranchName: updated.branchName ?? null,
+    };
+    return updated;
   }
 
   @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  async remove(
+    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
+    @Param('id') id: string,
+  ) {
+    const result = await this.usersService.remove(id);
+    req.auditLogContext = {
+      targetUserId: result.targetUserId,
+      targetUserName: result.targetUserName,
+    };
+    return { deleted: true };
   }
 }
