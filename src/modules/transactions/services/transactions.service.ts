@@ -41,7 +41,7 @@ export class TransactionsService {
     return data;
   }
 
-  async findAll(user: UserWithBranch, branchQuery?: string, date?: string) {
+  async findAll(user: UserWithBranch, branchQuery?: string, date?: string, range?: string) {
     const client = this.supabase.getClient();
     let query = client
       .from('transactions')
@@ -49,6 +49,7 @@ export class TransactionsService {
         *,
         pawned_item:pawned_items (
           id,
+          qr_code,
           customer:customers (
             full_name,
             address,
@@ -56,16 +57,30 @@ export class TransactionsService {
           )
         )
       `)
-      .order('created_at', { ascending: false });
+      .order('transaction_date', { ascending: false })
+      .order('transaction_time', { ascending: false });
 
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
     if (scoped) {
       query = query.eq('branch_id', scoped);
     }
 
-    // Default to today if no date provided, to satisfy "ngayon araw" request
-    const filterDate = date || new Date().toISOString().split('T')[0];
-    query = query.eq('transaction_date', filterDate);
+    if (range && range !== 'daily') {
+      if (range === 'weekly') {
+        const lastWeek = new Date();
+        lastWeek.setDate(lastWeek.getDate() - 7);
+        query = query.gte('transaction_date', lastWeek.toISOString().split('T')[0]);
+      } else if (range === 'monthly') {
+        const lastMonth = new Date();
+        lastMonth.setMonth(lastMonth.getMonth() - 1);
+        query = query.gte('transaction_date', lastMonth.toISOString().split('T')[0]);
+      }
+      // If range is 'all', we don't apply any date filter
+    } else {
+      // Default to daily if no range or range is 'daily'
+      const filterDate = date || new Date().toISOString().split('T')[0];
+      query = query.eq('transaction_date', filterDate);
+    }
 
     const { data: transactions, error } = await query;
     if (error) throw new InternalServerErrorException(error.message);
