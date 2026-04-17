@@ -166,14 +166,31 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('pawned_items')
-      .select('*, item_renewals(*)')
+      .select('*, item_renewals(*), customer:customers(*)')
       .eq('id', id)
       .single();
+
     if (error) {
       throw new NotFoundException('Item not found');
     }
     assertResourceBranch(user, data?.branch_id);
-    return data;
+
+    // Resolve storage URLs for photos
+    const [profilePhoto, idPhoto] = await Promise.all([
+      this.resolveStorageUrl(data.profile_photo),
+      this.resolveStorageUrl(data.id_photo),
+    ]);
+
+    return {
+      ...data,
+      profile_photo: profilePhoto,
+      id_photo: idPhoto,
+      renewalCount: (data.item_renewals || []).length,
+      renewals: (data.item_renewals || []).map((r: any) => ({
+        date: r.renewal_date,
+        amount: r.amount_paid,
+      })),
+    };
   }
 
   async findByItemId(user: UserWithBranch, itemId: string) {
