@@ -28,6 +28,50 @@ interface QueryFilters {
 export class InventoryService {
   constructor(private supabase: SupabaseService) {}
 
+  private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
+    if (!storedUrl) {
+      return '';
+    }
+
+    if (!storedUrl.startsWith('http')) {
+      return storedUrl;
+    }
+
+    try {
+      const parsedUrl = new URL(storedUrl);
+      const storagePrefix = '/storage/v1/object/public/';
+
+      if (!parsedUrl.pathname.includes(storagePrefix)) {
+        return storedUrl;
+      }
+
+      const storagePath = parsedUrl.pathname.split(storagePrefix)[1];
+      if (!storagePath) {
+        return storedUrl;
+      }
+
+      const [bucketName, ...objectPathParts] = storagePath.split('/');
+      const objectPath = objectPathParts.join('/');
+
+      if (!bucketName || !objectPath) {
+        return storedUrl;
+      }
+
+      const { data, error } = await this.supabase
+        .getClient()
+        .storage.from(bucketName)
+        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+
+      if (error || !data?.signedUrl) {
+        return storedUrl;
+      }
+
+      return data.signedUrl;
+    } catch {
+      return storedUrl;
+    }
+  }
+
   private async adjustBalance(branchId: string, delta: number): Promise<void> {
     await adjustDailyBalance(this.supabase.getClient(), branchId, delta);
   }
@@ -73,25 +117,27 @@ export class InventoryService {
     }
 
     return {
-      items: (data || []).map((item: any) => ({
-        id: item.id,
-        itemId: item.item_id,
-        itemName: item.item_name,
-        category: item.category,
-        branch: item.branch,
-        pawnDate: item.pawn_date,
-        status: item.status,
-        renewalCount: (item.item_renewals || []).length,
-        renewals: (item.item_renewals || []).map((r: any) => ({
-          date: r.renewal_date,
-          amount: r.amount_paid,
+      items: await Promise.all(
+        (data || []).map(async (item: any) => ({
+          id: item.id,
+          itemId: item.item_id,
+          itemName: item.item_name,
+          category: item.category,
+          branch: item.branch,
+          pawnDate: item.pawn_date,
+          status: item.status,
+          renewalCount: (item.item_renewals || []).length,
+          renewals: (item.item_renewals || []).map((r: any) => ({
+            date: r.renewal_date,
+            amount: r.amount_paid,
+          })),
+          remarks: item.remarks || '',
+          qrCode: item.qr_code || '',
+          originalPhoto: await this.resolveStorageUrl(item.profile_photo),
+          conditionReport: item.condition_report || '',
+          amount: item.amount || 0,
         })),
-        remarks: item.remarks || '',
-        qrCode: item.qr_code || '',
-        originalPhoto: item.profile_photo || '',
-        conditionReport: item.condition_report || '',
-        amount: item.amount || 0,
-      })),
+      ),
       total: count || 0,
     };
   }
@@ -150,6 +196,41 @@ export class InventoryService {
 
     if (pawnedData) {
       assertResourceBranch(user, pawnedData.branch_id);
+
+      let customerData:
+        | {
+            full_name: string;
+            address: string;
+            barangay?: string | null;
+            city?: string | null;
+            province?: string | null;
+            contact_number?: string | null;
+            id_presented?: string | null;
+          }
+        | null = null;
+
+      if (pawnedData.customer_id) {
+        const { data: customer, error: customerError } = await client
+          .from('customers')
+          .select('full_name, address, barangay, city, province, contact_number, id_presented')
+          .eq('id', pawnedData.customer_id)
+          .maybeSingle();
+
+        if (customerError) {
+          console.error(
+            `[InventoryService] Error fetching customer for pawned item ${cleanId}:`,
+            customerError,
+          );
+        } else {
+          customerData = customer;
+        }
+      }
+
+      const [originalPhoto, ownerIdPhoto] = await Promise.all([
+        this.resolveStorageUrl(pawnedData.profile_photo),
+        this.resolveStorageUrl(pawnedData.id_photo),
+      ]);
+
       return {
         id: pawnedData.id,
         itemId: pawnedData.item_id,
@@ -158,7 +239,17 @@ export class InventoryService {
         branch: pawnedData.branch,
         pawnDate: pawnedData.pawn_date,
         status: pawnedData.status,
-        originalPhoto: pawnedData.profile_photo || '',
+        amount: pawnedData.amount ?? 0,
+        originalPhoto,
+        ownerIdPhoto,
+        customerName: customerData?.full_name || '',
+        customerAddress: customerData
+          ? [customerData.address, customerData.barangay, customerData.city, customerData.province]
+              .filter(Boolean)
+              .join(', ')
+          : '',
+        customerContact: customerData?.contact_number || '',
+        customerIdPresented: customerData?.id_presented || '',
         type: 'PAWNED',
       };
     }
@@ -179,6 +270,8 @@ export class InventoryService {
 
     if (saleData) {
       assertResourceBranch(user, saleData.branch_id);
+      const originalPhoto = await this.resolveStorageUrl(saleData.image_url);
+
       return {
         id: saleData.id,
         itemId: saleData.item_id,
@@ -187,7 +280,7 @@ export class InventoryService {
         branch: saleData.branch,
         pawnDate: saleData.available_date,
         status: saleData.status,
-        originalPhoto: saleData.image_url || '',
+        originalPhoto,
         type: 'SALE',
       };
     }
@@ -348,24 +441,59 @@ export class InventoryService {
 
     const { data: systemItems, error } = await client
       .from('pawned_items')
-      .select('item_id')
+      .select('item_id, item_name, category')
       .eq('branch_id', branchId)
       .eq('status', 'Active');
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    const systemIds = (systemItems || []).map((i: any) => i.item_id);
-    const missingInVault = systemIds.filter(
-      (id: string) => !scannedItemIds.includes(id),
+    const normalizeId = (value: string) => value.trim().toUpperCase();
+
+    const systemItemList = Array.from(
+      (systemItems || [])
+        .filter(
+          (item: any) =>
+            typeof item?.item_id === 'string' && item.item_id.trim().length > 0,
+        )
+        .reduce((map, item: any) => {
+          const normalizedId = normalizeId(item.item_id);
+          if (!map.has(normalizedId)) {
+            map.set(normalizedId, {
+              itemId: normalizedId,
+              itemName: item.item_name || item.item_id,
+              category: item.category || 'Uncategorized',
+            });
+          }
+          return map;
+        }, new Map<string, { itemId: string; itemName: string; category: string }>() )
+        .values(),
     );
-    const extraInVault = scannedItemIds.filter((id) => !systemIds.includes(id));
+
+    const systemIds = systemItemList.map((item) => item.itemId);
+
+    const normalizedScannedIds = Array.from(
+      new Set(
+        scannedItemIds
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .map(normalizeId),
+      ),
+    );
+
+    const missingInVault = systemIds.filter(
+      (id: string) => !normalizedScannedIds.includes(id),
+    );
+    const missingItems = systemItemList.filter((item) =>
+      missingInVault.includes(item.itemId),
+    );
+    const extraInVault = normalizedScannedIds.filter((id) => !systemIds.includes(id));
 
     return {
       totalInSystem: systemIds.length,
-      totalScanned: scannedItemIds.length,
-      matched: scannedItemIds.filter((id) => systemIds.includes(id)).length,
+      totalScanned: normalizedScannedIds.length,
+      matched: normalizedScannedIds.filter((id) => systemIds.includes(id)).length,
       missingInVault,
+      missingItems,
       extraInVault,
     };
   }
