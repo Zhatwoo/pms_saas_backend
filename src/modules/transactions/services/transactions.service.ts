@@ -48,8 +48,7 @@ export class TransactionsService {
       .select(`
         *,
         pawned_item:pawned_items (
-          id,
-          qr_code,
+          *,
           customer:customers (
             full_name,
             address,
