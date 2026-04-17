@@ -24,8 +24,15 @@ export class TransactionsController {
     @Query('branch') branch?: string,
     @Query('date') date?: string,
     @Query('range') range?: string,
+    @Query('customerId') customerId?: string,
   ) {
-    return this.transactionsService.findAll(req.user, branch, date, range);
+    return this.transactionsService.findAll(
+      req.user,
+      branch,
+      date,
+      range,
+      customerId,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

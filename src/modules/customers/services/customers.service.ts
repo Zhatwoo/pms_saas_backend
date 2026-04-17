@@ -61,7 +61,14 @@ export class CustomersService {
 
     const { data, error } = await query.single();
     if (error) {
-      if (error.code === 'PGRST116') return null; // Not found
+      if (
+        error.code === 'PGRST116' ||
+        error.code === '22P02' ||
+        error.message?.toLowerCase().includes('invalid input syntax')
+      ) {
+        return null;
+      }
+
       throw new InternalServerErrorException(error.message);
     }
     return data;
