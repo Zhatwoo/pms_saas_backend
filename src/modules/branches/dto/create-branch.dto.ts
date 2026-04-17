@@ -1,4 +1,6 @@
-import { IsNotEmpty, IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsEnum, Matches } from 'class-validator';
+
+export const PHONE_REGEX = /^\+639\d{9}$/;
 
 export enum BranchStatus {
   ACTIVE = 'Active',
@@ -19,6 +21,20 @@ export class CreateBranchDto {
   @IsNotEmpty()
   @IsString()
   location: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @Matches(PHONE_REGEX, {
+    message: 'contact_number must use +639XXXXXXXXX format',
+  })
+  contact_number: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(PHONE_REGEX, {
+    message: 'contactNumber must use +639XXXXXXXXX format',
+  })
+  contactNumber?: string;
 
   @IsOptional()
   @IsEnum(BranchStatus)

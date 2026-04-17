@@ -44,6 +44,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     ActivityLogsModule,
     FundRequestsModule,
     BranchFinanceModule,
+    ShopSettingsModule,
   ],
   providers: [
     {
