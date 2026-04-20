@@ -18,6 +18,7 @@ import { ListFundRequestsDto } from '../dto/list-fund-requests.dto';
 import { ReviewFundRequestDto } from '../dto/review-fund-request.dto';
 import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.dto';
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
+import { UploadFundTransferProofDto } from '../dto/upload-fund-transfer-proof.dto';
 import { FundRequestsService } from '../services/fund-requests.service';
 
 @Controller('fund-requests')
@@ -107,5 +108,14 @@ export class FundRequestsController {
     @Body() confirmDto: ConfirmFundRequestDto,
   ) {
     return this.fundRequestsService.confirm(req.user, id, confirmDto);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('proof-upload')
+  uploadProof(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: UploadFundTransferProofDto,
+  ) {
+    return this.fundRequestsService.uploadProof(req.user, dto);
   }
 }
