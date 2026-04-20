@@ -16,4 +16,8 @@ export class UpdateUserDto {
   @IsOptional()
   @IsUUID()
   branchId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
 }

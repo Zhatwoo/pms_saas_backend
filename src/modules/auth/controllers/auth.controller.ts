@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Body,
   Req,
   UnauthorizedException,
@@ -11,6 +12,8 @@ import { BranchesService } from '../../branches/services/branches.service';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 import { VerifyPasswordDto } from '../dto/verify-password.dto';
+import { UpdateUserDto } from '../../users/dto/update-user.dto';
+import { UsersService } from '../../users/services/users.service';
 import { Public } from '../../../common/decorators';
 
 @Controller('auth')
@@ -18,6 +21,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly branchesService: BranchesService,
+    private readonly usersService: UsersService,
   ) {}
 
   /** Public branch list for signup (avoids /branches/:id catching "public"). */
@@ -57,5 +61,19 @@ export class AuthController {
     }
 
     return { success: true };
+  }
+
+  @Post('profile') // Turbopack workaround: using POST for updates
+  async updateProfilePost(@Req() req: any, @Body() dto: UpdateUserDto) {
+    return this.updateProfile(req, dto);
+  }
+
+  @Patch('profile')
+  async updateProfile(@Req() req: any, @Body() dto: UpdateUserDto) {
+    const sanitized: UpdateUserDto = {};
+    if (dto.fullName !== undefined) sanitized.fullName = dto.fullName;
+    if (dto.avatarUrl !== undefined) sanitized.avatarUrl = dto.avatarUrl;
+    
+    return this.usersService.update(req.user.id, sanitized);
   }
 }

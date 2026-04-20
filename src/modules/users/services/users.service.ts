@@ -382,6 +382,10 @@ export class UsersService {
       }
     }
 
+    if (dto.avatarUrl !== undefined) {
+      payload.avatar_url = dto.avatarUrl;
+    }
+
     const selectColumns =
       'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at';
 
