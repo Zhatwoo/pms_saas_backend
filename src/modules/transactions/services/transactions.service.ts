@@ -8,10 +8,14 @@ import {
 } from '../../../common/utils/branch-scope.util';
 import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
 import { Role } from '../../../common/enums';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 
 @Injectable()
 export class TransactionsService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   async create(user: UserWithBranch, dto: any) {
     // 1. Resolve Branch Info
@@ -51,6 +55,26 @@ export class TransactionsService {
     if (branchId && (cash_in || cash_out)) {
       const netChange = parseFloat(cash_in || 0) - parseFloat(cash_out || 0);
       await adjustDailyBalance(client, branchId, netChange);
+    }
+
+    // 3. Create Notification
+    try {
+      const title = dto.purpose === 'Buy Back' 
+        ? `Successful buyback completed - ${transactionNo}` 
+        : `New ${dto.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
+      
+      const subtitle = dto.unit 
+        ? `Transaction Alert: ${dto.purpose?.toLowerCase() || 'item'} [${dto.unit}]`
+        : `Transaction Alert: ${dto.purpose?.toLowerCase() || 'activity'}`;
+
+      await this.notificationsService.create({
+        title,
+        subtitle,
+        category: 'Transactions',
+        branch_id: branchId,
+      });
+    } catch (e) {
+      console.warn('[TransactionsService] Failed to create notification', e);
     }
 
     return data;
@@ -116,13 +140,37 @@ export class TransactionsService {
       filtered = transactions.filter((tx: any) => tx.pawned_item?.customer_id === customerId);
     }
 
-    // Compute stats for the requested date
+    // Compute stats for the requested date and range
     const stats = {
       pawnedToday: filtered.filter((t: any) => t.purpose === 'Pawn').length,
       buyBack: filtered.filter((t: any) => t.purpose === 'Buy Back').length,
       renewed: filtered.filter((t: any) => t.purpose === 'Renew').length,
-      soldItem: filtered.filter((t: any) => t.purpose === 'Sold Item').length,
+      soldItem: filtered.filter((t: any) => 
+        t.purpose === 'Sold Item' || t.purpose === 'Sale'
+      ).length,
+      redeemed: filtered.filter((t: any) => t.purpose === 'Redeem').length,
+      transfer: filtered.filter((t: any) => 
+        t.purpose === 'Fund Transfer' || t.purpose === 'Cash Transfer'
+      ).length,
+      startingBalance: 0,
+      endingBalance: 0,
     };
+
+    // If a specific branch is scoped, attempt to fetch its balance record for the current view
+    if (scoped) {
+      const balanceDate = date || new Date().toISOString().split('T')[0];
+      const { data: balanceData } = await client
+        .from('daily_balances')
+        .select('starting_balance, ending_balance')
+        .eq('branch_id', scoped)
+        .eq('record_date', balanceDate)
+        .maybeSingle();
+
+      if (balanceData) {
+        stats.startingBalance = Number(balanceData.starting_balance || 0);
+        stats.endingBalance = Number(balanceData.ending_balance || 0);
+      }
+    }
 
     return { transactions: filtered, stats };
   }

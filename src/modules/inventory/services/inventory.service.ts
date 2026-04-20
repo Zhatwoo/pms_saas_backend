@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { Role } from '../../../common/enums';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   assertResourceBranch,
@@ -26,7 +27,10 @@ interface QueryFilters {
 
 @Injectable()
 export class InventoryService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
     if (!storedUrl) {
@@ -467,6 +471,18 @@ export class InventoryService {
         );
       }
       throw new InternalServerErrorException(insertErr.message);
+    }
+
+    // 4. Create Notification
+    try {
+      await this.notificationsService.create({
+        title: `${pawnedItem.item_name} - Item already expired`,
+        subtitle: `Transaction Alert: expired pawn item [${pawnedItem.item_id}]`,
+        category: 'Alerts',
+        branch_id: pawnedItem.branch_id,
+      });
+    } catch (e) {
+      console.warn('[InventoryService] Failed to create notification', e);
     }
 
     return {
