@@ -13,16 +13,27 @@ import { Role } from '../../../common/enums';
 export class TransactionsService {
   constructor(private supabase: SupabaseService) {}
 
-  async create(user: UserWithBranch, createTransactionDto: any) {
-    const payload =
-      user.role === Role.SUPER_ADMIN
-        ? { ...createTransactionDto }
-        : {
-            ...createTransactionDto,
-            branch_id: requireUserBranchId(user),
-          };
-    payload.created_by_user_id = user.id;
-    const { branch_id, cash_in, cash_out } = payload;
+  async create(user: UserWithBranch, dto: any) {
+    // 1. Resolve Branch Info
+    const branchId = dto.branch_id || (user.role !== Role.SUPER_ADMIN ? requireUserBranchId(user) : null);
+    if (!branchId) {
+      throw new InternalServerErrorException("Missing branch_id for transaction.");
+    }
+
+    const branchName = dto.branch || 'Unknown Branch';
+    
+    // Generate transaction number if not provided
+    const transactionNo = dto.transaction_no || 
+      `${dto.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
+
+    const payload = {
+      ...dto,
+      transaction_no: transactionNo,
+      branch_id: branchId,
+      branch: branchName,
+    };
+    
+    const { cash_in, cash_out } = payload;
     const client = this.supabase.getClient();
 
     // 1. Insert Transaction
@@ -32,11 +43,14 @@ export class TransactionsService {
       .select()
       .single();
 
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      console.error("[Transactions DB Error]", error);
+      throw new InternalServerErrorException(error.message);
+    }
 
-    if (branch_id && (cash_in || cash_out)) {
+    if (branchId && (cash_in || cash_out)) {
       const netChange = parseFloat(cash_in || 0) - parseFloat(cash_out || 0);
-      await adjustDailyBalance(client, branch_id, netChange);
+      await adjustDailyBalance(client, branchId, netChange);
     }
 
     return data;
