@@ -89,7 +89,7 @@ export class InventoryService {
 
     let query = client
       .from('pawned_items')
-      .select('*, item_renewals(*)', { count: 'exact' })
+      .select('*, customers(*), item_renewals(*)', { count: 'exact' })
       .order('created_at', { ascending: false });
 
     if (branchId) {
@@ -105,7 +105,9 @@ export class InventoryService {
       query = query.eq('status', filters.status);
     }
     if (filters.search) {
-      query = query.ilike('item_name', `%${filters.search}%`);
+      query = query.or(
+        `item_name.ilike.%${filters.search}%,item_id.ilike.%${filters.search}%,serial_number.ilike.%${filters.search}%`,
+      );
     }
 
     const from = (filters.page - 1) * filters.limit;
@@ -136,6 +138,11 @@ export class InventoryService {
           originalPhoto: await this.resolveStorageUrl(item.profile_photo),
           conditionReport: item.condition_report || '',
           amount: item.amount || 0,
+          customers: item.customers,
+          serialNumber: item.serial_number,
+          itemsIncluded: item.items_included,
+          condition: item.condition,
+          memoryStorage: item.memory_storage,
         })),
       ),
       total: count || 0,

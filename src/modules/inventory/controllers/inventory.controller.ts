@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   Req,
+  Patch,
 } from '@nestjs/common';
 import { InventoryService } from '../services/inventory.service';
 import { Roles } from '../../../common/decorators';
@@ -66,8 +67,9 @@ export class InventoryController {
     return this.inventoryService.findByItemId(req.user, itemId);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Put('pawned/:id')
+  @Patch('pawned/:id')
   updatePawned(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
