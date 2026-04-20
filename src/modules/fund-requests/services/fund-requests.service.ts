@@ -26,6 +26,7 @@ import {
 } from '../dto/review-fund-request.dto';
 import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.dto';
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
+import { UploadFundTransferProofDto } from '../dto/upload-fund-transfer-proof.dto';
 
 interface BranchRow {
   id: string;
@@ -239,6 +240,78 @@ export class FundRequestsService {
       errorMessage.includes('transactions_purpose_check') &&
       errorMessage.includes('violates check constraint')
     );
+  }
+
+  private sanitizePathPart(value: string): string {
+    return value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  private getUploadContentType(fileData: string, fileName?: string): string {
+    if (fileData.startsWith('data:')) {
+      const header = fileData.slice(0, fileData.indexOf(','));
+      const match = header.match(/^data:([^;]+);base64$/i);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+
+    if (fileName) {
+      const ext = fileName.split('.').pop()?.toLowerCase();
+      if (ext === 'png') return 'image/png';
+      if (ext === 'webp') return 'image/webp';
+      if (ext === 'gif') return 'image/gif';
+    }
+
+    return 'image/jpeg';
+  }
+
+  private getUploadExtension(fileData: string, fileName?: string): string {
+    if (fileName && fileName.includes('.')) {
+      return fileName.split('.').pop()?.toLowerCase() ?? 'jpg';
+    }
+
+    if (fileData.startsWith('data:')) {
+      const header = fileData.slice(0, fileData.indexOf(','));
+      const match = header.match(/^data:[^/]+\/([^;]+);base64$/i);
+      if (match?.[1]) {
+        const ext = match[1].toLowerCase();
+        if (ext === 'jpeg') return 'jpg';
+        return ext;
+      }
+    }
+
+    return 'jpg';
+  }
+
+  async uploadProof(user: AuthenticatedUserProfile, dto: UploadFundTransferProofDto) {
+    if (user.role !== Role.SUPER_ADMIN && user.role !== Role.ADMIN && user.role !== Role.EMPLOYEE) {
+      throw new ForbiddenException('You are not allowed to upload fund transfer proofs');
+    }
+
+    const branchId = user.role === Role.SUPER_ADMIN
+      ? (dto.branchId?.trim() || 'super-admin')
+      : requireUserBranchId(user);
+
+    const client = this.supabaseService.getClient();
+    const base64Data = dto.fileData.includes(',') ? dto.fileData.split(',')[1] : dto.fileData;
+    const fileBuffer = Buffer.from(base64Data, 'base64');
+    const requestPart = this.sanitizePathPart(dto.requestNo || 'fund-request');
+    const stagePart = this.sanitizePathPart(dto.stage);
+    const branchPart = this.sanitizePathPart(branchId);
+    const extension = this.getUploadExtension(dto.fileData, dto.fileName);
+    const filePath = `${branchPart}/${requestPart}/${stagePart}-${Date.now()}.${extension}`;
+
+    const { error } = await client.storage.from('fund-transfer-proofs').upload(filePath, fileBuffer, {
+      upsert: true,
+      contentType: this.getUploadContentType(dto.fileData, dto.fileName),
+    });
+
+    if (error) {
+      throw new InternalServerErrorException(`Proof upload failed: ${error.message}`);
+    }
+
+    const { data } = client.storage.from('fund-transfer-proofs').getPublicUrl(filePath);
+    return { proofUrl: data.publicUrl };
   }
 
   private async getBranchById(branchId: string): Promise<BranchRow> {

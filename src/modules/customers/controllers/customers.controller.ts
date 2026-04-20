@@ -35,4 +35,28 @@ export class CustomersController {
   ) {
     return this.customersService.findOne(req.user, id);
   }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get(':id/activity-logs')
+  findCustomerActivityLogs(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.customersService.findCustomerActivityLogs(req.user, id);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post(':id/activity-logs')
+  addCustomerNote(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: { title?: string; note?: string },
+  ) {
+    return this.customersService.addCustomerNote(
+      req.user,
+      id,
+      dto?.title,
+      dto?.note,
+    );
+  }
 }

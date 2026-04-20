@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
@@ -187,15 +188,17 @@ export class InventoryService {
     assertResourceBranch(user, data?.branch_id);
 
     // Resolve storage URLs for photos
-    const [profilePhoto, idPhoto] = await Promise.all([
+      const [profilePhoto, idPhoto, idBackPhoto] = await Promise.all([
       this.resolveStorageUrl(data.profile_photo),
       this.resolveStorageUrl(data.id_photo),
+        this.resolveStorageUrl(data.id_back_photo),
     ]);
 
     return {
       ...data,
       profile_photo: profilePhoto,
       id_photo: idPhoto,
+      id_back_photo: idBackPhoto,
       renewalCount: (data.item_renewals || []).length,
       renewals: (data.item_renewals || []).map((r: any) => ({
         date: r.renewal_date,
@@ -263,9 +266,10 @@ export class InventoryService {
         }
       }
 
-      const [originalPhoto, ownerIdPhoto] = await Promise.all([
+      const [originalPhoto, ownerIdPhoto, ownerIdBackPhoto] = await Promise.all([
         this.resolveStorageUrl(pawnedData.profile_photo),
         this.resolveStorageUrl(pawnedData.id_photo),
+        this.resolveStorageUrl(pawnedData.id_back_photo),
       ]);
 
       return {
@@ -279,6 +283,7 @@ export class InventoryService {
         amount: pawnedData.amount ?? 0,
         originalPhoto,
         ownerIdPhoto,
+        ownerIdBackPhoto,
         customerName: customerData?.full_name || '',
         customerAddress: customerData
           ? [customerData.address, customerData.barangay, customerData.city, customerData.province]
@@ -448,10 +453,16 @@ export class InventoryService {
       throw new InternalServerErrorException(updateErr.message);
     }
 
+    const saleItemId =
+      typeof pawnedItem.item_id === 'string' && pawnedItem.item_id.trim().length > 0
+        ? pawnedItem.item_id.trim()
+        : `PAWN-${String(pawnedItem.id).slice(0, 8).toUpperCase()}`;
+
     const { data: saleItem, error: insertErr } = await client
       .from('sale_items')
       .insert([
         {
+          item_id: saleItemId,
           item_name: pawnedItem.item_name,
           category: pawnedItem.category,
           branch: pawnedItem.branch,
@@ -488,6 +499,169 @@ export class InventoryService {
     return {
       message: 'Item expired and transferred to Items for Sale',
       saleItem,
+    };
+  }
+
+  async requestExpireApproval(
+    user: UserWithBranch & { id: string },
+    itemId: string,
+    message?: string,
+  ) {
+    const client = this.supabase.getClient();
+    const trimmedMessage = message?.trim() ?? '';
+
+    if (!trimmedMessage) {
+      throw new BadRequestException('Approval message is required');
+    }
+
+    if (trimmedMessage.length > 500) {
+      throw new BadRequestException('Approval message is too long');
+    }
+
+    const { data: pawnedItem, error: fetchErr } = await client
+      .from('pawned_items')
+      .select('id, item_id, item_name, branch, branch_id, status')
+      .eq('id', itemId)
+      .single();
+
+    if (fetchErr || !pawnedItem) {
+      throw new NotFoundException('Pawned item not found');
+    }
+
+    assertResourceBranch(user, pawnedItem.branch_id);
+
+    if (pawnedItem.status === 'Expired') {
+      throw new BadRequestException(
+        'Item is already expired and no longer needs approval',
+      );
+    }
+
+    const { error: logError } = await client.from('activity_logs').insert({
+      user_id: user.id,
+      branch_id: pawnedItem.branch_id,
+      action: 'PAWN_ITEM_EXPIRE_REQUEST',
+      details: JSON.stringify({
+        itemId: pawnedItem.item_id,
+        itemName: pawnedItem.item_name,
+        pawnedItemId: pawnedItem.id,
+        branch: pawnedItem.branch,
+        requestedByRole: user.role,
+        message: trimmedMessage,
+        requestStatus: 'pending',
+        requestedAt: new Date().toISOString(),
+      }),
+    });
+
+    if (logError) {
+      throw new InternalServerErrorException(logError.message);
+    }
+
+    return {
+      message: 'Expire request sent to super admin for approval',
+    };
+  }
+
+  async reviewExpireApproval(
+    user: UserWithBranch & { id: string },
+    itemId: string,
+    requestId: string,
+    decision?: 'approve' | 'reject',
+    note?: string,
+  ) {
+    const client = this.supabase.getClient();
+    const normalizedDecision = decision?.trim().toLowerCase();
+
+    if (normalizedDecision !== 'approve' && normalizedDecision !== 'reject') {
+      throw new BadRequestException('Decision must be either approve or reject');
+    }
+
+    const trimmedNote = note?.trim() ?? '';
+    if (trimmedNote.length > 500) {
+      throw new BadRequestException('Review note is too long');
+    }
+
+    const { data: requestLog, error: requestLogError } = await client
+      .from('activity_logs')
+      .select('id, action, details')
+      .eq('id', requestId)
+      .maybeSingle();
+
+    if (requestLogError) {
+      throw new InternalServerErrorException(requestLogError.message);
+    }
+
+    if (!requestLog) {
+      throw new NotFoundException('Expire request not found');
+    }
+
+    if (requestLog.action !== 'PAWN_ITEM_EXPIRE_REQUEST') {
+      throw new BadRequestException('Expire request was already reviewed');
+    }
+
+    let parsedDetails: Record<string, unknown> = {};
+    if (typeof requestLog.details === 'string' && requestLog.details.trim()) {
+      try {
+        parsedDetails = JSON.parse(requestLog.details) as Record<string, unknown>;
+      } catch {
+        parsedDetails = {};
+      }
+    }
+
+    const requestItemId =
+      typeof parsedDetails.pawnedItemId === 'string'
+        ? parsedDetails.pawnedItemId
+        : null;
+
+    if (requestItemId && requestItemId !== itemId) {
+      throw new BadRequestException('Request does not belong to this pawned item');
+    }
+
+    const requestStatus =
+      typeof parsedDetails.requestStatus === 'string'
+        ? parsedDetails.requestStatus.toLowerCase()
+        : 'pending';
+
+    if (requestStatus !== 'pending') {
+      throw new ConflictException('Expire request was already reviewed');
+    }
+
+    if (normalizedDecision === 'approve') {
+      await this.expireAndTransfer(user, itemId);
+    }
+
+    const reviewedAt = new Date().toISOString();
+    const reviewedAction =
+      normalizedDecision === 'approve'
+        ? 'PAWN_ITEM_EXPIRE_REQUEST_APPROVED'
+        : 'PAWN_ITEM_EXPIRE_REQUEST_REJECTED';
+
+    const reviewDetails = {
+      ...parsedDetails,
+      requestStatus: normalizedDecision === 'approve' ? 'approved' : 'rejected',
+      reviewedAt,
+      reviewedByUserId: user.id,
+      reviewedByRole: user.role,
+      reviewNote: trimmedNote || null,
+    };
+
+    const { error: updateErr } = await client
+      .from('activity_logs')
+      .update({
+        action: reviewedAction,
+        details: JSON.stringify(reviewDetails),
+      })
+      .eq('id', requestId);
+
+    if (updateErr) {
+      throw new InternalServerErrorException(updateErr.message);
+    }
+
+    return {
+      message:
+        normalizedDecision === 'approve'
+          ? 'Expire request approved and item moved to Items for Sale'
+          : 'Expire request rejected',
+      status: normalizedDecision,
     };
   }
 
