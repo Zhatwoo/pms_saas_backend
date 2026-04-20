@@ -21,6 +21,7 @@ export class TransactionsService {
             ...createTransactionDto,
             branch_id: requireUserBranchId(user),
           };
+    payload.created_by_user_id = user.id;
     const { branch_id, cash_in, cash_out } = payload;
     const client = this.supabase.getClient();
 

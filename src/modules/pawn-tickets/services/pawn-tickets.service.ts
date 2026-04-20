@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -8,6 +12,20 @@ import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
 @Injectable()
 export class PawnTicketsService {
   constructor(private readonly supabase: SupabaseService) {}
+
+  private getVerificationMode(idPresented?: string | null) {
+    const value = idPresented?.trim() || '';
+
+    if (value === 'No ID / None') {
+      return 'no-id';
+    }
+
+    if (value === 'NBI Clearance' || value === 'Police Clearance') {
+      return 'single-document';
+    }
+
+    return 'standard-id';
+  }
 
   private isPawnTicketMigrationMissing(error: unknown): boolean {
     if (!error || typeof error !== 'object') {
@@ -20,6 +38,8 @@ export class PawnTicketsService {
     return (
       message.includes("Could not find the table 'public.customers'") ||
       message.includes("column 'customer_id' does not exist") ||
+      message.includes("column 'created_by_user_id' does not exist") ||
+      message.includes("column 'id_back_photo' does not exist") ||
       message.includes('relation "public.customers" does not exist')
     );
   }
@@ -50,26 +70,52 @@ export class PawnTicketsService {
     const branchName = dto.branchName ?? user.branchName ?? 'Unknown Branch';
 
     // 1. Process Photos if present
+    const verificationMode = this.getVerificationMode(dto.customer.idPresented);
     let profilePhotoUrl: string | null = null;
     let idPhotoUrl: string | null = null;
+    let idBackPhotoUrl: string | null = null;
 
-    const bucketName = dto.customer.idPresented === 'No ID / None' 
-      ? 'profile_image' 
-      : 'id_pictures';
+    if (verificationMode === 'no-id') {
+      if (!dto.item.profilePhoto) {
+        throw new BadRequestException(
+          'Customer photo is required when No ID / None is selected.',
+        );
+      }
 
-    if (dto.item.profilePhoto) {
       profilePhotoUrl = await this.uploadPhoto(
         dto.item.profilePhoto,
-        `profile_${Date.now()}.jpg`,
-        bucketName
+        this.buildUploadPath('profile'),
+        'profile_image',
       );
-    }
+    } else if (verificationMode === 'single-document') {
+      if (!dto.item.idPhoto) {
+        throw new BadRequestException(
+          'Document image is required for clearance verification.',
+        );
+      }
 
-    if (dto.item.idPhoto) {
       idPhotoUrl = await this.uploadPhoto(
         dto.item.idPhoto,
-        `id_${Date.now()}.jpg`,
-        bucketName
+        this.buildUploadPath('id-front'),
+        'id_pictures',
+      );
+    } else {
+      if (!dto.item.idPhoto || !dto.item.idBackPhoto) {
+        throw new BadRequestException(
+          'Front and back ID photos are required for standard IDs.',
+        );
+      }
+
+      idPhotoUrl = await this.uploadPhoto(
+        dto.item.idPhoto,
+        this.buildUploadPath('id-front'),
+        'id_pictures',
+      );
+
+      idBackPhotoUrl = await this.uploadPhoto(
+        dto.item.idBackPhoto,
+        this.buildUploadPath('id-back'),
+        'id_pictures',
       );
     }
 
@@ -110,6 +156,7 @@ export class PawnTicketsService {
       qr_code: dto.item.qrCode ?? null,
       profile_photo: profilePhotoUrl,
       id_photo: idPhotoUrl,
+      id_back_photo: idBackPhotoUrl,
       condition: dto.item.condition?.trim() ?? '',
       serial_number: dto.item.serialNumber?.trim() ?? '',
       items_included: dto.item.itemsIncluded?.trim() ?? '',
@@ -148,8 +195,10 @@ export class PawnTicketsService {
       storage_fee: dto.transaction.storageFee ?? 0,
       details: dto.transaction.details?.trim() ?? null,
       related_pawned_item_id: pawnedItem.id,
+      created_by_user_id: user.id,
       profile_photo: profilePhotoUrl,
       id_photo: idPhotoUrl,
+      id_back_photo: idBackPhotoUrl,
     };
 
     const { data: transaction, error: transactionError } = await client
@@ -249,5 +298,9 @@ export class PawnTicketsService {
     } = client.storage.from(bucket).getPublicUrl(path);
 
     return publicUrl;
+  }
+
+  private buildUploadPath(prefix: string) {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
   }
 }

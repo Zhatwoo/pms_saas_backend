@@ -176,15 +176,17 @@ export class InventoryService {
     assertResourceBranch(user, data?.branch_id);
 
     // Resolve storage URLs for photos
-    const [profilePhoto, idPhoto] = await Promise.all([
+      const [profilePhoto, idPhoto, idBackPhoto] = await Promise.all([
       this.resolveStorageUrl(data.profile_photo),
       this.resolveStorageUrl(data.id_photo),
+        this.resolveStorageUrl(data.id_back_photo),
     ]);
 
     return {
       ...data,
       profile_photo: profilePhoto,
       id_photo: idPhoto,
+      id_back_photo: idBackPhoto,
       renewalCount: (data.item_renewals || []).length,
       renewals: (data.item_renewals || []).map((r: any) => ({
         date: r.renewal_date,
@@ -252,9 +254,10 @@ export class InventoryService {
         }
       }
 
-      const [originalPhoto, ownerIdPhoto] = await Promise.all([
+      const [originalPhoto, ownerIdPhoto, ownerIdBackPhoto] = await Promise.all([
         this.resolveStorageUrl(pawnedData.profile_photo),
         this.resolveStorageUrl(pawnedData.id_photo),
+        this.resolveStorageUrl(pawnedData.id_back_photo),
       ]);
 
       return {
@@ -268,6 +271,7 @@ export class InventoryService {
         amount: pawnedData.amount ?? 0,
         originalPhoto,
         ownerIdPhoto,
+        ownerIdBackPhoto,
         customerName: customerData?.full_name || '',
         customerAddress: customerData
           ? [customerData.address, customerData.barangay, customerData.city, customerData.province]

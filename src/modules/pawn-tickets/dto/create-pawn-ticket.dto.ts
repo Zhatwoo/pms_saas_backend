@@ -84,6 +84,10 @@ export class CreatePawnTicketItemDto {
   @IsOptional()
   @IsString()
   idPhoto?: string;
+
+  @IsOptional()
+  @IsString()
+  idBackPhoto?: string;
 }
 
 export class CreatePawnTicketTransactionDto {
