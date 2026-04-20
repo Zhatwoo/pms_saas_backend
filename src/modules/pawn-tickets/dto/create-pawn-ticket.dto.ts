@@ -84,6 +84,10 @@ export class CreatePawnTicketItemDto {
   @IsOptional()
   @IsString()
   idPhoto?: string;
+
+  @IsOptional()
+  @IsString()
+  idBackPhoto?: string;
 }
 
 export class CreatePawnTicketTransactionDto {
@@ -104,6 +108,10 @@ export class CreatePawnTicketTransactionDto {
 }
 
 export class CreatePawnTicketDto {
+  @IsOptional()
+  @IsString()
+  customerId?: string;
+
   @ValidateNested()
   @Type(() => CreatePawnTicketCustomerDto)
   customer!: CreatePawnTicketCustomerDto;
