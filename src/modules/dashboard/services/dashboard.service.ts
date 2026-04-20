@@ -519,7 +519,9 @@ export class DashboardService {
             employeeLatestBalanceResult.data?.ending_balance,
           ),
           fundRequests: {
-            summary: this.summarizeFundRequests(employeeFundRowsResult.data ?? []),
+            summary: this.summarizeFundRequests(
+              employeeFundRowsResult.data ?? [],
+            ),
             recent: (employeeFundRowsResult.data ?? [])
               .slice(0, 8)
               .map((row) => this.mapDashboardFundRequest(row)),
@@ -537,7 +539,9 @@ export class DashboardService {
 
     // Determine branch scope
     const isAdmin = user?.role === Role.SUPER_ADMIN;
-    const branchId = !isAdmin ? requireUserBranchId(user) : (branchFilter || null);
+    const branchId = !isAdmin
+      ? requireUserBranchId(user)
+      : branchFilter || null;
 
     // Build base queries
     const buildPawnQuery = (baseQuery: any) => {
@@ -548,7 +552,10 @@ export class DashboardService {
 
     // 1. Active pawn contracts
     const activeQuery = buildPawnQuery(
-      client.from('pawned_items').select('id', { count: 'exact', head: true }).eq('status', 'Active'),
+      client
+        .from('pawned_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'Active'),
     );
     // 2. Items near expiration (maturity within 7 days)
     const twentyThreeDaysAgo = new Date(today);
@@ -573,15 +580,23 @@ export class DashboardService {
     );
     // 5. Redeemed
     const redeemedQuery = buildPawnQuery(
-      client.from('pawned_items').select('id', { count: 'exact', head: true }).eq('status', 'Redeemed'),
+      client
+        .from('pawned_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'Redeemed'),
     );
     // 6. Expired (redeemed overdue)
     const expiredQuery = buildPawnQuery(
-      client.from('pawned_items').select('id', { count: 'exact', head: true }).eq('status', 'Expired'),
+      client
+        .from('pawned_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'Expired'),
     );
 
     // 7. Monthly revenue from transactions
-    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+      .toISOString()
+      .split('T')[0];
     let revenueQuery = client
       .from('transactions')
       .select('cash_in')
@@ -592,7 +607,7 @@ export class DashboardService {
     const sixMonthsAgo = new Date(today);
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
     sixMonthsAgo.setDate(1);
-    let contractTrendQuery = buildPawnQuery(
+    const contractTrendQuery = buildPawnQuery(
       client
         .from('pawned_items')
         .select('status, pawn_date')
@@ -604,10 +619,11 @@ export class DashboardService {
       .from('transactions')
       .select('cash_in, transaction_date')
       .gte('transaction_date', sixMonthsAgo.toISOString().split('T')[0]);
-    if (branchId) revenueTrendQuery = revenueTrendQuery.eq('branch_id', branchId);
+    if (branchId)
+      revenueTrendQuery = revenueTrendQuery.eq('branch_id', branchId);
 
     // 10. Items needing attention (near expiration, with detail)
-    let attentionQuery = buildPawnQuery(
+    const attentionQuery = buildPawnQuery(
       client
         .from('pawned_items')
         .select('id, item_name, item_id, amount, pawn_date, status')
@@ -663,8 +679,24 @@ export class DashboardService {
     );
 
     // Build contract trends by month
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const contractTrendMap = new Map<string, { contracts: number; redeemed: number }>();
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    const contractTrendMap = new Map<
+      string,
+      { contracts: number; redeemed: number }
+    >();
     for (let i = 0; i < 6; i++) {
       const d = new Date(today.getFullYear(), today.getMonth() - 5 + i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -679,10 +711,16 @@ export class DashboardService {
         if (row.status === 'Redeemed') entry.redeemed += 1;
       }
     }
-    const contractTrends = Array.from(contractTrendMap.entries()).map(([key, val]) => {
-      const [, month] = key.split('-');
-      return { month: monthNames[parseInt(month) - 1], contracts: val.contracts, redeemed: val.redeemed };
-    });
+    const contractTrends = Array.from(contractTrendMap.entries()).map(
+      ([key, val]) => {
+        const [, month] = key.split('-');
+        return {
+          month: monthNames[parseInt(month) - 1],
+          contracts: val.contracts,
+          redeemed: val.redeemed,
+        };
+      },
+    );
 
     // Build revenue trend by month
     const revenueTrendMap = new Map<string, number>();
@@ -699,16 +737,20 @@ export class DashboardService {
         revenueTrendMap.set(key, current + this.toMoney(row.cash_in));
       }
     }
-    const revenueTrend = Array.from(revenueTrendMap.entries()).map(([key, revenue]) => {
-      const [, month] = key.split('-');
-      return { month: monthNames[parseInt(month) - 1], revenue };
-    });
+    const revenueTrend = Array.from(revenueTrendMap.entries()).map(
+      ([key, revenue]) => {
+        const [, month] = key.split('-');
+        return { month: monthNames[parseInt(month) - 1], revenue };
+      },
+    );
 
     // Build attention items
     const attentionItems = (attentionResult.data || []).map((item: any) => {
       const maturityDate = new Date(item.pawn_date);
       maturityDate.setDate(maturityDate.getDate() + 30);
-      const daysRemaining = Math.ceil((maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const daysRemaining = Math.ceil(
+        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
       let badgeLabel = `${daysRemaining} days left`;
       let badgeVariant: 'yellow' | 'red' | 'orange' = 'yellow';
       if (daysRemaining <= 0) {
@@ -736,7 +778,7 @@ export class DashboardService {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
-    let notifQuery = buildPawnQuery(
+    const notifQuery = buildPawnQuery(
       client
         .from('pawned_items')
         .select('id, item_name, item_id, pawn_date')
@@ -746,15 +788,17 @@ export class DashboardService {
         .limit(5),
     );
     const notifResult = await notifQuery;
-    const notifications = (notifResult.data || []).map((item: any, idx: number) => {
-      const matDate = new Date(item.pawn_date);
-      matDate.setDate(matDate.getDate() + 30);
-      return {
-        id: item.id || idx,
-        message: `${item.item_name} (${item.item_id}) has passed its maturity date`,
-        time: matDate.toISOString().split('T')[0],
-      };
-    });
+    const notifications = (notifResult.data || []).map(
+      (item: any, idx: number) => {
+        const matDate = new Date(item.pawn_date);
+        matDate.setDate(matDate.getDate() + 30);
+        return {
+          id: item.id || idx,
+          message: `${item.item_name} (${item.item_id}) has passed its maturity date`,
+          time: matDate.toISOString().split('T')[0],
+        };
+      },
+    );
 
     return {
       overallData: {
@@ -777,18 +821,25 @@ export class DashboardService {
     };
   }
 
-  async getExpirationMonitoring(user: AuthenticatedUserProfile, branchFilter?: string) {
+  async getExpirationMonitoring(
+    user: AuthenticatedUserProfile,
+    branchFilter?: string,
+  ) {
     const client = this.supabaseService.getClient();
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
 
     const isAdmin = user?.role === Role.SUPER_ADMIN;
-    const branchId = !isAdmin ? requireUserBranchId(user) : (branchFilter || null);
+    const branchId = !isAdmin
+      ? requireUserBranchId(user)
+      : branchFilter || null;
 
     // Fetch all active pawned items with pawn_date
     let query = client
       .from('pawned_items')
-      .select('id, item_id, item_name, category, branch, amount, pawn_date, status, customer_id, customers(full_name)')
+      .select(
+        'id, item_id, item_name, category, branch, amount, pawn_date, status, customer_id, customers(full_name)',
+      )
       .eq('status', 'Active')
       .not('pawn_date', 'is', null)
       .order('pawn_date', { ascending: true });
@@ -803,8 +854,12 @@ export class DashboardService {
     const items = (data || []).map((item: any) => {
       const maturityDate = new Date(item.pawn_date);
       maturityDate.setDate(maturityDate.getDate() + 30);
-      const daysRemaining = Math.ceil((maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      const customer = Array.isArray(item.customers) ? item.customers[0] : item.customers;
+      const daysRemaining = Math.ceil(
+        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      const customer = Array.isArray(item.customers)
+        ? item.customers[0]
+        : item.customers;
 
       return {
         id: item.id,
@@ -820,9 +875,15 @@ export class DashboardService {
 
     // Bucket items
     const overdue = items.filter((i: any) => i.daysRemaining <= 0);
-    const within3 = items.filter((i: any) => i.daysRemaining > 0 && i.daysRemaining <= 3);
-    const within7 = items.filter((i: any) => i.daysRemaining > 0 && i.daysRemaining <= 7);
-    const within30 = items.filter((i: any) => i.daysRemaining > 0 && i.daysRemaining <= 30);
+    const within3 = items.filter(
+      (i: any) => i.daysRemaining > 0 && i.daysRemaining <= 3,
+    );
+    const within7 = items.filter(
+      (i: any) => i.daysRemaining > 0 && i.daysRemaining <= 7,
+    );
+    const within30 = items.filter(
+      (i: any) => i.daysRemaining > 0 && i.daysRemaining <= 30,
+    );
 
     return {
       stats: {
@@ -841,4 +902,3 @@ export class DashboardService {
     };
   }
 }
-

@@ -73,7 +73,7 @@ export class AuthController {
     const sanitized: UpdateUserDto = {};
     if (dto.fullName !== undefined) sanitized.fullName = dto.fullName;
     if (dto.avatarUrl !== undefined) sanitized.avatarUrl = dto.avatarUrl;
-    
+
     return this.usersService.update(req.user.id, sanitized);
   }
 }

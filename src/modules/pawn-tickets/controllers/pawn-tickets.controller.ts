@@ -23,4 +23,10 @@ export class PawnTicketsController {
   getNextUnitCode(@Req() req: { user: AuthenticatedUserProfile }) {
     return this.pawnTicketsService.generateNextUnitCode(req.user);
   }
+
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Get('next-serial-number')
+  getNextSerialNumber(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.pawnTicketsService.generateNextSerialNumber(req.user);
+  }
 }

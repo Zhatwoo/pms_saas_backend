@@ -19,15 +19,20 @@ export class TransactionsService {
 
   async create(user: UserWithBranch, dto: any) {
     // 1. Resolve Branch Info
-    const branchId = dto.branch_id || (user.role !== Role.SUPER_ADMIN ? requireUserBranchId(user) : null);
+    const branchId =
+      dto.branch_id ||
+      (user.role !== Role.SUPER_ADMIN ? requireUserBranchId(user) : null);
     if (!branchId) {
-      throw new InternalServerErrorException("Missing branch_id for transaction.");
+      throw new InternalServerErrorException(
+        'Missing branch_id for transaction.',
+      );
     }
 
     const branchName = dto.branch || 'Unknown Branch';
-    
+
     // Generate transaction number if not provided
-    const transactionNo = dto.transaction_no || 
+    const transactionNo =
+      dto.transaction_no ||
       `${dto.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
 
     const payload = {
@@ -36,7 +41,7 @@ export class TransactionsService {
       branch_id: branchId,
       branch: branchName,
     };
-    
+
     const { cash_in, cash_out } = payload;
     const client = this.supabase.getClient();
 
@@ -48,7 +53,7 @@ export class TransactionsService {
       .single();
 
     if (error) {
-      console.error("[Transactions DB Error]", error);
+      console.error('[Transactions DB Error]', error);
       throw new InternalServerErrorException(error.message);
     }
 
@@ -59,11 +64,12 @@ export class TransactionsService {
 
     // 3. Create Notification
     try {
-      const title = dto.purpose === 'Buy Back' 
-        ? `Successful buyback completed - ${transactionNo}` 
-        : `New ${dto.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
-      
-      const subtitle = dto.unit 
+      const title =
+        dto.purpose === 'Buy Back'
+          ? `Successful buyback completed - ${transactionNo}`
+          : `New ${dto.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
+
+      const subtitle = dto.unit
         ? `Transaction Alert: ${dto.purpose?.toLowerCase() || 'item'} [${dto.unit}]`
         : `Transaction Alert: ${dto.purpose?.toLowerCase() || 'activity'}`;
 
@@ -90,7 +96,8 @@ export class TransactionsService {
     const client = this.supabase.getClient();
     let query = client
       .from('transactions')
-      .select(`
+      .select(
+        `
         *,
         pawned_item:pawned_items (
           *,
@@ -100,7 +107,8 @@ export class TransactionsService {
             contact_number
           )
         )
-      `)
+      `,
+      )
       .order('transaction_date', { ascending: false })
       .order('transaction_time', { ascending: false });
 
@@ -117,11 +125,17 @@ export class TransactionsService {
         if (range === 'weekly') {
           const lastWeek = new Date();
           lastWeek.setDate(lastWeek.getDate() - 7);
-          query = query.gte('transaction_date', lastWeek.toISOString().split('T')[0]);
+          query = query.gte(
+            'transaction_date',
+            lastWeek.toISOString().split('T')[0],
+          );
         } else if (range === 'monthly') {
           const lastMonth = new Date();
           lastMonth.setMonth(lastMonth.getMonth() - 1);
-          query = query.gte('transaction_date', lastMonth.toISOString().split('T')[0]);
+          query = query.gte(
+            'transaction_date',
+            lastMonth.toISOString().split('T')[0],
+          );
         }
         // If range is 'all', we don't apply any date filter
       } else if (range === 'daily' || !range) {
@@ -137,7 +151,9 @@ export class TransactionsService {
     // Filter by customerId after fetching (post-filter)
     let filtered = transactions;
     if (customerId) {
-      filtered = transactions.filter((tx: any) => tx.pawned_item?.customer_id === customerId);
+      filtered = transactions.filter(
+        (tx: any) => tx.pawned_item?.customer_id === customerId,
+      );
     }
 
     // Compute stats for the requested date and range
@@ -145,12 +161,13 @@ export class TransactionsService {
       pawnedToday: filtered.filter((t: any) => t.purpose === 'Pawn').length,
       buyBack: filtered.filter((t: any) => t.purpose === 'Buy Back').length,
       renewed: filtered.filter((t: any) => t.purpose === 'Renew').length,
-      soldItem: filtered.filter((t: any) => 
-        t.purpose === 'Sold Item' || t.purpose === 'Sale'
+      soldItem: filtered.filter(
+        (t: any) => t.purpose === 'Sold Item' || t.purpose === 'Sale',
       ).length,
       redeemed: filtered.filter((t: any) => t.purpose === 'Redeem').length,
-      transfer: filtered.filter((t: any) => 
-        t.purpose === 'Fund Transfer' || t.purpose === 'Cash Transfer'
+      transfer: filtered.filter(
+        (t: any) =>
+          t.purpose === 'Fund Transfer' || t.purpose === 'Cash Transfer',
       ).length,
       startingBalance: 0,
       endingBalance: 0,

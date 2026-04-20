@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 @Injectable()
@@ -28,7 +32,10 @@ export class ShopSettingsService {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('shop_settings')
-      .upsert({ setting_key: key, setting_value: value, updated_at: new Date() }, { onConflict: 'setting_key' })
+      .upsert(
+        { setting_key: key, setting_value: value, updated_at: new Date() },
+        { onConflict: 'setting_key' },
+      )
       .select()
       .single();
 

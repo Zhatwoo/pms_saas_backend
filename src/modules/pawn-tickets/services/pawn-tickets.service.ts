@@ -40,13 +40,26 @@ export class PawnTicketsService {
       message.includes("column 'customer_id' does not exist") ||
       message.includes("column 'created_by_user_id' does not exist") ||
       message.includes("column 'id_back_photo' does not exist") ||
+      message.includes("column 'item_photo' does not exist") ||
       message.includes('relation "public.customers" does not exist')
     );
   }
 
+  private isItemPhotosSchemaCacheError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const rec = error as Record<string, unknown>;
+    const message = typeof rec.message === 'string' ? rec.message : '';
+
+    return message.includes("Could not find the 'item_photos' column of 'pawned_items' in the schema cache")
+      || message.includes("column 'item_photos' does not exist");
+  }
+
   private throwMissingMigrationError() {
     throw new InternalServerErrorException(
-      'Database schema is incomplete for pawn tickets. Apply migration: PMS_backend/supabase/migrations/009_create_customers_and_pawn_ticket_relations.sql, then refresh the Supabase schema cache.',
+      'Database schema is incomplete for pawn tickets. Apply migrations PMS_backend/supabase/migrations/009_create_customers_and_pawn_ticket_relations.sql, PMS_backend/supabase/migrations/018_add_item_photo_to_pawned_items.sql, and PMS_backend/supabase/migrations/020_add_item_photos_to_pawned_items.sql, then refresh the Supabase schema cache.',
     );
   }
 
@@ -55,25 +68,97 @@ export class PawnTicketsService {
   }
 
   private generateItemId(unitCode?: string) {
-    if (unitCode && unitCode.trim()) {
-      return unitCode.trim().toUpperCase();
+    const value = unitCode?.trim();
+    if (value && !value.startsWith('PENDING')) {
+      return value.toUpperCase();
     }
     return `PWN-${Date.now()}`;
+  }
+
+  private getTodayDateKey() {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  private buildSerialPrefix(branchCode: string) {
+    return `${branchCode}-SN-${this.getTodayDateKey().replaceAll('-', '')}-`;
+  }
+
+  private async generateNextSerialNumberForBranch(branchId: string) {
+    const client = this.supabase.getClient();
+
+    const { data: branch, error: branchError } = await client
+      .from('branches')
+      .select('branch_code')
+      .eq('id', branchId)
+      .single();
+
+    if (branchError || !branch) {
+      throw new InternalServerErrorException(
+        branchError?.message || 'Branch code not found',
+      );
+    }
+
+    const serialDate = this.getTodayDateKey();
+    const branchCode = (branch as { branch_code?: string | null }).branch_code;
+
+    if (!branchCode) {
+      throw new InternalServerErrorException('Branch code not found');
+    }
+
+    const serialPrefix = this.buildSerialPrefix(branchCode);
+
+    const { data: items, error: itemsError } = await client
+      .from('pawned_items')
+      .select('serial_number')
+      .eq('branch_id', branchId)
+      .eq('pawn_date', serialDate)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (itemsError) {
+      throw new InternalServerErrorException(itemsError.message);
+    }
+
+    let maxNumber = 0;
+    const typedItems = (items ?? []) as Array<{ serial_number: string | null }>;
+
+    for (const item of typedItems) {
+      const serialNumber = item.serial_number?.trim();
+      if (!serialNumber || !serialNumber.startsWith(serialPrefix)) {
+        continue;
+      }
+
+      const sequencePart = serialNumber.slice(serialPrefix.length);
+      const sequenceNumber = Number.parseInt(sequencePart, 10);
+      if (!Number.isNaN(sequenceNumber) && sequenceNumber > maxNumber) {
+        maxNumber = sequenceNumber;
+      }
+    }
+
+    const nextNumber = String(maxNumber + 1).padStart(3, '0');
+
+    return `${serialPrefix}${nextNumber}`;
   }
 
   async create(user: AuthenticatedUserProfile, dto: CreatePawnTicketDto) {
     const client = this.supabase.getClient();
     const branchId =
       user.role === Role.SUPER_ADMIN
-        ? dto.branchId ?? requireUserBranchId(user)
+        ? (dto.branchId ?? requireUserBranchId(user))
         : requireUserBranchId(user);
     const branchName = dto.branchName ?? user.branchName ?? 'Unknown Branch';
+    const providedSerialNumber = dto.item.serialNumber?.trim();
+    const serialNumber =
+      providedSerialNumber && !providedSerialNumber.startsWith('PENDING')
+        ? providedSerialNumber
+        : await this.generateNextSerialNumberForBranch(branchId);
 
     // 1. Process Photos if present
     const verificationMode = this.getVerificationMode(dto.customer.idPresented);
     let profilePhotoUrl: string | null = null;
     let idPhotoUrl: string | null = null;
     let idBackPhotoUrl: string | null = null;
+    let itemPhotoUrls: string[] = [];
 
     if (verificationMode === 'no-id') {
       if (!dto.item.profilePhoto) {
@@ -119,15 +204,40 @@ export class PawnTicketsService {
       );
     }
 
+    const rawItemPhotos = Array.isArray(dto.item.itemPhotos) && dto.item.itemPhotos.length > 0
+      ? dto.item.itemPhotos
+      : dto.item.itemPhoto
+        ? [dto.item.itemPhoto]
+        : [];
+
+    const itemPhotoInputs = rawItemPhotos.filter(
+      (photo): photo is string => typeof photo === 'string' && photo.trim().length > 0,
+    );
+
+    if (itemPhotoInputs.length === 0) {
+      throw new BadRequestException('Item photo is required for pawned items.');
+    }
+
+    itemPhotoUrls = await Promise.all(
+      itemPhotoInputs.map((photo, index) =>
+        this.uploadPhoto(
+          photo,
+          this.buildBranchScopedUploadPath(branchId, `item-${index + 1}`),
+          'pawned_items',
+        ),
+      ),
+    );
+
     let customer: { id: string } | null = null;
 
     if (dto.customerId) {
-      const { data: existingCustomer, error: customerLookupError } = await client
-        .from('customers')
-        .select('*')
-        .eq('id', dto.customerId)
-        .eq('branch_id', branchId)
-        .single();
+      const { data: existingCustomer, error: customerLookupError } =
+        await client
+          .from('customers')
+          .select('*')
+          .eq('id', dto.customerId)
+          .eq('branch_id', branchId)
+          .single();
 
       if (customerLookupError || !existingCustomer) {
         throw new BadRequestException(
@@ -171,15 +281,17 @@ export class PawnTicketsService {
       category: dto.item.category?.trim() || 'Miscellaneous',
       branch_id: branchId,
       branch: branchName,
-      pawn_date: dto.item.purchasedDate || new Date().toISOString().split('T')[0],
+      pawn_date:
+        dto.item.purchasedDate || new Date().toISOString().split('T')[0],
       status: 'Active',
       remarks: dto.item.remarks?.trim() ?? '',
       qr_code: dto.item.qrCode ?? null,
       profile_photo: profilePhotoUrl,
+      item_photos: itemPhotoUrls,
       id_photo: idPhotoUrl,
       id_back_photo: idBackPhotoUrl,
       condition: dto.item.condition?.trim() ?? '',
-      serial_number: dto.item.serialNumber?.trim() ?? '',
+      serial_number: serialNumber,
       items_included: dto.item.itemsIncluded?.trim() ?? '',
       memory_storage: dto.item.memoryStorage?.trim() ?? '',
       condition_report: dto.item.condition?.trim() ?? '',
@@ -187,11 +299,24 @@ export class PawnTicketsService {
       amount: dto.transaction.pawnAmount ?? 0,
     };
 
-    const { data: pawnedItem, error: pawnedError } = await client
-      .from('pawned_items')
-      .insert([itemPayload])
-      .select()
-      .single();
+    const insertPawnedItem = async (payload: Record<string, unknown>) => {
+      const { data, error } = await client
+        .from('pawned_items')
+        .insert([payload])
+        .select()
+        .single();
+
+      return { data, error };
+    };
+
+    let { data: pawnedItem, error: pawnedError } = await insertPawnedItem(itemPayload);
+
+    if (pawnedError && this.isItemPhotosSchemaCacheError(pawnedError)) {
+      ({ data: pawnedItem, error: pawnedError } = await insertPawnedItem({
+        ...itemPayload,
+        item_photos: undefined,
+      }));
+    }
 
     if (pawnedError) {
       if (this.isPawnTicketMigrationMissing(pawnedError)) {
@@ -251,7 +376,9 @@ export class PawnTicketsService {
       .single();
 
     if (branchError || !branch) {
-      throw new InternalServerErrorException(branchError?.message || 'Branch code not found');
+      throw new InternalServerErrorException(
+        branchError?.message || 'Branch code not found',
+      );
     }
 
     // 2. Get the most recent items to find the highest sequence number
@@ -268,11 +395,11 @@ export class PawnTicketsService {
     }
 
     let maxNumber = 0;
-    
+
     // Parse the item_id (unit_code) to find the numeric sequence part
     // Format: [branch]-jclb-[number]
     if (items && items.length > 0) {
-      items.forEach(item => {
+      items.forEach((item) => {
         const parts = item.item_id.split('-');
         if (parts.length === 3) {
           const numPart = parseInt(parts[2], 10);
@@ -285,9 +412,18 @@ export class PawnTicketsService {
 
     const nextNumber = maxNumber + 1;
     const formattedNumber = String(nextNumber).padStart(5, '0');
-    
+
     return {
-      unitCode: `${branch.branch_code}-jclb-${formattedNumber}`
+      unitCode: `${branch.branch_code}-jclb-${formattedNumber}`,
+    };
+  }
+
+  async generateNextSerialNumber(user: AuthenticatedUserProfile) {
+    const branchId = requireUserBranchId(user);
+    const serialNumber = await this.generateNextSerialNumberForBranch(branchId);
+
+    return {
+      serialNumber,
     };
   }
 
@@ -323,5 +459,9 @@ export class PawnTicketsService {
 
   private buildUploadPath(prefix: string) {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+  }
+
+  private buildBranchScopedUploadPath(branchId: string, prefix: string) {
+    return `${branchId}/${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
   }
 }
