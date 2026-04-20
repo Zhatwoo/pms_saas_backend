@@ -108,6 +108,10 @@ export class CreatePawnTicketTransactionDto {
 }
 
 export class CreatePawnTicketDto {
+  @IsOptional()
+  @IsString()
+  customerId?: string;
+
   @ValidateNested()
   @Type(() => CreatePawnTicketCustomerDto)
   customer!: CreatePawnTicketCustomerDto;

@@ -119,29 +119,50 @@ export class PawnTicketsService {
       );
     }
 
-    const customerPayload = {
-      full_name: dto.customer.fullName.trim(),
-      address: dto.customer.address.trim(),
-      barangay: dto.customer.barangay?.trim() ?? null,
-      city: dto.customer.city?.trim() ?? null,
-      province: dto.customer.province?.trim() ?? null,
-      contact_number: dto.customer.contactNumber?.trim() ?? null,
-      email: dto.customer.email?.trim() ?? null,
-      id_presented: dto.customer.idPresented?.trim() ?? null,
-      branch_id: branchId,
-    };
+    let customer: { id: string } | null = null;
 
-    const { data: customer, error: customerError } = await client
-      .from('customers')
-      .insert([customerPayload])
-      .select()
-      .single();
+    if (dto.customerId) {
+      const { data: existingCustomer, error: customerLookupError } = await client
+        .from('customers')
+        .select('*')
+        .eq('id', dto.customerId)
+        .eq('branch_id', branchId)
+        .single();
 
-    if (customerError) {
-      if (this.isPawnTicketMigrationMissing(customerError)) {
-        this.throwMissingMigrationError();
+      if (customerLookupError || !existingCustomer) {
+        throw new BadRequestException(
+          'Selected customer was not found for the active branch.',
+        );
       }
-      throw new InternalServerErrorException(customerError.message);
+
+      customer = existingCustomer;
+    } else {
+      const customerPayload = {
+        full_name: dto.customer.fullName.trim(),
+        address: dto.customer.address.trim(),
+        barangay: dto.customer.barangay?.trim() ?? null,
+        city: dto.customer.city?.trim() ?? null,
+        province: dto.customer.province?.trim() ?? null,
+        contact_number: dto.customer.contactNumber?.trim() ?? null,
+        email: dto.customer.email?.trim() ?? null,
+        id_presented: dto.customer.idPresented?.trim() ?? null,
+        branch_id: branchId,
+      };
+
+      const { data: createdCustomer, error: customerError } = await client
+        .from('customers')
+        .insert([customerPayload])
+        .select()
+        .single();
+
+      if (customerError) {
+        if (this.isPawnTicketMigrationMissing(customerError)) {
+          this.throwMissingMigrationError();
+        }
+        throw new InternalServerErrorException(customerError.message);
+      }
+
+      customer = createdCustomer;
     }
 
     const itemPayload = {
@@ -162,7 +183,7 @@ export class PawnTicketsService {
       items_included: dto.item.itemsIncluded?.trim() ?? '',
       memory_storage: dto.item.memoryStorage?.trim() ?? '',
       condition_report: dto.item.condition?.trim() ?? '',
-      customer_id: customer.id,
+      customer_id: customer!.id,
       amount: dto.transaction.pawnAmount ?? 0,
     };
 
