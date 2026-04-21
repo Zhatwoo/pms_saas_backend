@@ -243,7 +243,10 @@ export class FundRequestsService {
   }
 
   private sanitizePathPart(value: string): string {
-    return value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return value
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
   }
 
   private getUploadContentType(fileData: string, fileName?: string): string {
@@ -283,17 +286,29 @@ export class FundRequestsService {
     return 'jpg';
   }
 
-  async uploadProof(user: AuthenticatedUserProfile, dto: UploadFundTransferProofDto) {
-    if (user.role !== Role.SUPER_ADMIN && user.role !== Role.ADMIN && user.role !== Role.EMPLOYEE) {
-      throw new ForbiddenException('You are not allowed to upload fund transfer proofs');
+  async uploadProof(
+    user: AuthenticatedUserProfile,
+    dto: UploadFundTransferProofDto,
+  ) {
+    if (
+      user.role !== Role.SUPER_ADMIN &&
+      user.role !== Role.ADMIN &&
+      user.role !== Role.EMPLOYEE
+    ) {
+      throw new ForbiddenException(
+        'You are not allowed to upload fund transfer proofs',
+      );
     }
 
-    const branchId = user.role === Role.SUPER_ADMIN
-      ? (dto.branchId?.trim() || 'super-admin')
-      : requireUserBranchId(user);
+    const branchId =
+      user.role === Role.SUPER_ADMIN
+        ? dto.branchId?.trim() || 'super-admin'
+        : requireUserBranchId(user);
 
     const client = this.supabaseService.getClient();
-    const base64Data = dto.fileData.includes(',') ? dto.fileData.split(',')[1] : dto.fileData;
+    const base64Data = dto.fileData.includes(',')
+      ? dto.fileData.split(',')[1]
+      : dto.fileData;
     const fileBuffer = Buffer.from(base64Data, 'base64');
     const requestPart = this.sanitizePathPart(dto.requestNo || 'fund-request');
     const stagePart = this.sanitizePathPart(dto.stage);
@@ -301,16 +316,22 @@ export class FundRequestsService {
     const extension = this.getUploadExtension(dto.fileData, dto.fileName);
     const filePath = `${branchPart}/${requestPart}/${stagePart}-${Date.now()}.${extension}`;
 
-    const { error } = await client.storage.from('fund-transfer-proofs').upload(filePath, fileBuffer, {
-      upsert: true,
-      contentType: this.getUploadContentType(dto.fileData, dto.fileName),
-    });
+    const { error } = await client.storage
+      .from('fund-transfer-proofs')
+      .upload(filePath, fileBuffer, {
+        upsert: true,
+        contentType: this.getUploadContentType(dto.fileData, dto.fileName),
+      });
 
     if (error) {
-      throw new InternalServerErrorException(`Proof upload failed: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Proof upload failed: ${error.message}`,
+      );
     }
 
-    const { data } = client.storage.from('fund-transfer-proofs').getPublicUrl(filePath);
+    const { data } = client.storage
+      .from('fund-transfer-proofs')
+      .getPublicUrl(filePath);
     return { proofUrl: data.publicUrl };
   }
 
@@ -598,7 +619,9 @@ export class FundRequestsService {
       ? [
           `Fund transfer for ${params.request.request_no}`,
           params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
-          params.transferReference ? `Reference: ${params.transferReference}` : '',
+          params.transferReference
+            ? `Reference: ${params.transferReference}`
+            : '',
           params.transferNotes ? `Notes: ${params.transferNotes}` : '',
         ].filter(Boolean)
       : [
@@ -607,7 +630,9 @@ export class FundRequestsService {
             ? `Destination: ${params.counterpartBranchName}`
             : '',
           params.request.purpose ? `Purpose: ${params.request.purpose}` : '',
-          params.transferReference ? `Reference: ${params.transferReference}` : '',
+          params.transferReference
+            ? `Reference: ${params.transferReference}`
+            : '',
           params.transferNotes ? `Notes: ${params.transferNotes}` : '',
         ].filter(Boolean);
 
@@ -879,7 +904,9 @@ export class FundRequestsService {
         receiver_user_id: receiver.receiverUserId,
         source_branch_id: sourceBranch?.id ?? null,
         receiver_role: receiver.receiverRole,
-        status: sourceBranch ? 'pending_source_confirmation' : 'pending_confirmation',
+        status: sourceBranch
+          ? 'pending_source_confirmation'
+          : 'pending_confirmation',
         approved_amount: amount,
         reviewed_by_user_id: user.id,
         reviewed_at: now.toISOString(),
@@ -1018,7 +1045,9 @@ export class FundRequestsService {
         fundRequest.branch_id !== branchId &&
         fundRequest.source_branch_id !== branchId
       ) {
-        throw new ForbiddenException('You cannot access data from another branch');
+        throw new ForbiddenException(
+          'You cannot access data from another branch',
+        );
       }
     }
     return this.mapFundRequest(fundRequest);
@@ -1133,10 +1162,7 @@ export class FundRequestsService {
         ? await this.getBranchById(existing.source_branch_id)
         : null;
 
-    if (
-      sourceBranch &&
-      sourceBranch.id === resolvedDestinationBranch.id
-    ) {
+    if (sourceBranch && sourceBranch.id === resolvedDestinationBranch.id) {
       throw new BadRequestException(
         'Source and destination branch cannot be the same',
       );
@@ -1320,7 +1346,8 @@ export class FundRequestsService {
       outboundTransactionId = outboundTransaction.id;
       await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err ?? '');
+      const errorMessage =
+        err instanceof Error ? err.message : String(err ?? '');
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
         await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
       } else {

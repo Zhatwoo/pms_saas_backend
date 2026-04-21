@@ -9,12 +9,12 @@ export class NotificationsService {
 
   async findAll(user: AuthenticatedUserProfile) {
     const client = this.supabase.getClient();
-    
+
     // Notifications can be:
     // 1. Specifically for this user
     // 2. For this branch (broadcast)
     // 3. For all (broadcast) - branch_id is null
-    
+
     let query = client
       .from('notifications')
       .select('*')
@@ -23,7 +23,9 @@ export class NotificationsService {
 
     if (user.role !== Role.SUPER_ADMIN) {
       if (user.branchId) {
-        query = query.or(`branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`);
+        query = query.or(
+          `branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`,
+        );
       } else {
         query = query.or(`user_id.eq.${user.id},branch_id.is.null`);
       }
@@ -61,7 +63,9 @@ export class NotificationsService {
 
     if (user.role !== Role.SUPER_ADMIN) {
       if (user.branchId) {
-        query = query.or(`branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`);
+        query = query.or(
+          `branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`,
+        );
       } else {
         query = query.or(`user_id.eq.${user.id},branch_id.is.null`);
       }
@@ -94,7 +98,10 @@ export class NotificationsService {
       .single();
 
     if (error) {
-      console.error('[NotificationsService] Failed to create notification:', error);
+      console.error(
+        '[NotificationsService] Failed to create notification:',
+        error,
+      );
       // We don't throw here to avoid failing the main transaction
     }
 

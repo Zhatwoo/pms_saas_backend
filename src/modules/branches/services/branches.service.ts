@@ -30,13 +30,12 @@ export class BranchesService {
     return `${normalizedBase} Branch`;
   }
 
-  private resolveContactNumber(
-    value?: string,
-    fallback?: string,
-  ): string {
+  private resolveContactNumber(value?: string, fallback?: string): string {
     const candidate = value ?? fallback;
     if (!candidate) {
-      throw new InternalServerErrorException('Branch contact number is required');
+      throw new InternalServerErrorException(
+        'Branch contact number is required',
+      );
     }
 
     return candidate.trim();

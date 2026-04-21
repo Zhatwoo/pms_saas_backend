@@ -231,13 +231,13 @@ export class BranchFinanceService {
 
     const branchIds = (branches as BranchRow[]).map((b) => b.id);
 
-    let balancesQuery = client
+    const balancesQuery = client
       .from('daily_balances')
       .select('branch_id, record_date, starting_balance, ending_balance')
       .in('branch_id', branchIds)
       .order('record_date', { ascending: false });
 
-    let todayTxQuery = client
+    const todayTxQuery = client
       .from('transactions')
       .select(
         'branch_id, purpose, unit, cash_in, cash_out, pawn_amount, storage_fee',
@@ -245,7 +245,7 @@ export class BranchFinanceService {
       .in('branch_id', branchIds)
       .eq('transaction_date', today);
 
-    let fundReqQuery = client
+    const fundReqQuery = client
       .from('fund_requests')
       .select('branch_id, status')
       .in('branch_id', branchIds)

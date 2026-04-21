@@ -77,6 +77,22 @@ export class InventoryService {
     }
   }
 
+  private async resolveStorageUrls(
+    storedUrls?: Array<string | null> | string | null,
+  ): Promise<string[]> {
+    const urls = Array.isArray(storedUrls)
+      ? storedUrls
+      : typeof storedUrls === 'string' && storedUrls.trim()
+        ? [storedUrls]
+        : [];
+
+    return Promise.all(
+      urls
+        .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+        .map((url) => this.resolveStorageUrl(url)),
+    );
+  }
+
   private async adjustBalance(branchId: string, delta: number): Promise<void> {
     await adjustDailyBalance(this.supabase.getClient(), branchId, delta);
   }
@@ -141,6 +157,7 @@ export class InventoryService {
           remarks: item.remarks || '',
           qrCode: item.qr_code || '',
           originalPhoto: await this.resolveStorageUrl(item.profile_photo),
+          itemPhotos: await this.resolveStorageUrls(item.item_photos),
           conditionReport: item.condition_report || '',
           amount: item.amount || 0,
           customers: item.customers,
@@ -188,15 +205,18 @@ export class InventoryService {
     assertResourceBranch(user, data?.branch_id);
 
     // Resolve storage URLs for photos
-      const [profilePhoto, idPhoto, idBackPhoto] = await Promise.all([
+    const [profilePhoto, itemPhotos, idPhoto, idBackPhoto] = await Promise.all([
       this.resolveStorageUrl(data.profile_photo),
+      this.resolveStorageUrls(data.item_photos ?? []),
       this.resolveStorageUrl(data.id_photo),
-        this.resolveStorageUrl(data.id_back_photo),
+      this.resolveStorageUrl(data.id_back_photo),
     ]);
 
     return {
       ...data,
       profile_photo: profilePhoto,
+      item_photo: itemPhotos[0] || null,
+      item_photos: itemPhotos,
       id_photo: idPhoto,
       id_back_photo: idBackPhoto,
       renewalCount: (data.item_renewals || []).length,
@@ -237,22 +257,22 @@ export class InventoryService {
     if (pawnedData) {
       assertResourceBranch(user, pawnedData.branch_id);
 
-      let customerData:
-        | {
-            full_name: string;
-            address: string;
-            barangay?: string | null;
-            city?: string | null;
-            province?: string | null;
-            contact_number?: string | null;
-            id_presented?: string | null;
-          }
-        | null = null;
+      let customerData: {
+        full_name: string;
+        address: string;
+        barangay?: string | null;
+        city?: string | null;
+        province?: string | null;
+        contact_number?: string | null;
+        id_presented?: string | null;
+      } | null = null;
 
       if (pawnedData.customer_id) {
         const { data: customer, error: customerError } = await client
           .from('customers')
-          .select('full_name, address, barangay, city, province, contact_number, id_presented')
+          .select(
+            'full_name, address, barangay, city, province, contact_number, id_presented',
+          )
           .eq('id', pawnedData.customer_id)
           .maybeSingle();
 
@@ -266,11 +286,13 @@ export class InventoryService {
         }
       }
 
-      const [originalPhoto, ownerIdPhoto, ownerIdBackPhoto] = await Promise.all([
-        this.resolveStorageUrl(pawnedData.profile_photo),
-        this.resolveStorageUrl(pawnedData.id_photo),
-        this.resolveStorageUrl(pawnedData.id_back_photo),
-      ]);
+      const [originalPhoto, itemPhotos, ownerIdPhoto, ownerIdBackPhoto] =
+        await Promise.all([
+          this.resolveStorageUrl(pawnedData.profile_photo),
+          this.resolveStorageUrls(pawnedData.item_photos ?? []),
+          this.resolveStorageUrl(pawnedData.id_photo),
+          this.resolveStorageUrl(pawnedData.id_back_photo),
+        ]);
 
       return {
         id: pawnedData.id,
@@ -282,11 +304,18 @@ export class InventoryService {
         status: pawnedData.status,
         amount: pawnedData.amount ?? 0,
         originalPhoto,
+        itemPhoto: itemPhotos[0] || '',
+        itemPhotos,
         ownerIdPhoto,
         ownerIdBackPhoto,
         customerName: customerData?.full_name || '',
         customerAddress: customerData
-          ? [customerData.address, customerData.barangay, customerData.city, customerData.province]
+          ? [
+              customerData.address,
+              customerData.barangay,
+              customerData.city,
+              customerData.province,
+            ]
               .filter(Boolean)
               .join(', ')
           : '',
@@ -454,7 +483,8 @@ export class InventoryService {
     }
 
     const saleItemId =
-      typeof pawnedItem.item_id === 'string' && pawnedItem.item_id.trim().length > 0
+      typeof pawnedItem.item_id === 'string' &&
+      pawnedItem.item_id.trim().length > 0
         ? pawnedItem.item_id.trim()
         : `PAWN-${String(pawnedItem.id).slice(0, 8).toUpperCase()}`;
 
@@ -572,7 +602,9 @@ export class InventoryService {
     const normalizedDecision = decision?.trim().toLowerCase();
 
     if (normalizedDecision !== 'approve' && normalizedDecision !== 'reject') {
-      throw new BadRequestException('Decision must be either approve or reject');
+      throw new BadRequestException(
+        'Decision must be either approve or reject',
+      );
     }
 
     const trimmedNote = note?.trim() ?? '';
@@ -601,7 +633,10 @@ export class InventoryService {
     let parsedDetails: Record<string, unknown> = {};
     if (typeof requestLog.details === 'string' && requestLog.details.trim()) {
       try {
-        parsedDetails = JSON.parse(requestLog.details) as Record<string, unknown>;
+        parsedDetails = JSON.parse(requestLog.details) as Record<
+          string,
+          unknown
+        >;
       } catch {
         parsedDetails = {};
       }
@@ -613,7 +648,9 @@ export class InventoryService {
         : null;
 
     if (requestItemId && requestItemId !== itemId) {
-      throw new BadRequestException('Request does not belong to this pawned item');
+      throw new BadRequestException(
+        'Request does not belong to this pawned item',
+      );
     }
 
     const requestStatus =
@@ -702,7 +739,7 @@ export class InventoryService {
             });
           }
           return map;
-        }, new Map<string, { itemId: string; itemName: string; category: string }>() )
+        }, new Map<string, { itemId: string; itemName: string; category: string }>())
         .values(),
     );
 
@@ -711,7 +748,10 @@ export class InventoryService {
     const normalizedScannedIds = Array.from(
       new Set(
         scannedItemIds
-          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .filter(
+            (value): value is string =>
+              typeof value === 'string' && value.trim().length > 0,
+          )
           .map(normalizeId),
       ),
     );
@@ -722,12 +762,15 @@ export class InventoryService {
     const missingItems = systemItemList.filter((item) =>
       missingInVault.includes(item.itemId),
     );
-    const extraInVault = normalizedScannedIds.filter((id) => !systemIds.includes(id));
+    const extraInVault = normalizedScannedIds.filter(
+      (id) => !systemIds.includes(id),
+    );
 
     return {
       totalInSystem: systemIds.length,
       totalScanned: normalizedScannedIds.length,
-      matched: normalizedScannedIds.filter((id) => systemIds.includes(id)).length,
+      matched: normalizedScannedIds.filter((id) => systemIds.includes(id))
+        .length,
       missingInVault,
       missingItems,
       extraInVault,

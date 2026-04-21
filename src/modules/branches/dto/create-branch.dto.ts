@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsString, IsOptional, IsEnum, Matches } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsEnum,
+  Matches,
+} from 'class-validator';
 
 export const PHONE_REGEX = /^\+639\d{9}$/;
 

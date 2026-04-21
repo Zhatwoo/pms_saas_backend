@@ -49,11 +49,16 @@ export class ReportsService {
       .from('branches')
       .select('id, name, status');
 
-    const activeBranches = (branches || []).filter(b => b.status === 'Active').length;
+    const activeBranches = (branches || []).filter(
+      (b) => b.status === 'Active',
+    ).length;
     const totalBranches = (branches || []).length;
 
     // Per-branch transaction counts + sales for today
-    const branchSalesMap = new Map<string, { name: string; txn: number; sales: number }>();
+    const branchSalesMap = new Map<
+      string,
+      { name: string; txn: number; sales: number }
+    >();
     for (const branch of branches || []) {
       // If scoped to a single branch, only include that branch
       if (branchId && branch.id !== branchId) continue;
@@ -76,9 +81,12 @@ export class ReportsService {
     }
 
     const branchSales = Array.from(branchSalesMap.values())
-      .map(b => ({
+      .map((b) => ({
         ...b,
-        share: totalSalesToday > 0 ? Number(((b.sales / totalSalesToday) * 100).toFixed(1)) : 0,
+        share:
+          totalSalesToday > 0
+            ? Number(((b.sales / totalSalesToday) * 100).toFixed(1))
+            : 0,
       }))
       .sort((a, b) => b.sales - a.sales);
 
@@ -112,7 +120,20 @@ export class ReportsService {
       }
     }
 
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     const salesTrend = Array.from(trendMap.entries()).map(([date, sales]) => {
       const d = new Date(date);
       const dayOfWeek = d.getDay();
@@ -140,7 +161,10 @@ export class ReportsService {
     const trendAverage = Math.round(totalTrendSales / salesTrend.length);
 
     // Peak day
-    const peakEntry = salesTrend.reduce((best, e) => (e.sales > best.sales ? e : best), salesTrend[0] || { date: '-', sales: 0 });
+    const peakEntry = salesTrend.reduce(
+      (best, e) => (e.sales > best.sales ? e : best),
+      salesTrend[0] || { date: '-', sales: 0 },
+    );
 
     // DSR (Daily Sales Report)
     let cashOutQuery = client
@@ -165,7 +189,9 @@ export class ReportsService {
     if (branchId) openingQuery = openingQuery.eq('branch_id', branchId);
     const { data: openingTxn } = await openingQuery;
 
-    const openingBalance = openingTxn?.[0] ? this.toMoney(openingTxn[0].cash_in) : 0;
+    const openingBalance = openingTxn?.[0]
+      ? this.toMoney(openingTxn[0].cash_in)
+      : 0;
 
     return {
       stats: {
@@ -196,7 +222,10 @@ export class ReportsService {
     return this.getSystemReport(user, branchQuery);
   }
 
-  async getTransactionReport(user: AuthenticatedUserProfile, branchQuery?: string) {
+  async getTransactionReport(
+    user: AuthenticatedUserProfile,
+    branchQuery?: string,
+  ) {
     return this.getSystemReport(user, branchQuery);
   }
 }

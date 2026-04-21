@@ -6,9 +6,7 @@ import { BranchFinanceService } from './branch-finance.service';
 
 @Controller('branch-finance')
 export class BranchFinanceController {
-  constructor(
-    private readonly branchFinanceService: BranchFinanceService,
-  ) {}
+  constructor(private readonly branchFinanceService: BranchFinanceService) {}
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get('summary')

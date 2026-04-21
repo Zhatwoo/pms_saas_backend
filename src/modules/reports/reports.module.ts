@@ -9,4 +9,3 @@ import { SupabaseModule } from '../../infrastructure/supabase/supabase.module';
   providers: [ReportsService],
 })
 export class ReportsModule {}
-

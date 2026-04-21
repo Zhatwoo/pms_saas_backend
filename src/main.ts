@@ -8,7 +8,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api');
-  
+
   // Increase payload limits for Base64 images
   const { json, urlencoded } = require('express');
   app.use(json({ limit: '50mb' }));

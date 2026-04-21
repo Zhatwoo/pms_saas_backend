@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNumber, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsString,
+  IsOptional,
+  IsNumber,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreatePawnTicketCustomerDto {
@@ -80,6 +86,15 @@ export class CreatePawnTicketItemDto {
   @IsOptional()
   @IsString()
   profilePhoto?: string;
+
+  @IsOptional()
+  @IsString()
+  itemPhoto?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  itemPhotos?: string[];
 
   @IsOptional()
   @IsString()

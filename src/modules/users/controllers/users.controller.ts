@@ -53,7 +53,11 @@ export class UsersController {
   @Roles(Role.SUPER_ADMIN)
   @Patch(':id')
   async update(
-    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      auditLogContext?: Record<string, unknown>;
+    },
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
   ) {
@@ -69,11 +73,18 @@ export class UsersController {
   @Roles(Role.SUPER_ADMIN)
   @Patch(':id/transfer-branch')
   async transferBranch(
-    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      auditLogContext?: Record<string, unknown>;
+    },
     @Param('id') id: string,
     @Body() transferDto: TransferUserBranchDto,
   ) {
-    const updated = await this.usersService.transferBranch(id, transferDto.branchId);
+    const updated = await this.usersService.transferBranch(
+      id,
+      transferDto.branchId,
+    );
     req.auditLogContext = {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,
@@ -86,7 +97,11 @@ export class UsersController {
   @Roles(Role.SUPER_ADMIN)
   @Post(':id/update')
   async updatePost(
-    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      auditLogContext?: Record<string, unknown>;
+    },
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
   ) {
@@ -102,7 +117,11 @@ export class UsersController {
   @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
   async remove(
-    @Req() req: { user: AuthenticatedUserProfile; auditLogContext?: Record<string, unknown> },
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      auditLogContext?: Record<string, unknown>;
+    },
     @Param('id') id: string,
   ) {
     const result = await this.usersService.remove(id);
