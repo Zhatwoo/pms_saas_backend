@@ -215,7 +215,6 @@ export class InventoryService {
     return {
       ...data,
       profile_photo: profilePhoto,
-      item_photo: itemPhotos[0] || null,
       item_photos: itemPhotos,
       id_photo: idPhoto,
       id_back_photo: idBackPhoto,
@@ -304,7 +303,6 @@ export class InventoryService {
         status: pawnedData.status,
         amount: pawnedData.amount ?? 0,
         originalPhoto,
-        itemPhoto: itemPhotos[0] || '',
         itemPhotos,
         ownerIdPhoto,
         ownerIdBackPhoto,
