@@ -17,6 +17,12 @@ type CustomerGroupMatch = {
   branch_id: string | null;
 };
 
+type CustomerTimelineScope = {
+  customer: CustomerGroupMatch;
+  matchingCustomerIds: string[];
+  matchingPawnedItemIds: string[];
+};
+
 @Injectable()
 export class TransactionsService {
   constructor(
@@ -24,10 +30,10 @@ export class TransactionsService {
     private notificationsService: NotificationsService,
   ) {}
 
-  private async resolveCustomerTimelineGroup(
+  private async resolveCustomerTimelineScope(
     user: UserWithBranch,
     customerId: string,
-  ) {
+  ): Promise<CustomerTimelineScope | null> {
     const client = this.supabase.getClient();
     let customerQuery = client
       .from('customers')
@@ -69,9 +75,19 @@ export class TransactionsService {
       matchingCustomerIds.unshift(customer.id);
     }
 
+    const { data: pawnedItems, error: pawnedItemsError } = await client
+      .from('pawned_items')
+      .select('id, customer_id')
+      .in('customer_id', matchingCustomerIds);
+
+    if (pawnedItemsError) {
+      throw new InternalServerErrorException(pawnedItemsError.message);
+    }
+
     return {
       customer,
       matchingCustomerIds,
+      matchingPawnedItemIds: (pawnedItems || []).map((item: { id: string }) => item.id),
     };
   }
 
@@ -175,11 +191,11 @@ export class TransactionsService {
       query = query.eq('branch_id', scoped);
     }
 
-    const customerGroup = customerId
-      ? await this.resolveCustomerTimelineGroup(user, customerId)
+    const customerScope = customerId
+      ? await this.resolveCustomerTimelineScope(user, customerId)
       : null;
 
-    if (customerId && !customerGroup) {
+    if (customerId && !customerScope) {
       return {
         transactions: [],
         stats: {
@@ -228,10 +244,28 @@ export class TransactionsService {
 
     // Filter by customerId after fetching (post-filter)
     let filtered = transactions;
-    if (customerGroup) {
-      const customerIdSet = new Set(customerGroup.matchingCustomerIds);
+    if (customerScope) {
+      const customerIdSet = new Set(customerScope.matchingCustomerIds);
+      const pawnedItemIdSet = new Set(customerScope.matchingPawnedItemIds);
       filtered = transactions.filter(
-        (tx: any) => customerIdSet.has(tx.pawned_item?.customer_id),
+        (tx: any) => {
+          const transactionCustomerId =
+            tx.customer_id ??
+            tx.customerId ??
+            tx.pawned_item?.customer_id ??
+            tx.pawned_item?.customer?.id ??
+            null;
+
+          const relatedPawnedItemId =
+            tx.related_pawned_item_id ??
+            tx.pawned_item?.id ??
+            null;
+
+          return (
+            (transactionCustomerId != null && customerIdSet.has(transactionCustomerId)) ||
+            (relatedPawnedItemId != null && pawnedItemIdSet.has(relatedPawnedItemId))
+          );
+        },
       );
     }
 
