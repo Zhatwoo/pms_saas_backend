@@ -40,7 +40,6 @@ export class PawnTicketsService {
       message.includes("column 'customer_id' does not exist") ||
       message.includes("column 'created_by_user_id' does not exist") ||
       message.includes("column 'id_back_photo' does not exist") ||
-      message.includes("column 'item_photo' does not exist") ||
       message.includes('relation "public.customers" does not exist')
     );
   }
@@ -206,9 +205,7 @@ export class PawnTicketsService {
 
     const rawItemPhotos = Array.isArray(dto.item.itemPhotos) && dto.item.itemPhotos.length > 0
       ? dto.item.itemPhotos
-      : dto.item.itemPhoto
-        ? [dto.item.itemPhoto]
-        : [];
+      : [];
 
     const itemPhotoInputs = rawItemPhotos.filter(
       (photo): photo is string => typeof photo === 'string' && photo.trim().length > 0,
