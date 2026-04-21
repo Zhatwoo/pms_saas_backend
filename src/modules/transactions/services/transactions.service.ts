@@ -9,6 +9,13 @@ import {
 import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
+
+type CustomerGroupMatch = {
+  id: string;
+  full_name: string;
+  branch_id: string | null;
+};
 
 @Injectable()
 export class TransactionsService {
@@ -16,6 +23,57 @@ export class TransactionsService {
     private supabase: SupabaseService,
     private notificationsService: NotificationsService,
   ) {}
+
+  private async resolveCustomerTimelineGroup(
+    user: UserWithBranch,
+    customerId: string,
+  ) {
+    const client = this.supabase.getClient();
+    let customerQuery = client
+      .from('customers')
+      .select('id, full_name, branch_id')
+      .eq('id', customerId);
+
+    if (user.role !== Role.SUPER_ADMIN) {
+      customerQuery = customerQuery.eq('branch_id', requireUserBranchId(user));
+    }
+
+    const { data: customer, error: customerError } = await customerQuery.maybeSingle();
+
+    if (customerError) {
+      throw new InternalServerErrorException(customerError.message);
+    }
+
+    if (!customer) {
+      return null;
+    }
+
+    let groupQuery = client.from('customers').select('id, full_name, branch_id');
+    if (user.role !== Role.SUPER_ADMIN) {
+      groupQuery = groupQuery.eq('branch_id', requireUserBranchId(user));
+    }
+
+    const { data: candidates, error: candidatesError } = await groupQuery;
+    if (candidatesError) {
+      throw new InternalServerErrorException(candidatesError.message);
+    }
+
+    const targetName = normalizeCustomerFullName(customer.full_name);
+    const matchingCustomerIds = (candidates || [])
+      .filter((candidate: CustomerGroupMatch) =>
+        normalizeCustomerFullName(candidate.full_name) === targetName,
+      )
+      .map((candidate: CustomerGroupMatch) => candidate.id);
+
+    if (!matchingCustomerIds.includes(customer.id)) {
+      matchingCustomerIds.unshift(customer.id);
+    }
+
+    return {
+      customer,
+      matchingCustomerIds,
+    };
+  }
 
   async create(user: UserWithBranch, dto: any) {
     // 1. Resolve Branch Info
@@ -117,6 +175,26 @@ export class TransactionsService {
       query = query.eq('branch_id', scoped);
     }
 
+    const customerGroup = customerId
+      ? await this.resolveCustomerTimelineGroup(user, customerId)
+      : null;
+
+    if (customerId && !customerGroup) {
+      return {
+        transactions: [],
+        stats: {
+          pawnedToday: 0,
+          buyBack: 0,
+          renewed: 0,
+          soldItem: 0,
+          redeemed: 0,
+          transfer: 0,
+          startingBalance: 0,
+          endingBalance: 0,
+        },
+      };
+    }
+
     // Skip date filtering if customerId is provided - show all customer's transactions
     if (!customerId) {
       if (date) {
@@ -150,9 +228,10 @@ export class TransactionsService {
 
     // Filter by customerId after fetching (post-filter)
     let filtered = transactions;
-    if (customerId) {
+    if (customerGroup) {
+      const customerIdSet = new Set(customerGroup.matchingCustomerIds);
       filtered = transactions.filter(
-        (tx: any) => tx.pawned_item?.customer_id === customerId,
+        (tx: any) => customerIdSet.has(tx.pawned_item?.customer_id),
       );
     }
 
