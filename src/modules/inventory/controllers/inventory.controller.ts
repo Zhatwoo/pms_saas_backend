@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   Req,
+  Patch,
 } from '@nestjs/common';
 import { InventoryService } from '../services/inventory.service';
 import { Roles } from '../../../common/decorators';
@@ -39,7 +40,7 @@ export class InventoryController {
     });
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post('pawned')
   createPawned(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -66,8 +67,9 @@ export class InventoryController {
     return this.inventoryService.findByItemId(req.user, itemId);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Put('pawned/:id')
+  @Patch('pawned/:id')
   updatePawned(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
@@ -112,6 +114,102 @@ export class InventoryController {
     @Param('id') id: string,
   ) {
     return this.inventoryService.expireAndTransfer(req.user, id);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('pawned/:id/expire-request')
+  requestExpireApproval(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: { message?: string },
+  ) {
+    return this.inventoryService.requestExpireApproval(
+      req.user,
+      id,
+      dto?.message,
+    );
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('pawned/:id/request-expire')
+  requestExpireApprovalLegacyPath(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: { message?: string },
+  ) {
+    return this.inventoryService.requestExpireApproval(
+      req.user,
+      id,
+      dto?.message,
+    );
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Post('pawned/:id/expire-request/:requestId/review')
+  reviewExpireApprovalPost(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() dto: { decision?: 'approve' | 'reject'; note?: string },
+  ) {
+    return this.inventoryService.reviewExpireApproval(
+      req.user,
+      id,
+      requestId,
+      dto?.decision,
+      dto?.note,
+    );
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Patch('pawned/:id/expire-request/:requestId/review')
+  reviewExpireApprovalPatch(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() dto: { decision?: 'approve' | 'reject'; note?: string },
+  ) {
+    return this.inventoryService.reviewExpireApproval(
+      req.user,
+      id,
+      requestId,
+      dto?.decision,
+      dto?.note,
+    );
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Post('pawned/:id/request-expire/:requestId/review')
+  reviewExpireApprovalLegacyPathPost(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() dto: { decision?: 'approve' | 'reject'; note?: string },
+  ) {
+    return this.inventoryService.reviewExpireApproval(
+      req.user,
+      id,
+      requestId,
+      dto?.decision,
+      dto?.note,
+    );
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Patch('pawned/:id/request-expire/:requestId/review')
+  reviewExpireApprovalLegacyPathPatch(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() dto: { decision?: 'approve' | 'reject'; note?: string },
+  ) {
+    return this.inventoryService.reviewExpireApproval(
+      req.user,
+      id,
+      requestId,
+      dto?.decision,
+      dto?.note,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

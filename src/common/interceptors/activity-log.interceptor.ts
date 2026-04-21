@@ -28,6 +28,13 @@ export class ActivityLogInterceptor implements NestInterceptor {
             // Success
             if (user && user.id) {
               const action = `${method} ${url.split('?')[0]}`;
+              const extraDetails =
+                request.auditLogContext &&
+                typeof request.auditLogContext === 'object' &&
+                !Array.isArray(request.auditLogContext)
+                  ? request.auditLogContext
+                  : {};
+
               this.activityLogsService.createLog({
                 userId: user.id || user.sub,
                 branchId: user.branchId || null,
@@ -38,6 +45,7 @@ export class ActivityLogInterceptor implements NestInterceptor {
                   body: this.sanitize(body),
                   params,
                   query,
+                  ...extraDetails,
                 },
               });
             }
