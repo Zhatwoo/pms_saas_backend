@@ -9,9 +9,14 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
 
+import { NotificationsService } from '../../notifications/services/notifications.service';
+
 @Injectable()
 export class PawnTicketsService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private getVerificationMode(idPresented?: string | null) {
     const value = idPresented?.trim() || '';
@@ -355,6 +360,18 @@ export class PawnTicketsService {
 
     if (transactionError) {
       throw new InternalServerErrorException(transactionError.message);
+    }
+
+    // 4. Create Notification
+    try {
+      await this.notificationsService.create({
+        title: `New pawn transaction created - ${transactionPayload.transaction_no}`,
+        subtitle: `Transaction Alert: new pawn [${dto.item.unitName}]`,
+        category: 'Transactions',
+        branch_id: branchId,
+      });
+    } catch (e) {
+      console.warn('[PawnTicketsService] Failed to create notification', e);
     }
 
     return {
