@@ -25,6 +25,15 @@ type CustomerVisualRow = {
   created_at: string;
 };
 
+type TransactionVisualRow = {
+  profile_photo: string | null;
+  id_photo: string | null;
+  id_back_photo: string | null;
+  related_pawned_item_id: string | null;
+  transaction_date: string | null;
+  transaction_time: string | null;
+};
+
 type CustomerMergeCandidate = {
   id: string;
   full_name: string;
@@ -41,19 +50,55 @@ export class CustomersService {
       return '';
     }
 
+    const publicPrefix = '/storage/v1/object/public/';
+    const signedPrefix = '/storage/v1/object/sign/';
+    const altPublicPrefix = 'storage/v1/object/public/';
+    const altSignedPrefix = 'storage/v1/object/sign/';
+
     if (!storedUrl.startsWith('http')) {
-      return storedUrl;
+
+      let storagePath = storedUrl;
+      if (storagePath.startsWith(publicPrefix)) {
+        storagePath = storagePath.slice(publicPrefix.length);
+      } else if (storagePath.startsWith(signedPrefix)) {
+        storagePath = storagePath.slice(signedPrefix.length);
+      } else if (storagePath.startsWith(altPublicPrefix)) {
+        storagePath = storagePath.slice(altPublicPrefix.length);
+      } else if (storagePath.startsWith(altSignedPrefix)) {
+        storagePath = storagePath.slice(altSignedPrefix.length);
+      } else {
+        storagePath = storagePath.replace(/^\/+/, '');
+      }
+
+      const [bucketName, ...objectPathParts] = storagePath.split('/');
+      const objectPath = objectPathParts.join('/');
+
+      if (!bucketName || !objectPath) {
+        return storedUrl;
+      }
+
+      const { data, error } = await this.supabase
+        .getClient()
+        .storage.from(bucketName)
+        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+
+      if (error || !data?.signedUrl) {
+        return storedUrl;
+      }
+
+      return data.signedUrl;
     }
 
     try {
       const parsedUrl = new URL(storedUrl);
-      const storagePrefix = '/storage/v1/object/public/';
+      const storagePrefixes = ['/storage/v1/object/public/', '/storage/v1/object/sign/'];
 
-      if (!parsedUrl.pathname.includes(storagePrefix)) {
+      const matchedPrefix = storagePrefixes.find((prefix) => parsedUrl.pathname.includes(prefix));
+      if (!matchedPrefix) {
         return storedUrl;
       }
 
-      const storagePath = parsedUrl.pathname.split(storagePrefix)[1];
+      const storagePath = parsedUrl.pathname.split(matchedPrefix)[1];
       if (!storagePath) {
         return storedUrl;
       }
@@ -131,25 +176,68 @@ export class CustomersService {
   private async resolveCustomerVisuals(customerIds: string[]) {
     const client = this.supabase.getClient();
 
-    const { data, error } = await client
+    const { data: pawnedItems, error: pawnedItemsError } = await client
       .from('pawned_items')
-      .select('profile_photo, id_photo, id_back_photo, customer_id, created_at')
+      .select('id, profile_photo, id_photo, id_back_photo, customer_id, created_at')
       .in('customer_id', customerIds)
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    if (pawnedItemsError) {
+      throw new InternalServerErrorException(pawnedItemsError.message);
     }
 
-    const latestVisual = (data || []).find((row: CustomerVisualRow) =>
+    const matchingPawnedItemIds = (pawnedItems || [])
+      .map((row: { id?: string }) => row.id)
+      .filter((id): id is string => Boolean(id));
+
+    const transactions = matchingPawnedItemIds.length > 0
+      ? await (async () => {
+          const { data, error } = await client
+            .from('transactions')
+            .select('profile_photo, id_photo, id_back_photo, related_pawned_item_id, transaction_date, transaction_time')
+            .in('related_pawned_item_id', matchingPawnedItemIds)
+            .order('transaction_date', { ascending: false })
+            .order('transaction_time', { ascending: false })
+            .limit(50);
+
+          if (error) {
+            throw new InternalServerErrorException(error.message);
+          }
+
+          return data || [];
+        })()
+      : [];
+
+    const latestVisual = (pawnedItems || []).find((row: CustomerVisualRow) =>
       Boolean(row.profile_photo || row.id_photo || row.id_back_photo),
     ) as CustomerVisualRow | undefined;
 
+    const latestTransactionVisual = (transactions || []).find((row: TransactionVisualRow) =>
+      Boolean(row.profile_photo || row.id_photo || row.id_back_photo),
+    ) as TransactionVisualRow | undefined;
+
+    const latestPawnedVisual = (pawnedItems || []).find((row: CustomerVisualRow) =>
+      Boolean(row.profile_photo || row.id_photo || row.id_back_photo),
+    ) as CustomerVisualRow | undefined;
+
+    const latestProfilePhoto = latestTransactionVisual?.profile_photo
+      ? latestTransactionVisual
+      : (transactions || []).find((row: TransactionVisualRow) => Boolean(row.profile_photo))
+        ?? (pawnedItems || []).find((row: CustomerVisualRow) => Boolean(row.profile_photo));
+    const latestFrontPhoto = latestTransactionVisual?.id_photo
+      ? latestTransactionVisual
+      : (transactions || []).find((row: TransactionVisualRow) => Boolean(row.id_photo))
+        ?? (pawnedItems || []).find((row: CustomerVisualRow) => Boolean(row.id_photo));
+    const latestBackPhoto = latestTransactionVisual?.id_back_photo
+      ? latestTransactionVisual
+      : (transactions || []).find((row: TransactionVisualRow) => Boolean(row.id_back_photo))
+        ?? (pawnedItems || []).find((row: CustomerVisualRow) => Boolean(row.id_back_photo));
+
     const [profilePhotoUrl, idFrontPhotoUrl, idBackPhotoUrl] = await Promise.all([
-      this.resolveStorageUrl(latestVisual?.profile_photo),
-      this.resolveStorageUrl(latestVisual?.id_photo),
-      this.resolveStorageUrl(latestVisual?.id_back_photo),
+      this.resolveStorageUrl(latestProfilePhoto?.profile_photo ?? latestTransactionVisual?.profile_photo ?? latestPawnedVisual?.profile_photo),
+      this.resolveStorageUrl(latestFrontPhoto?.id_photo ?? latestTransactionVisual?.id_photo ?? latestPawnedVisual?.id_photo),
+      this.resolveStorageUrl(latestBackPhoto?.id_back_photo ?? latestTransactionVisual?.id_back_photo ?? latestPawnedVisual?.id_back_photo),
     ]);
 
     return {
