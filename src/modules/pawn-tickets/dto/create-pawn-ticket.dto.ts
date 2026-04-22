@@ -88,10 +88,6 @@ export class CreatePawnTicketItemDto {
   profilePhoto?: string;
 
   @IsOptional()
-  @IsString()
-  itemPhoto?: string;
-
-  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   itemPhotos?: string[];

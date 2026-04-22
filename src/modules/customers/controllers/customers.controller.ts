@@ -27,6 +27,15 @@ export class CustomersController {
     return this.customersService.findAll(req.user, branchId);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Post('merge-duplicates')
+  mergeDuplicateCustomers(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: { branchId?: string },
+  ) {
+    return this.customersService.mergeDuplicateCustomers(req.user, dto?.branchId);
+  }
+
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get(':id')
   findOne(
