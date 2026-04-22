@@ -1,4 +1,9 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { Role } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -52,9 +57,325 @@ interface DashboardFundRequestListRow {
   requested_by: DashboardRelationUser | DashboardRelationUser[] | null;
 }
 
+export interface ExpirationMonitoringItem {
+  id: string;
+  ticketNo: string;
+  customer: string;
+  customerEmail: string | null;
+  item: string;
+  principal: number;
+  totalDue: number;
+  maturityDate: string;
+  daysRemaining: number;
+}
+
+interface ExpirationBuckets {
+  overdue: ExpirationMonitoringItem[];
+  threeDays: ExpirationMonitoringItem[];
+  sevenDays: ExpirationMonitoringItem[];
+  thirtyDays: ExpirationMonitoringItem[];
+}
+
 @Injectable()
 export class DashboardService {
+  private transporter: Transporter | null = null;
+
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  private resolveExpirationBranchScope(
+    user: AuthenticatedUserProfile,
+    branchFilter?: string,
+  ) {
+    const isSuperAdmin = user?.role === Role.SUPER_ADMIN;
+    return !isSuperAdmin ? requireUserBranchId(user) : branchFilter || null;
+  }
+
+  private bucketExpirationItems(items: ExpirationMonitoringItem[]): ExpirationBuckets {
+    const overdue = items.filter((i) => i.daysRemaining <= 0);
+    const threeDays = items.filter(
+      (i) => i.daysRemaining > 0 && i.daysRemaining <= 3,
+    );
+    const sevenDays = items.filter(
+      (i) => i.daysRemaining > 0 && i.daysRemaining <= 7,
+    );
+    const thirtyDays = items.filter(
+      (i) => i.daysRemaining > 0 && i.daysRemaining <= 30,
+    );
+
+    return {
+      overdue,
+      threeDays,
+      sevenDays,
+      thirtyDays,
+    };
+  }
+
+  private getBucketItems(
+    bucket: string | undefined,
+    grouped: ExpirationBuckets,
+  ) {
+    switch ((bucket || '30days').toLowerCase()) {
+      case 'overdue':
+        return grouped.overdue;
+      case '3days':
+      case 'three_days':
+      case 'three-days':
+        return grouped.threeDays;
+      case '7days':
+      case 'seven_days':
+      case 'seven-days':
+        return grouped.sevenDays;
+      case '30days':
+      case 'thirty_days':
+      case 'thirty-days':
+      default:
+        return grouped.thirtyDays;
+    }
+  }
+
+  private async sendResendEmail(
+    to: string,
+    subject: string,
+    html: string,
+  ): Promise<{ deliveredTo: string; testMode: boolean }> {
+    const smtpUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+    const smtpPass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS;
+
+    if (!smtpUser || !smtpPass) {
+      throw new InternalServerErrorException(
+        'Email service is not configured. Set GMAIL_USER and GMAIL_APP_PASSWORD in backend env.',
+      );
+    }
+
+    if (!this.transporter) {
+      const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+      const smtpPort = Number(process.env.SMTP_PORT || 465);
+      const smtpSecure =
+        process.env.SMTP_SECURE == null
+          ? true
+          : process.env.SMTP_SECURE === 'true';
+
+      this.transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+    }
+
+    const fromAddress = process.env.SMTP_FROM || smtpUser;
+    const fromName = process.env.SMTP_FROM_NAME || 'Pawnshop';
+
+    try {
+      await this.transporter.sendMail({
+        from: `${fromName} <${fromAddress}>`,
+        to,
+        subject,
+        html,
+      });
+      return { deliveredTo: to, testMode: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new InternalServerErrorException(
+        `Failed to send email via Gmail SMTP: ${message}`,
+      );
+    }
+  }
+
+  private buildEmailLayout(params: {
+    title: string;
+    subtitle: string;
+    greeting: string;
+    bodyHtml: string;
+  }) {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>${params.title}</title>
+        </head>
+        <body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,sans-serif;color:#1f2937;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6f8;padding:24px 0;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+                  <tr>
+                    <td style="background:linear-gradient(90deg,#0f766e,#0b5d56);padding:20px 24px;">
+                      <div style="font-size:20px;font-weight:700;color:#f8d26a;">JCLB Pawnshop</div>
+                      <div style="margin-top:4px;font-size:13px;color:#d1fae5;">${params.subtitle}</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:24px;">
+                      <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">${params.greeting}</p>
+                      ${params.bodyHtml}
+                      <p style="margin:20px 0 0;font-size:13px;line-height:1.6;color:#4b5563;">
+                        If you already completed this action, you may disregard this message.
+                      </p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:16px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;">
+                      <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.5;">
+                        This is an automated service email from JCLB Pawnshop Management System.
+                        Please contact your branch directly for account-specific concerns.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+  }
+
+  private buildSingleReminderEmail(params: {
+    customerName: string;
+    itemName: string;
+    ticketNo: string;
+    maturityDate: string;
+    daysRemaining: number;
+    totalDue: number;
+  }) {
+    const statusLabel =
+      params.daysRemaining <= 0
+        ? 'Overdue'
+        : `${params.daysRemaining} day${params.daysRemaining > 1 ? 's' : ''} remaining`;
+
+    const body = `
+      <h2 style="margin:0 0 12px;font-size:20px;color:#111827;">Maturity Reminder</h2>
+      <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+        This is a courtesy reminder regarding your pawned item details below.
+      </p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <tr><td style="padding:10px 12px;background:#f8fafc;font-size:12px;color:#6b7280;">Ticket No.</td><td style="padding:10px 12px;font-size:13px;font-weight:600;">${params.ticketNo}</td></tr>
+        <tr><td style="padding:10px 12px;background:#f8fafc;font-size:12px;color:#6b7280;">Item</td><td style="padding:10px 12px;font-size:13px;">${params.itemName}</td></tr>
+        <tr><td style="padding:10px 12px;background:#f8fafc;font-size:12px;color:#6b7280;">Maturity Date</td><td style="padding:10px 12px;font-size:13px;">${params.maturityDate}</td></tr>
+        <tr><td style="padding:10px 12px;background:#f8fafc;font-size:12px;color:#6b7280;">Status</td><td style="padding:10px 12px;font-size:13px;">${statusLabel}</td></tr>
+        <tr><td style="padding:10px 12px;background:#f8fafc;font-size:12px;color:#6b7280;">Estimated Total Due</td><td style="padding:10px 12px;font-size:13px;font-weight:700;color:#0f766e;">PHP ${params.totalDue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;">
+        To avoid additional penalties, please visit your nearest branch for renewal or redemption.
+      </p>
+    `;
+
+    return this.buildEmailLayout({
+      title: 'Pawn Item Maturity Notice',
+      subtitle: 'Contract Monitoring Notification',
+      greeting: `Dear ${params.customerName},`,
+      bodyHtml: body,
+    });
+  }
+
+  private buildBlastReminderEmail(params: {
+    customerName: string;
+    bucketLabel: string;
+    items: Array<{
+      ticketNo: string;
+      itemName: string;
+      maturityDate: string;
+      daysRemaining: number;
+      totalDue: number;
+    }>;
+  }) {
+    const rows = params.items
+      .map(
+        (item) => `
+        <tr>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-size:12px;">${item.ticketNo}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-size:12px;">${item.itemName}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-size:12px;">${item.maturityDate}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-size:12px;">${item.daysRemaining <= 0 ? 'Overdue' : `${item.daysRemaining} day(s)`}</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;font-size:12px;text-align:right;">PHP ${item.totalDue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        </tr>
+      `,
+      )
+      .join('');
+
+    const body = `
+      <h2 style="margin:0 0 12px;font-size:20px;color:#111827;">Expiration Alert Summary</h2>
+      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;">
+        You have pawn contracts tagged under <strong>${params.bucketLabel}</strong>. Please review the details below.
+      </p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:10px;text-align:left;font-size:11px;color:#6b7280;">Ticket No.</th>
+            <th style="padding:10px;text-align:left;font-size:11px;color:#6b7280;">Item</th>
+            <th style="padding:10px;text-align:left;font-size:11px;color:#6b7280;">Maturity Date</th>
+            <th style="padding:10px;text-align:left;font-size:11px;color:#6b7280;">Status</th>
+            <th style="padding:10px;text-align:right;font-size:11px;color:#6b7280;">Total Due</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:1.6;">
+        For assistance, please contact your servicing branch to process renewal or redemption.
+      </p>
+    `;
+
+    return this.buildEmailLayout({
+      title: 'Pawn Expiration Reminder',
+      subtitle: 'Bulk Expiration Monitoring Notice',
+      greeting: `Dear ${params.customerName},`,
+      bodyHtml: body,
+    });
+  }
+
+  private async fetchExpirationMonitoringItems(
+    user: AuthenticatedUserProfile,
+    branchFilter?: string,
+  ): Promise<ExpirationMonitoringItem[]> {
+    const client = this.supabaseService.getClient();
+    const today = new Date();
+    const branchId = this.resolveExpirationBranchScope(user, branchFilter);
+
+    let query = client
+      .from('pawned_items')
+      .select(
+        'id, item_id, item_name, amount, pawn_date, status, branch_id, customers(full_name, email)',
+      )
+      .eq('status', 'Active')
+      .not('pawn_date', 'is', null)
+      .order('pawn_date', { ascending: true });
+
+    if (branchId) query = query.eq('branch_id', branchId);
+
+    const { data, error } = await query;
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return (data || []).map((item: any) => {
+      const maturityDate = new Date(item.pawn_date);
+      maturityDate.setDate(maturityDate.getDate() + 30);
+      const daysRemaining = Math.ceil(
+        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      const customer = Array.isArray(item.customers)
+        ? item.customers[0]
+        : item.customers;
+
+      return {
+        id: item.id,
+        ticketNo: item.item_id,
+        customer: customer?.full_name || 'Unknown',
+        customerEmail: customer?.email || null,
+        item: item.item_name,
+        principal: this.toMoney(item.amount),
+        totalDue: Number((this.toMoney(item.amount) * 1.035).toFixed(2)),
+        maturityDate: maturityDate.toISOString().split('T')[0],
+        daysRemaining,
+      };
+    });
+  }
 
   private toMoney(value: number | string | null | undefined): number {
     const parsed = Number(value ?? 0);
@@ -825,80 +1146,156 @@ export class DashboardService {
     user: AuthenticatedUserProfile,
     branchFilter?: string,
   ) {
-    const client = this.supabaseService.getClient();
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-
-    const isAdmin = user?.role === Role.SUPER_ADMIN;
-    const branchId = !isAdmin
-      ? requireUserBranchId(user)
-      : branchFilter || null;
-
-    // Fetch all active pawned items with pawn_date
-    let query = client
-      .from('pawned_items')
-      .select(
-        'id, item_id, item_name, category, branch, amount, pawn_date, status, customer_id, customers(full_name)',
-      )
-      .eq('status', 'Active')
-      .not('pawn_date', 'is', null)
-      .order('pawn_date', { ascending: true });
-
-    if (branchId) query = query.eq('branch_id', branchId);
-
-    const { data, error } = await query;
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    const items = (data || []).map((item: any) => {
-      const maturityDate = new Date(item.pawn_date);
-      maturityDate.setDate(maturityDate.getDate() + 30);
-      const daysRemaining = Math.ceil(
-        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      const customer = Array.isArray(item.customers)
-        ? item.customers[0]
-        : item.customers;
-
-      return {
-        id: item.id,
-        ticketNo: item.item_id,
-        customer: customer?.full_name || 'Unknown',
-        item: item.item_name,
-        principal: this.toMoney(item.amount),
-        totalDue: Number((this.toMoney(item.amount) * 1.035).toFixed(2)),
-        maturityDate: maturityDate.toISOString().split('T')[0],
-        daysRemaining,
-      };
-    });
-
-    // Bucket items
-    const overdue = items.filter((i: any) => i.daysRemaining <= 0);
-    const within3 = items.filter(
-      (i: any) => i.daysRemaining > 0 && i.daysRemaining <= 3,
-    );
-    const within7 = items.filter(
-      (i: any) => i.daysRemaining > 0 && i.daysRemaining <= 7,
-    );
-    const within30 = items.filter(
-      (i: any) => i.daysRemaining > 0 && i.daysRemaining <= 30,
-    );
+    const items = await this.fetchExpirationMonitoringItems(user, branchFilter);
+    const buckets = this.bucketExpirationItems(items);
 
     return {
       stats: {
-        overdue: overdue.length,
-        threeDays: within3.length,
-        sevenDays: within7.length,
-        thirtyDays: within30.length,
+        overdue: buckets.overdue.length,
+        threeDays: buckets.threeDays.length,
+        sevenDays: buckets.sevenDays.length,
+        thirtyDays: buckets.thirtyDays.length,
       },
       items,
       buckets: {
-        overdue,
-        threeDays: within3,
-        sevenDays: within7,
-        thirtyDays: within30,
+        overdue: buckets.overdue,
+        threeDays: buckets.threeDays,
+        sevenDays: buckets.sevenDays,
+        thirtyDays: buckets.thirtyDays,
       },
+    };
+  }
+
+  async sendExpirationEmailBlast(
+    user: AuthenticatedUserProfile,
+    bucket: string | undefined,
+    branchFilter?: string,
+  ) {
+    const items = await this.fetchExpirationMonitoringItems(user, branchFilter);
+    const grouped = this.bucketExpirationItems(items);
+    const targetItems = this.getBucketItems(bucket, grouped);
+    const recipientsMap = new Map<string, ExpirationMonitoringItem[]>();
+    for (const item of targetItems) {
+      const email = item.customerEmail?.trim().toLowerCase();
+      if (!email) {
+        continue;
+      }
+      const current = recipientsMap.get(email) ?? [];
+      current.push(item);
+      recipientsMap.set(email, current);
+    }
+
+    const fallbackRecipient = (
+      process.env.BLAST_FALLBACK_EMAIL ||
+      process.env.GMAIL_USER ||
+      process.env.SMTP_FROM
+    )?.trim();
+
+    if (recipientsMap.size === 0 && targetItems.length > 0 && fallbackRecipient) {
+      recipientsMap.set(fallbackRecipient.toLowerCase(), targetItems);
+    }
+
+    if (recipientsMap.size === 0) {
+      return {
+        success: false,
+        message:
+          'No recipient emails found for this bucket. Add customer emails or set BLAST_FALLBACK_EMAIL in backend env.',
+        sentCount: 0,
+        failedCount: 0,
+        bucket: bucket || '30days',
+      };
+    }
+
+    const bucketLabelMap: Record<string, string> = {
+      overdue: 'Overdue',
+      '3days': 'Expiring within 3 days',
+      '7days': 'Expiring within 7 days',
+      '30days': 'Expiring within 30 days',
+    };
+    const resolvedBucket = (bucket || '30days').toLowerCase();
+    const bucketLabel = bucketLabelMap[resolvedBucket] || 'Expiring Soon';
+
+    const deliveries = await Promise.allSettled(
+      Array.from(recipientsMap.entries()).map(([email, customerItems]) =>
+        this.sendResendEmail(
+          email,
+          `JCLB Pawnshop | ${bucketLabel} Reminder`,
+          this.buildBlastReminderEmail({
+            customerName: customerItems[0]?.customer || 'Valued Customer',
+            bucketLabel,
+            items: customerItems.map((entry) => ({
+              ticketNo: entry.ticketNo,
+              itemName: entry.item,
+              maturityDate: entry.maturityDate,
+              daysRemaining: entry.daysRemaining,
+              totalDue: entry.totalDue,
+            })),
+          }),
+        ),
+      ),
+    );
+
+    const sentCount = deliveries.filter(
+      (delivery) => delivery.status === 'fulfilled',
+    ).length;
+    const failedCount = deliveries.length - sentCount;
+
+    if (sentCount === 0) {
+      throw new InternalServerErrorException(
+        'Unable to send blast emails. Please check SMTP credentials and try again.',
+      );
+    }
+
+    const message =
+      failedCount > 0
+        ? `Email blast partially sent: ${sentCount} delivered, ${failedCount} failed.`
+        : `Sent ${sentCount} professional reminder email(s).`;
+
+    return {
+      success: true,
+      message,
+      sentCount,
+      failedCount,
+      bucket: bucket || '30days',
+    };
+  }
+
+  async sendExpirationReminder(
+    user: AuthenticatedUserProfile,
+    itemId: string,
+    branchFilter?: string,
+  ) {
+    const items = await this.fetchExpirationMonitoringItems(user, branchFilter);
+    const selected = items.find((item) => item.id === itemId);
+
+    if (!selected) {
+      throw new BadRequestException('Expiration item not found.');
+    }
+
+    if (!selected.customerEmail) {
+      throw new BadRequestException(
+        `No email address found for ${selected.customer}.`,
+      );
+    }
+
+    const delivery = await this.sendResendEmail(
+      selected.customerEmail,
+      'JCLB Pawnshop | Pawn Item Maturity Notice',
+      this.buildSingleReminderEmail({
+        customerName: selected.customer,
+        itemName: selected.item,
+        ticketNo: selected.ticketNo,
+        maturityDate: selected.maturityDate,
+        daysRemaining: selected.daysRemaining,
+        totalDue: selected.totalDue,
+      }),
+    );
+
+    return {
+      success: true,
+      message: `Email sent to ${selected.customer}.`,
+      sentTo: delivery.deliveredTo,
+      intendedRecipient: selected.customerEmail,
     };
   }
 }
