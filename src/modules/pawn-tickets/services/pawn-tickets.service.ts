@@ -254,7 +254,7 @@ export class PawnTicketsService {
         address: dto.customer.address.trim(),
         barangay: dto.customer.barangay?.trim() ?? null,
         city: dto.customer.city?.trim() ?? null,
-        province: dto.customer.province?.trim() ?? null,
+        region: dto.customer.region?.trim() ?? null,
         contact_number: dto.customer.contactNumber?.trim() ?? null,
         email: dto.customer.email?.trim() ?? null,
         id_presented: dto.customer.idPresented?.trim() ?? null,

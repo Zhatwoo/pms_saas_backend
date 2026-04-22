@@ -3,7 +3,7 @@ export class CreateCustomerDto {
   address!: string;
   barangay?: string;
   city?: string;
-  province?: string;
+  region?: string;
   contact_number?: string;
   email?: string;
   id_presented?: string;

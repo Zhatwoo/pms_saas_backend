@@ -19,7 +19,7 @@ export class UpdateCustomerDto {
 
   @IsOptional()
   @IsString()
-  province?: string;
+  region?: string;
 
   @IsOptional()
   @Matches(/^\+?[0-9]{7,15}$/)

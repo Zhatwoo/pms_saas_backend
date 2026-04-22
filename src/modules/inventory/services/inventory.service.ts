@@ -261,7 +261,7 @@ export class InventoryService {
         address: string;
         barangay?: string | null;
         city?: string | null;
-        province?: string | null;
+        region?: string | null;
         contact_number?: string | null;
         id_presented?: string | null;
       } | null = null;
@@ -270,7 +270,7 @@ export class InventoryService {
         const { data: customer, error: customerError } = await client
           .from('customers')
           .select(
-            'full_name, address, barangay, city, province, contact_number, id_presented',
+            'full_name, address, barangay, city, region, contact_number, id_presented',
           )
           .eq('id', pawnedData.customer_id)
           .maybeSingle();
@@ -312,7 +312,7 @@ export class InventoryService {
               customerData.address,
               customerData.barangay,
               customerData.city,
-              customerData.province,
+              customerData.region,
             ]
               .filter(Boolean)
               .join(', ')
