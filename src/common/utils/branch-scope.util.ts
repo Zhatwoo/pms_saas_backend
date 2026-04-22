@@ -10,6 +10,7 @@ const UUID_RE =
 export type UserWithBranch = {
   role: Role;
   branchId: string | null;
+  id?: string | null;
 };
 
 export function isUuid(value: string): boolean {

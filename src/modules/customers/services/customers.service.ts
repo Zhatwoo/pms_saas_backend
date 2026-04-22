@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { Role } from '../../../common/enums';
@@ -34,6 +35,50 @@ type CustomerMergeCandidate = {
 @Injectable()
 export class CustomersService {
   constructor(private readonly supabase: SupabaseService) {}
+
+  private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
+    if (!storedUrl) {
+      return '';
+    }
+
+    if (!storedUrl.startsWith('http')) {
+      return storedUrl;
+    }
+
+    try {
+      const parsedUrl = new URL(storedUrl);
+      const storagePrefix = '/storage/v1/object/public/';
+
+      if (!parsedUrl.pathname.includes(storagePrefix)) {
+        return storedUrl;
+      }
+
+      const storagePath = parsedUrl.pathname.split(storagePrefix)[1];
+      if (!storagePath) {
+        return storedUrl;
+      }
+
+      const [bucketName, ...objectPathParts] = storagePath.split('/');
+      const objectPath = objectPathParts.join('/');
+
+      if (!bucketName || !objectPath) {
+        return storedUrl;
+      }
+
+      const { data, error } = await this.supabase
+        .getClient()
+        .storage.from(bucketName)
+        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+
+      if (error || !data?.signedUrl) {
+        return storedUrl;
+      }
+
+      return data.signedUrl;
+    } catch {
+      return storedUrl;
+    }
+  }
 
   private resolveMergeBranchId(user: UserWithBranch, branchId?: string) {
     if (user.role === Role.SUPER_ADMIN) {
@@ -101,10 +146,16 @@ export class CustomersService {
       Boolean(row.profile_photo || row.id_photo || row.id_back_photo),
     ) as CustomerVisualRow | undefined;
 
+    const [profilePhotoUrl, idFrontPhotoUrl, idBackPhotoUrl] = await Promise.all([
+      this.resolveStorageUrl(latestVisual?.profile_photo),
+      this.resolveStorageUrl(latestVisual?.id_photo),
+      this.resolveStorageUrl(latestVisual?.id_back_photo),
+    ]);
+
     return {
-      profilePhotoUrl: latestVisual?.profile_photo ?? null,
-      idFrontPhotoUrl: latestVisual?.id_photo ?? null,
-      idBackPhotoUrl: latestVisual?.id_back_photo ?? null,
+      profilePhotoUrl: profilePhotoUrl || null,
+      idFrontPhotoUrl: idFrontPhotoUrl || null,
+      idBackPhotoUrl: idBackPhotoUrl || null,
     };
   }
 
@@ -192,9 +243,25 @@ export class CustomersService {
 
     const group = await this.resolveCustomerNameGroup(user, data as CustomerRow);
     const visuals = await this.resolveCustomerVisuals(group.matchingIds);
+    let branchName: string | null = null;
+
+    if (data.branch_id) {
+      const { data: branch, error: branchError } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', data.branch_id)
+        .maybeSingle<{ name: string }>();
+
+      if (branchError) {
+        throw new InternalServerErrorException(branchError.message);
+      }
+
+      branchName = branch?.name ?? null;
+    }
 
     return {
       ...data,
+      branch_name: branchName,
       profile_photo_url: visuals.profilePhotoUrl,
       id_front_photo_url: visuals.idFrontPhotoUrl,
       id_back_photo_url: visuals.idBackPhotoUrl,
@@ -302,6 +369,47 @@ export class CustomersService {
     }
 
     return { message: 'Note saved successfully' };
+  }
+
+  // Update customer information (admin / super admin only)
+  async update(user: UserWithBranch, id: string, updateDto: any) {
+    const client = this.supabase.getClient();
+    // Ensure the customer exists and is within the allowed branch scope
+    const existing = await this.findOne(user, id);
+    if (!existing) {
+      throw new NotFoundException('Customer not found');
+    }
+    const { error } = await client
+      .from('customers')
+      .update(updateDto)
+      .eq('id', id);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+    return { message: 'Customer updated successfully' };
+  }
+
+  // Employee request to edit customer details (adds a note for review)
+  async requestEdit(user: AuthenticatedUserProfile, id: string, notes: string) {
+    const client = this.supabase.getClient();
+    const customer = await this.findOne(user, id);
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+    const trimmed = notes?.trim();
+    if (!trimmed) {
+      throw new BadRequestException('Edit request notes are required');
+    }
+    const { error } = await client.from('activity_logs').insert({
+      user_id: user.id,
+      branch_id: customer.branch_id || null,
+      action: 'CUSTOMER_EDIT_REQUESTED',
+      details: JSON.stringify({ customerId: id, notes: trimmed }),
+    });
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+    return { message: 'Edit request submitted successfully' };
   }
 
   async mergeDuplicateCustomers(
