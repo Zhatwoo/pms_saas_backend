@@ -1,9 +1,10 @@
-import { Controller, Post, Body, Req, Get, Query, Param } from '@nestjs/common';
+import { Controller, Post, Body, Req, Get, Query, Param, Put } from '@nestjs/common';
 import { CustomersService } from '../services/customers.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { CreateCustomerDto } from '../dto/create-customer.dto';
+import { UpdateCustomerDto } from '../dto/update-customer.dto';
 
 @Controller('customers')
 export class CustomersController {
@@ -45,6 +46,16 @@ export class CustomersController {
     return this.customersService.findOne(req.user, id);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Put(':id')
+  update(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() updateDto: any,
+  ) {
+    return this.customersService.update(req.user, id, updateDto);
+  }
+
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get(':id/activity-logs')
   findCustomerActivityLogs(
@@ -68,4 +79,15 @@ export class CustomersController {
       dto?.note,
     );
   }
+
+  @Roles(Role.EMPLOYEE)
+  @Post(':id/request-edit')
+  requestEdit(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: { notes: string },
+  ) {
+    return this.customersService.requestEdit(req.user, id, dto.notes);
+  }
 }
+
