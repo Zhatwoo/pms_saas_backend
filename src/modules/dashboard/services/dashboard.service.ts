@@ -383,6 +383,19 @@ export class DashboardService {
     return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
   }
 
+  private formatRelativeTime(isoString: string): string {
+    if (!isoString) return '';
+    const diff = Date.now() - new Date(isoString).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(isoString).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
   private summarizeFundRequests(
     rows: Array<{
       status: string;
@@ -1119,32 +1132,32 @@ export class DashboardService {
       };
     });
 
-    // Notifications (recent items that expired)
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+    // Notifications (fetch from notifications table)
+    let notifQuery = client
+      .from('notifications')
+      .select('id, title, subtitle, created_at, is_read')
+      .order('created_at', { ascending: false })
+      .limit(5);
 
-    const notifQuery = buildPawnQuery(
-      client
-        .from('pawned_items')
-        .select('id, item_name, item_id, pawn_date')
-        .eq('status', 'Active')
-        .lte('pawn_date', thirtyDaysAgoStr)
-        .order('pawn_date', { ascending: true })
-        .limit(5),
-    );
+    if (user.role !== Role.SUPER_ADMIN) {
+      if (user.branchId) {
+        notifQuery = notifQuery.or(
+          `branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`,
+        );
+      } else {
+        notifQuery = notifQuery.or(`user_id.eq.${user.id},branch_id.is.null`);
+      }
+    } else if (branchId) {
+      notifQuery = notifQuery.or(`branch_id.eq.${branchId},branch_id.is.null`);
+    }
+
     const notifResult = await notifQuery;
-    const notifications = (notifResult.data || []).map(
-      (item: any, idx: number) => {
-        const matDate = new Date(item.pawn_date);
-        matDate.setDate(matDate.getDate() + 30);
-        return {
-          id: item.id || idx,
-          message: `${item.item_name} (${item.item_id}) has passed its maturity date`,
-          time: matDate.toISOString().split('T')[0],
-        };
-      },
-    );
+    const notifications = (notifResult.data || []).map((item: any) => ({
+      id: item.id,
+      message: item.title || item.subtitle || 'Notification',
+      time: this.formatRelativeTime(item.created_at),
+      branchId: item.branch_id || null,
+    }));
 
     return {
       overallData: {
