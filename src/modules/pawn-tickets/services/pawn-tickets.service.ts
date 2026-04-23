@@ -157,11 +157,9 @@ export class PawnTicketsService {
 
     let dbQuery = client
       .from('pawned_items')
-      .select(`
-        id, item_name, item_id, unit_code, serial_number, amount, pawn_date, status, branch_id,
-        customer:customers (id, full_name, contact_number),
-        branch:branches (name)
-      `)
+      .select(
+        'id, item_name, item_id, serial_number, amount, pawn_date, status, branch_id, customer_id',
+      )
       .order('pawn_date', { ascending: false })
       .limit(500);
 
@@ -177,19 +175,82 @@ export class PawnTicketsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    let items = data ?? [];
+    let items = (data ?? []) as Array<{
+      id: string;
+      item_name: string | null;
+      item_id: string | null;
+      serial_number: string | null;
+      amount: number | string | null;
+      pawn_date: string | null;
+      status: string | null;
+      branch_id: string | null;
+      customer_id: string | null;
+    }>;
+
+    const customerIds = Array.from(
+      new Set(items.map((i) => i.customer_id).filter((id): id is string => Boolean(id))),
+    );
+    const branchIds = Array.from(
+      new Set(items.map((i) => i.branch_id).filter((id): id is string => Boolean(id))),
+    );
+
+    let customerMap = new Map<
+      string,
+      { id: string; full_name: string | null; contact_number: string | null }
+    >();
+    let branchMap = new Map<string, { name: string | null }>();
+
+    if (customerIds.length > 0) {
+      const { data: customerRows, error: customerError } = await client
+        .from('customers')
+        .select('id, full_name, contact_number')
+        .in('id', customerIds);
+      if (customerError) {
+        throw new InternalServerErrorException(customerError.message);
+      }
+      customerMap = new Map(
+        (customerRows ?? []).map((row: any) => [
+          row.id,
+          {
+            id: row.id,
+            full_name: row.full_name ?? null,
+            contact_number: row.contact_number ?? null,
+          },
+        ]),
+      );
+    }
+
+    if (branchIds.length > 0) {
+      const { data: branchRows, error: branchError } = await client
+        .from('branches')
+        .select('id, name')
+        .in('id', branchIds);
+      if (branchError) {
+        throw new InternalServerErrorException(branchError.message);
+      }
+      branchMap = new Map(
+        (branchRows ?? []).map((row: any) => [row.id, { name: row.name ?? null }]),
+      );
+    }
+
+    let normalized = items.map((item) => ({
+      ...item,
+      unit_code: item.item_id ?? null,
+      customer: item.customer_id ? customerMap.get(item.customer_id) ?? null : null,
+      branch: item.branch_id ? branchMap.get(item.branch_id) ?? null : null,
+    }));
 
     if (query.search) {
       const q = query.search.toLowerCase();
-      items = items.filter((item: any) =>
+      normalized = normalized.filter((item) =>
         (item.item_name ?? '').toLowerCase().includes(q) ||
-        (item.unit_code ?? '').toLowerCase().includes(q) ||
+        (item.item_id ?? '').toLowerCase().includes(q) ||
         (item.serial_number ?? '').toLowerCase().includes(q) ||
         (item.customer?.full_name ?? '').toLowerCase().includes(q),
       );
     }
 
-    return items;
+    return normalized;
   }
 
   async create(user: AuthenticatedUserProfile, dto: CreatePawnTicketDto) {
