@@ -7,6 +7,7 @@ import {
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
 import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
+import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
@@ -286,7 +287,7 @@ export class TransactionsService {
       endingBalance: 0,
     };
 
-    // If a specific branch is scoped, attempt to fetch its balance record for the current view
+    // If a specific branch is scoped, load today's daily_balances row or carry-forward snapshot
     if (scoped) {
       const balanceDate = date || new Date().toISOString().split('T')[0];
       const { data: balanceData } = await client
@@ -299,6 +300,42 @@ export class TransactionsService {
       if (balanceData) {
         stats.startingBalance = Number(balanceData.starting_balance || 0);
         stats.endingBalance = Number(balanceData.ending_balance || 0);
+      } else {
+        const { data: recentRows } = await client
+          .from('daily_balances')
+          .select('branch_id, record_date, starting_balance, ending_balance')
+          .eq('branch_id', scoped)
+          .order('record_date', { ascending: false })
+          .limit(120);
+        const snap = computeBranchDaySnapshot(
+          recentRows ?? [],
+          scoped,
+          balanceDate,
+          { carryForward: false },
+        );
+        stats.startingBalance = snap.startingBalance;
+        stats.endingBalance = snap.endingBalance;
+        const txsMatchBalanceDate =
+          filtered.length === 0 ||
+          filtered.every(
+            (t: any) => String(t.transaction_date) === balanceDate,
+          );
+        if (txsMatchBalanceDate && filtered.length > 0) {
+          const net = filtered.reduce((sum: number, t: any) => {
+            const p = String(t.purpose ?? '')
+              .toLowerCase()
+              .trim();
+            if (p === 'start' || p === 'end') return sum;
+            return (
+              sum +
+              (parseFloat(String(t.cash_in ?? 0)) || 0) -
+              (parseFloat(String(t.cash_out ?? 0)) || 0)
+            );
+          }, 0);
+          stats.endingBalance = Number(
+            (snap.startingBalance + net).toFixed(2),
+          );
+        }
       }
     }
 
