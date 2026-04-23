@@ -1,0 +1,43 @@
+import { Controller, Get, Post, Body, Req, Query } from '@nestjs/common';
+import { PawnTicketsService } from '../services/pawn-tickets.service';
+import { Roles } from '../../../common/decorators';
+import { Role } from '../../../common/enums';
+import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
+
+@Controller('pawn-tickets')
+export class PawnTicketsController {
+  constructor(private readonly pawnTicketsService: PawnTicketsService) {}
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get()
+  findAll(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.pawnTicketsService.findAll(req.user, { branch, status, search });
+  }
+
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Post()
+  create(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() createPawnTicketDto: CreatePawnTicketDto,
+  ) {
+    return this.pawnTicketsService.create(req.user, createPawnTicketDto);
+  }
+
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Get('next-unit-code')
+  getNextUnitCode(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.pawnTicketsService.generateNextUnitCode(req.user);
+  }
+
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Get('next-serial-number')
+  getNextSerialNumber(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.pawnTicketsService.generateNextSerialNumber(req.user);
+  }
+}

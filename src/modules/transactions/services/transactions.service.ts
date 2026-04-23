@@ -6,21 +6,118 @@ import {
   effectiveBranchIdForQuery,
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
+import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
+import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
 import { Role } from '../../../common/enums';
+import { NotificationsService } from '../../notifications/services/notifications.service';
+import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
+
+type CustomerGroupMatch = {
+  id: string;
+  full_name: string;
+  branch_id: string | null;
+};
+
+type CustomerTimelineScope = {
+  customer: CustomerGroupMatch;
+  matchingCustomerIds: string[];
+  matchingPawnedItemIds: string[];
+};
 
 @Injectable()
 export class TransactionsService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private notificationsService: NotificationsService,
+  ) {}
 
-  async create(user: UserWithBranch, createTransactionDto: any) {
-    const payload =
-      user.role === Role.SUPER_ADMIN
-        ? { ...createTransactionDto }
-        : {
-            ...createTransactionDto,
-            branch_id: requireUserBranchId(user),
-          };
-    const { branch_id, cash_in, cash_out } = payload;
+  private async resolveCustomerTimelineScope(
+    user: UserWithBranch,
+    customerId: string,
+  ): Promise<CustomerTimelineScope | null> {
+    const client = this.supabase.getClient();
+    let customerQuery = client
+      .from('customers')
+      .select('id, full_name, branch_id')
+      .eq('id', customerId);
+
+    if (user.role !== Role.SUPER_ADMIN) {
+      customerQuery = customerQuery.eq('branch_id', requireUserBranchId(user));
+    }
+
+    const { data: customer, error: customerError } = await customerQuery.maybeSingle();
+
+    if (customerError) {
+      throw new InternalServerErrorException(customerError.message);
+    }
+
+    if (!customer) {
+      return null;
+    }
+
+    let groupQuery = client.from('customers').select('id, full_name, branch_id');
+    if (user.role !== Role.SUPER_ADMIN) {
+      groupQuery = groupQuery.eq('branch_id', requireUserBranchId(user));
+    }
+
+    const { data: candidates, error: candidatesError } = await groupQuery;
+    if (candidatesError) {
+      throw new InternalServerErrorException(candidatesError.message);
+    }
+
+    const targetName = normalizeCustomerFullName(customer.full_name);
+    const matchingCustomerIds = (candidates || [])
+      .filter((candidate: CustomerGroupMatch) =>
+        normalizeCustomerFullName(candidate.full_name) === targetName,
+      )
+      .map((candidate: CustomerGroupMatch) => candidate.id);
+
+    if (!matchingCustomerIds.includes(customer.id)) {
+      matchingCustomerIds.unshift(customer.id);
+    }
+
+    const { data: pawnedItems, error: pawnedItemsError } = await client
+      .from('pawned_items')
+      .select('id, customer_id')
+      .in('customer_id', matchingCustomerIds);
+
+    if (pawnedItemsError) {
+      throw new InternalServerErrorException(pawnedItemsError.message);
+    }
+
+    return {
+      customer,
+      matchingCustomerIds,
+      matchingPawnedItemIds: (pawnedItems || []).map((item: { id: string }) => item.id),
+    };
+  }
+
+  async create(user: UserWithBranch, dto: any) {
+    // 1. Resolve Branch Info
+    const branchId =
+      dto.branch_id ||
+      (user.role !== Role.SUPER_ADMIN ? requireUserBranchId(user) : null);
+    if (!branchId) {
+      throw new InternalServerErrorException(
+        'Missing branch_id for transaction.',
+      );
+    }
+
+    const branchName = dto.branch || 'Unknown Branch';
+
+    // Generate transaction number if not provided
+    const transactionNo =
+      dto.transaction_no ||
+      `${dto.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
+
+    const payload = {
+      ...dto,
+      transaction_no: transactionNo,
+      branch_id: branchId,
+      branch: branchName,
+    };
+
+    const { cash_in, cash_out } = payload;
     const client = this.supabase.getClient();
 
     // 1. Insert Transaction
@@ -30,51 +127,219 @@ export class TransactionsService {
       .select()
       .single();
 
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      console.error('[Transactions DB Error]', error);
+      throw new InternalServerErrorException(error.message);
+    }
 
-    // 2. Adjust daily balance real time
-    if (branch_id && (cash_in || cash_out)) {
-      const today = new Date().toISOString().split('T')[0];
+    if (branchId && (cash_in || cash_out)) {
+      const netChange = parseFloat(cash_in || 0) - parseFloat(cash_out || 0);
+      await adjustDailyBalance(client, branchId, netChange);
+    }
 
-      const { data: balanceData } = await client
-        .from('daily_balances')
-        .select('ending_balance')
-        .eq('branch_id', branch_id)
-        .eq('record_date', today)
-        .single();
+    // 3. Create Notification
+    try {
+      const title =
+        dto.purpose === 'Buy Back'
+          ? `Successful buyback completed - ${transactionNo}`
+          : `New ${dto.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
 
-      if (balanceData) {
-        const netChange = parseFloat(cash_in || 0) - parseFloat(cash_out || 0);
-        await client
-          .from('daily_balances')
-          .update({
-            ending_balance: parseFloat(balanceData.ending_balance) + netChange,
-          })
-          .eq('branch_id', branch_id)
-          .eq('record_date', today);
-      }
+      const subtitle = dto.unit
+        ? `Transaction Alert: ${dto.purpose?.toLowerCase() || 'item'} [${dto.unit}]`
+        : `Transaction Alert: ${dto.purpose?.toLowerCase() || 'activity'}`;
+
+      await this.notificationsService.create({
+        title,
+        subtitle,
+        category: 'Transactions',
+        branch_id: branchId,
+      });
+    } catch (e) {
+      console.warn('[TransactionsService] Failed to create notification', e);
     }
 
     return data;
   }
 
-  async findAll(user: UserWithBranch, branchQuery?: string) {
+  async findAll(
+    user: UserWithBranch,
+    branchQuery?: string,
+    date?: string,
+    range?: string,
+    customerId?: string,
+  ) {
     const client = this.supabase.getClient();
     let query = client
       .from('transactions')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .select(
+        `
+        *,
+        pawned_item:pawned_items (
+          *,
+          customer:customers (
+            full_name,
+            address,
+            contact_number
+          )
+        )
+      `,
+      )
+      .order('transaction_date', { ascending: false })
+      .order('transaction_time', { ascending: false });
 
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
     if (scoped) {
       query = query.eq('branch_id', scoped);
     }
 
+    const customerScope = customerId
+      ? await this.resolveCustomerTimelineScope(user, customerId)
+      : null;
+
+    if (customerId && !customerScope) {
+      return {
+        transactions: [],
+        stats: {
+          pawnedToday: 0,
+          buyBack: 0,
+          renewed: 0,
+          soldItem: 0,
+          redeemed: 0,
+          transfer: 0,
+          startingBalance: 0,
+          endingBalance: 0,
+        },
+      };
+    }
+
+    // Skip date filtering if customerId is provided - show all customer's transactions
+    if (!customerId) {
+      if (date) {
+        query = query.eq('transaction_date', date);
+      } else if (range && range !== 'daily') {
+        if (range === 'weekly') {
+          const lastWeek = new Date();
+          lastWeek.setDate(lastWeek.getDate() - 7);
+          query = query.gte(
+            'transaction_date',
+            lastWeek.toISOString().split('T')[0],
+          );
+        } else if (range === 'monthly') {
+          const lastMonth = new Date();
+          lastMonth.setMonth(lastMonth.getMonth() - 1);
+          query = query.gte(
+            'transaction_date',
+            lastMonth.toISOString().split('T')[0],
+          );
+        }
+        // If range is 'all', we don't apply any date filter
+      } else if (range === 'daily' || !range) {
+        // Keep daily default for general transaction list calls (when no customerId).
+        const filterDate = date || new Date().toISOString().split('T')[0];
+        query = query.eq('transaction_date', filterDate);
+      }
+    }
+
     const { data: transactions, error } = await query;
     if (error) throw new InternalServerErrorException(error.message);
 
-    // Compute quick dashboard stats
-    return transactions;
+    // Filter by customerId after fetching (post-filter)
+    let filtered = transactions;
+    if (customerScope) {
+      const customerIdSet = new Set(customerScope.matchingCustomerIds);
+      const pawnedItemIdSet = new Set(customerScope.matchingPawnedItemIds);
+      filtered = transactions.filter(
+        (tx: any) => {
+          const transactionCustomerId =
+            tx.customer_id ??
+            tx.customerId ??
+            tx.pawned_item?.customer_id ??
+            tx.pawned_item?.customer?.id ??
+            null;
+
+          const relatedPawnedItemId =
+            tx.related_pawned_item_id ??
+            tx.pawned_item?.id ??
+            null;
+
+          return (
+            (transactionCustomerId != null && customerIdSet.has(transactionCustomerId)) ||
+            (relatedPawnedItemId != null && pawnedItemIdSet.has(relatedPawnedItemId))
+          );
+        },
+      );
+    }
+
+    // Compute stats for the requested date and range
+    const stats = {
+      pawnedToday: filtered.filter((t: any) => t.purpose === 'Pawn').length,
+      buyBack: filtered.filter((t: any) => t.purpose === 'Buy Back').length,
+      renewed: filtered.filter((t: any) => t.purpose === 'Renew').length,
+      soldItem: filtered.filter(
+        (t: any) => t.purpose === 'Sold Item' || t.purpose === 'Sale',
+      ).length,
+      redeemed: filtered.filter((t: any) => t.purpose === 'Redeem').length,
+      transfer: filtered.filter(
+        (t: any) =>
+          t.purpose === 'Fund Transfer' || t.purpose === 'Cash Transfer',
+      ).length,
+      startingBalance: 0,
+      endingBalance: 0,
+    };
+
+    // If a specific branch is scoped, load today's daily_balances row or carry-forward snapshot
+    if (scoped) {
+      const balanceDate = date || new Date().toISOString().split('T')[0];
+      const { data: balanceData } = await client
+        .from('daily_balances')
+        .select('starting_balance, ending_balance')
+        .eq('branch_id', scoped)
+        .eq('record_date', balanceDate)
+        .maybeSingle();
+
+      if (balanceData) {
+        stats.startingBalance = Number(balanceData.starting_balance || 0);
+        stats.endingBalance = Number(balanceData.ending_balance || 0);
+      } else {
+        const { data: recentRows } = await client
+          .from('daily_balances')
+          .select('branch_id, record_date, starting_balance, ending_balance')
+          .eq('branch_id', scoped)
+          .order('record_date', { ascending: false })
+          .limit(120);
+        const snap = computeBranchDaySnapshot(
+          recentRows ?? [],
+          scoped,
+          balanceDate,
+          { carryForward: false },
+        );
+        stats.startingBalance = snap.startingBalance;
+        stats.endingBalance = snap.endingBalance;
+        const txsMatchBalanceDate =
+          filtered.length === 0 ||
+          filtered.every(
+            (t: any) => String(t.transaction_date) === balanceDate,
+          );
+        if (txsMatchBalanceDate && filtered.length > 0) {
+          const net = filtered.reduce((sum: number, t: any) => {
+            const p = String(t.purpose ?? '')
+              .toLowerCase()
+              .trim();
+            if (p === 'start' || p === 'end') return sum;
+            return (
+              sum +
+              (parseFloat(String(t.cash_in ?? 0)) || 0) -
+              (parseFloat(String(t.cash_out ?? 0)) || 0)
+            );
+          }, 0);
+          stats.endingBalance = Number(
+            (snap.startingBalance + net).toFixed(2),
+          );
+        }
+      }
+    }
+
+    return { transactions: filtered, stats };
   }
 
   async findOne(user: UserWithBranch, id: string) {

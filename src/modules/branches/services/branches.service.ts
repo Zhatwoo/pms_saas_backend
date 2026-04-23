@@ -30,6 +30,17 @@ export class BranchesService {
     return `${normalizedBase} Branch`;
   }
 
+  private resolveContactNumber(value?: string, fallback?: string): string {
+    const candidate = value ?? fallback;
+    if (!candidate) {
+      throw new InternalServerErrorException(
+        'Branch contact number is required',
+      );
+    }
+
+    return candidate.trim();
+  }
+
   private async getNextAvailableBranchCode(): Promise<string> {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -59,6 +70,10 @@ export class BranchesService {
       ...createBranchDto,
       name: this.normalizeBranchName(createBranchDto.name),
       branch_code: createBranchDto.branch_code.trim(),
+      contact_number: this.resolveContactNumber(
+        createBranchDto.contact_number,
+        createBranchDto.contactNumber,
+      ),
     };
 
     let { data, error } = await this.supabaseService
@@ -172,6 +187,14 @@ export class BranchesService {
       ...(updateBranchDto.name
         ? { name: this.normalizeBranchName(updateBranchDto.name) }
         : {}),
+      ...(updateBranchDto.contact_number || updateBranchDto.contactNumber
+        ? {
+            contact_number: this.resolveContactNumber(
+              updateBranchDto.contact_number,
+              updateBranchDto.contactNumber,
+            ),
+          }
+        : {}),
     };
 
     const { data, error } = await this.supabaseService
@@ -201,5 +224,55 @@ export class BranchesService {
     }
 
     return { deleted: true };
+  }
+
+  async getOverviewStats() {
+    const client = this.supabaseService.getClient();
+
+    const [pawnedResult, saleResult] = await Promise.all([
+      client
+        .from('pawned_items')
+        .select('branch_id, amount, status'),
+      client
+        .from('sale_items')
+        .select('branch_id, price, status'),
+    ]);
+
+    const branchStats = new Map<
+      string,
+      { pawnedItems: number; forSaleItems: number; totalValue: number }
+    >();
+
+    const ensure = (id: string) => {
+      if (!branchStats.has(id)) {
+        branchStats.set(id, { pawnedItems: 0, forSaleItems: 0, totalValue: 0 });
+      }
+      return branchStats.get(id)!;
+    };
+
+    for (const item of pawnedResult.data ?? []) {
+      if (!item.branch_id) continue;
+      const s = ensure(item.branch_id);
+      if (item.status === 'Active') {
+        s.pawnedItems += 1;
+        s.totalValue += Number(item.amount ?? 0);
+      }
+    }
+
+    for (const item of saleResult.data ?? []) {
+      if (!item.branch_id) continue;
+      const s = ensure(item.branch_id);
+      if (item.status === 'Available') {
+        s.forSaleItems += 1;
+        s.totalValue += Number(item.price ?? 0);
+      }
+    }
+
+    const result: Record<string, { pawnedItems: number; forSaleItems: number; totalValue: number }> = {};
+    for (const [id, stats] of branchStats) {
+      result[id] = stats;
+    }
+
+    return result;
   }
 }
