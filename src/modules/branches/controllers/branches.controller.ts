@@ -33,6 +33,12 @@ export class BranchesController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('overview-stats')
+  getOverviewStats() {
+    return this.branchesService.getOverviewStats();
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get(':id')
   findOne(
     @Req() req: { user: AuthenticatedUserProfile },

@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { Role } from '../../common/enums';
 import type { UserWithBranch } from '../../common/utils/branch-scope.util';
 import {
@@ -48,6 +48,7 @@ export type LedgerEntryType =
   | 'fund_transfer_in'
   | 'fund_transfer_out'
   | 'start'
+  | 'end'
   | 'other';
 
 export interface LedgerEntry {
@@ -128,6 +129,9 @@ export class BranchFinanceService {
     if (purpose === 'start') {
       return 'start';
     }
+    if (purpose === 'end') {
+      return 'end';
+    }
     return 'other';
   }
 
@@ -155,6 +159,9 @@ export class BranchFinanceService {
         break;
       case 'start':
         parts.push('Opening Balance');
+        break;
+      case 'end':
+        parts.push('Closing Balance');
         break;
       default:
         parts.push(row.purpose ?? 'Transaction');
@@ -424,6 +431,142 @@ export class BranchFinanceService {
     return {
       entries,
       total: count ?? entries.length,
+    };
+  }
+
+  async confirmDailyBalance(
+    user: UserWithBranch,
+    type: 'starting' | 'ending',
+    amount: number,
+  ) {
+    if (!type || !['starting', 'ending'].includes(type)) {
+      throw new BadRequestException('type must be "starting" or "ending"');
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new BadRequestException('amount must be a non-negative number');
+    }
+
+    const branchId = requireUserBranchId(user);
+    const client = this.supabaseService.getClient();
+    const today = new Date().toISOString().split('T')[0];
+    const confirmedAmount = Number(amount.toFixed(2));
+
+    const { data: existing, error: existingError } = await client
+      .from('daily_balances')
+      .select('id, starting_balance, ending_balance')
+      .eq('branch_id', branchId)
+      .eq('record_date', today)
+      .maybeSingle();
+
+    if (existingError) {
+      throw new InternalServerErrorException(existingError.message);
+    }
+
+    if (existing) {
+      const update =
+        type === 'starting'
+          ? { starting_balance: confirmedAmount }
+          : { ending_balance: confirmedAmount };
+      const { error: updateError } = await client
+        .from('daily_balances')
+        .update(update)
+        .eq('id', existing.id);
+      if (updateError) {
+        throw new InternalServerErrorException(updateError.message);
+      }
+    } else {
+      const row: Record<string, unknown> = {
+        branch_id: branchId,
+        record_date: today,
+      };
+      if (type === 'starting') {
+        row.starting_balance = confirmedAmount;
+        row.ending_balance = confirmedAmount;
+      } else {
+        const { data: prev } = await client
+          .from('daily_balances')
+          .select('ending_balance')
+          .eq('branch_id', branchId)
+          .order('record_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        row.starting_balance = Number(prev?.ending_balance ?? 0);
+        row.ending_balance = confirmedAmount;
+      }
+      const { error: insertError } = await client
+        .from('daily_balances')
+        .insert(row);
+      if (insertError) {
+        throw new InternalServerErrorException(insertError.message);
+      }
+    }
+
+    // Create a transaction row so it appears in ledger and reports' opening balance query
+    const purpose = type === 'starting' ? 'Start' : 'End';
+    const { data: branch } = await client
+      .from('branches')
+      .select('name')
+      .eq('id', branchId)
+      .maybeSingle();
+
+    await client.from('transactions').insert([
+      {
+        transaction_no: `${purpose.toUpperCase()}-${Date.now()}`,
+        branch_id: branchId,
+        branch: branch?.name ?? 'Unknown',
+        purpose,
+        transaction_date: today,
+        transaction_time: new Date().toTimeString().slice(0, 8),
+        cash_in: type === 'starting' ? confirmedAmount : 0,
+        cash_out: 0,
+        details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
+      },
+    ]);
+
+    return { success: true, type, amount: confirmedAmount, date: today };
+  }
+
+  async getLatestBalance(user: UserWithBranch, branchQuery?: string) {
+    const branchId =
+      user.role === Role.SUPER_ADMIN
+        ? effectiveBranchIdForQuery(user, branchQuery)
+        : requireUserBranchId(user);
+
+    if (!branchId) {
+      return { startingBalance: 0, endingBalance: 0, date: null };
+    }
+
+    const client = this.supabaseService.getClient();
+    const today = new Date().toISOString().split('T')[0];
+
+    // Try today first, then fall back to most recent
+    const { data: todayRow } = await client
+      .from('daily_balances')
+      .select('starting_balance, ending_balance, record_date')
+      .eq('branch_id', branchId)
+      .eq('record_date', today)
+      .maybeSingle();
+
+    if (todayRow) {
+      return {
+        startingBalance: this.toMoney(todayRow.starting_balance),
+        endingBalance: this.toMoney(todayRow.ending_balance),
+        date: todayRow.record_date,
+      };
+    }
+
+    const { data: latest } = await client
+      .from('daily_balances')
+      .select('starting_balance, ending_balance, record_date')
+      .eq('branch_id', branchId)
+      .order('record_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return {
+      startingBalance: this.toMoney(latest?.starting_balance),
+      endingBalance: this.toMoney(latest?.ending_balance),
+      date: latest?.record_date ?? null,
     };
   }
 }

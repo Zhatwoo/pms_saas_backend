@@ -853,10 +853,34 @@ export class DashboardService {
     }
   }
 
-  async getPawnKpis(user: AuthenticatedUserProfile, branchFilter?: string) {
+  private resolvePeriodRange(period?: string): { fromDate: string; toDate: string } {
+    const today = new Date();
+    const toDate = today.toISOString().split('T')[0];
+    const p = (period ?? 'monthly').toLowerCase();
+
+    const from = new Date(today);
+    switch (p) {
+      case 'daily':
+        return { fromDate: toDate, toDate };
+      case 'weekly':
+        from.setDate(from.getDate() - 6);
+        break;
+      case 'yearly':
+        from.setFullYear(from.getFullYear() - 1);
+        from.setDate(from.getDate() + 1);
+        break;
+      default: // monthly
+        from.setDate(from.getDate() - 29);
+        break;
+    }
+    return { fromDate: from.toISOString().split('T')[0], toDate };
+  }
+
+  async getPawnKpis(user: AuthenticatedUserProfile, branchFilter?: string, period?: string) {
     const client = this.supabaseService.getClient();
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
+    const { fromDate, toDate } = this.resolvePeriodRange(period);
 
     // Determine branch scope
     const isAdmin = user?.role === Role.SUPER_ADMIN;
@@ -914,14 +938,12 @@ export class DashboardService {
         .eq('status', 'Expired'),
     );
 
-    // 7. Monthly revenue from transactions
-    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-      .toISOString()
-      .split('T')[0];
+    // 7. Revenue from transactions for the selected period
     let revenueQuery = client
       .from('transactions')
       .select('cash_in')
-      .gte('transaction_date', firstOfMonth);
+      .gte('transaction_date', fromDate)
+      .lte('transaction_date', toDate);
     if (branchId) revenueQuery = revenueQuery.eq('branch_id', branchId);
 
     // 8. Contract trends (last 6 months)
