@@ -1,1 +1,0 @@
-- [x] Update UserWithBranch type in branch-scope.util.ts to include id
