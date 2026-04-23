@@ -27,6 +27,7 @@ export class InventoryController {
     @Query('category') category?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('date') date?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -35,9 +36,30 @@ export class InventoryController {
       category,
       status,
       search,
+      date,
       page: parseInt(page || '1'),
       limit: parseInt(limit || '10'),
     });
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('pawned-categories')
+  findPawnedCategories(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+    @Query('date') date?: string,
+  ) {
+    return this.inventoryService.findPawnedCategories(req.user, branch, date);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('pawned-calendar')
+  findPawnedCalendar(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.inventoryService.findPawnedCalendar(req.user, branch, month);
   }
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
