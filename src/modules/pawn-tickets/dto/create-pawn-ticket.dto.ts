@@ -24,7 +24,7 @@ export class CreatePawnTicketCustomerDto {
 
   @IsOptional()
   @IsString()
-  province?: string;
+  region?: string;
 
   @IsOptional()
   @IsString()
