@@ -61,7 +61,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
   ) {
-    const updated = await this.usersService.update(id, updateUserDto);
+    const updated = await this.usersService.update(id, updateUserDto, req.user);
     req.auditLogContext = {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,
@@ -105,7 +105,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
   ) {
-    const updated = await this.usersService.update(id, updateUserDto);
+    const updated = await this.usersService.update(id, updateUserDto, req.user);
     req.auditLogContext = {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,
