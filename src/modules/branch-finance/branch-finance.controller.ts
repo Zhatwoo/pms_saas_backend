@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Req } from '@nestjs/common';
 import { Roles } from '../../common/decorators';
 import { Role } from '../../common/enums';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
@@ -36,5 +36,23 @@ export class BranchFinanceController {
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
     });
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('daily-balance')
+  confirmDailyBalance(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() body: { type: 'starting' | 'ending'; amount: number },
+  ) {
+    return this.branchFinanceService.confirmDailyBalance(req.user, body.type, body.amount);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('latest-balance')
+  getLatestBalance(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.branchFinanceService.getLatestBalance(req.user, branch);
   }
 }

@@ -6,8 +6,12 @@ import {
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
-import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
+import {
+  requireUserBranchId,
+  effectiveBranchIdForQuery,
+} from '../../../common/utils/branch-scope.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
+import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 
@@ -142,6 +146,50 @@ export class PawnTicketsService {
     const nextNumber = String(maxNumber + 1).padStart(3, '0');
 
     return `${serialPrefix}${nextNumber}`;
+  }
+
+  async findAll(
+    user: AuthenticatedUserProfile,
+    query: { branch?: string; status?: string; search?: string },
+  ) {
+    const client = this.supabase.getClient();
+    const branchId = effectiveBranchIdForQuery(user, query.branch);
+
+    let dbQuery = client
+      .from('pawned_items')
+      .select(`
+        id, item_name, item_id, unit_code, serial_number, amount, pawn_date, status, branch_id,
+        customer:customers (id, full_name, contact_number),
+        branch:branches (name)
+      `)
+      .order('pawn_date', { ascending: false })
+      .limit(500);
+
+    if (branchId) {
+      dbQuery = dbQuery.eq('branch_id', branchId);
+    }
+    if (query.status) {
+      dbQuery = dbQuery.eq('status', query.status);
+    }
+
+    const { data, error } = await dbQuery;
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    let items = data ?? [];
+
+    if (query.search) {
+      const q = query.search.toLowerCase();
+      items = items.filter((item: any) =>
+        (item.item_name ?? '').toLowerCase().includes(q) ||
+        (item.unit_code ?? '').toLowerCase().includes(q) ||
+        (item.serial_number ?? '').toLowerCase().includes(q) ||
+        (item.customer?.full_name ?? '').toLowerCase().includes(q),
+      );
+    }
+
+    return items;
   }
 
   async create(user: AuthenticatedUserProfile, dto: CreatePawnTicketDto) {
@@ -357,6 +405,14 @@ export class PawnTicketsService {
 
     if (transactionError) {
       throw new InternalServerErrorException(transactionError.message);
+    }
+
+    // 3b. Adjust daily balance for this pawn cash outflow
+    const pawnCashIn = Number(transactionPayload.cash_in ?? 0);
+    const pawnCashOut = Number(transactionPayload.cash_out ?? 0);
+    const netChange = pawnCashIn - pawnCashOut;
+    if (netChange !== 0) {
+      await adjustDailyBalance(client, branchId, netChange);
     }
 
     // 4. Create Notification

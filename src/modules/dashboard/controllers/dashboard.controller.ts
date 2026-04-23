@@ -15,8 +15,9 @@ export class DashboardController {
   getPawnKpis(
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
+    @Query('period') period?: string,
   ) {
-    return this.dashboardService.getPawnKpis(req.user, branch);
+    return this.dashboardService.getPawnKpis(req.user, branch, period);
   }
 
   @Get('expiration-monitoring')

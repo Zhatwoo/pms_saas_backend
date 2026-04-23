@@ -865,23 +865,7 @@ export class InventoryService {
       throw new InternalServerErrorException(updateErr.message);
     }
 
-    const today = new Date().toISOString().split('T')[0];
-    const { data: balanceData } = await client
-      .from('daily_balances')
-      .select('ending_balance')
-      .eq('branch_id', branchId)
-      .eq('record_date', today)
-      .single();
-
-    if (balanceData) {
-      await client
-        .from('daily_balances')
-        .update({
-          ending_balance: parseFloat(balanceData.ending_balance) + soldPrice,
-        })
-        .eq('branch_id', branchId)
-        .eq('record_date', today);
-    }
+    await adjustDailyBalance(client, branchId, soldPrice);
 
     return {
       message: 'Item marked as sold, amount added to branch balance',

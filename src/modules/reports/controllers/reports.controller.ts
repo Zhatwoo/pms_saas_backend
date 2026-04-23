@@ -13,8 +13,9 @@ export class ReportsController {
   getSystemReport(
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
+    @Query('period') period?: string,
   ) {
-    return this.reportsService.getSystemReport(req.user, branch);
+    return this.reportsService.getSystemReport(req.user, branch, period);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
@@ -22,8 +23,9 @@ export class ReportsController {
   getBranchSummary(
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
+    @Query('period') period?: string,
   ) {
-    return this.reportsService.getBranchSummary(req.user, branch);
+    return this.reportsService.getBranchSummary(req.user, branch, period);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -31,7 +33,8 @@ export class ReportsController {
   getTransactionReport(
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
+    @Query('period') period?: string,
   ) {
-    return this.reportsService.getTransactionReport(req.user, branch);
+    return this.reportsService.getTransactionReport(req.user, branch, period);
   }
 }
