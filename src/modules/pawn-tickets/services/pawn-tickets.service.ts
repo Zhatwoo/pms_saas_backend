@@ -464,11 +464,15 @@ export class PawnTicketsService {
       );
     }
 
-    const {
-      data: { publicUrl },
-    } = client.storage.from(bucket).getPublicUrl(path);
+    const { data: signedData, error: signError } = await client.storage
+      .from(bucket)
+      .createSignedUrl(path, 60 * 60 * 24 * 7);
 
-    return publicUrl;
+    if (signError || !signedData?.signedUrl) {
+      return `${bucket}/${path}`;
+    }
+
+    return signedData.signedUrl;
   }
 
   private buildUploadPath(prefix: string) {
