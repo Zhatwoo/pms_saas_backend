@@ -22,6 +22,7 @@ interface QueryFilters {
   status?: string;
   search?: string;
   viewMode?: string;
+  date?: string; // ISO date string YYYY-MM-DD for single-day filter
   page: number;
   limit: number;
 }
@@ -93,6 +94,12 @@ export class InventoryService {
     );
   }
 
+  private nextDay(date: string): string {
+    const d = new Date(date + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().split('T')[0];
+  }
+
   private async adjustBalance(branchId: string, delta: number): Promise<void> {
     await adjustDailyBalance(this.supabase.getClient(), branchId, delta);
   }
@@ -129,6 +136,11 @@ export class InventoryService {
       query = query.or(
         `item_name.ilike.%${filters.search}%,item_id.ilike.%${filters.search}%,serial_number.ilike.%${filters.search}%`,
       );
+    }
+
+    if (filters.date) {
+      // Support both plain date "YYYY-MM-DD" and timestamp columns
+      query = query.gte('pawn_date', filters.date).lt('pawn_date', this.nextDay(filters.date));
     }
 
     const from = (filters.page - 1) * filters.limit;
@@ -169,6 +181,75 @@ export class InventoryService {
       ),
       total: count || 0,
     };
+  }
+
+  async findPawnedCategories(user: UserWithBranch, branch?: string, date?: string): Promise<{ category: string; count: number }[]> {
+    const client = this.supabase.getClient();
+    const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
+
+    let query = client
+      .from('pawned_items')
+      .select('category');
+
+    if (branchId) {
+      query = query.eq('branch_id', branchId);
+    } else if (branchNameIlike) {
+      query = query.ilike('branch', `%${branchNameIlike}%`);
+    }
+
+    if (date) {
+      // Support both plain date "YYYY-MM-DD" and timestamp columns
+      query = query.gte('pawn_date', `${date}`).lt('pawn_date', this.nextDay(date));
+    }
+
+    const { data, error } = await query;
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const counts: Record<string, number> = {};
+    for (const row of data || []) {
+      const cat = (row.category || 'Uncategorized').trim();
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+
+    return Object.entries(counts)
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  async findPawnedCalendar(user: UserWithBranch, branch?: string, month?: string): Promise<Record<string, number>> {
+    const client = this.supabase.getClient();
+    const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
+
+    let query = client
+      .from('pawned_items')
+      .select('pawn_date');
+
+    if (branchId) {
+      query = query.eq('branch_id', branchId);
+    } else if (branchNameIlike) {
+      query = query.ilike('branch', `%${branchNameIlike}%`);
+    }
+
+    if (month) {
+      // month = YYYY-MM, filter pawn_date >= first day and <= last day
+      const [y, m] = month.split('-').map(Number);
+      const firstDay = `${month}-01`;
+      const lastDay = new Date(y, m, 0).toISOString().split('T')[0];
+      query = query.gte('pawn_date', firstDay).lte('pawn_date', lastDay);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const counts: Record<string, number> = {};
+    for (const row of data || []) {
+      if (row.pawn_date) {
+        // Normalize to YYYY-MM-DD in case column is a timestamp
+        const dateKey = String(row.pawn_date).slice(0, 10);
+        counts[dateKey] = (counts[dateKey] || 0) + 1;
+      }
+    }
+    return counts;
   }
 
   async createPawned(user: UserWithBranch, dto: any) {
