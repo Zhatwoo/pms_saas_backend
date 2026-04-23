@@ -382,8 +382,9 @@ export class PawnTicketsService {
       purpose: 'Pawn',
       transaction_date: new Date().toISOString().split('T')[0],
       transaction_time: new Date().toTimeString().slice(0, 8),
-      cash_in: dto.transaction.pawnAmount ?? 0,
-      cash_out: 0,
+      // Pawn disbursement is a cash outflow from branch to customer.
+      cash_in: 0,
+      cash_out: dto.transaction.pawnAmount ?? 0,
       return_amount: dto.transaction.returnAmount ?? 0,
       unit: dto.item.unitName.trim(),
       unit_code: dto.item.unitCode?.trim() ?? null,
