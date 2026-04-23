@@ -6,6 +6,7 @@ import {
 import nodemailer, { type Transporter } from 'nodemailer';
 import { Role } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
+import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
@@ -451,16 +452,12 @@ export class DashboardService {
 
   private buildBranchFinanceSummaries(params: {
     branches: BranchRecord[];
-    latestBalances: DailyBalanceRow[];
+    /** All daily_balances rows fetched for these branches (any dates). */
+    balanceRows: DailyBalanceRow[];
     transferredFunds: TransferredFundRow[];
+    /** ISO date (YYYY-MM-DD) for "today's" snapshot per branch. */
+    asOfDate: string;
   }) {
-    const latestBalanceByBranch = new Map<string, DailyBalanceRow>();
-    for (const row of params.latestBalances) {
-      if (!latestBalanceByBranch.has(row.branch_id)) {
-        latestBalanceByBranch.set(row.branch_id, row);
-      }
-    }
-
     const transferredSummaryByBranch = new Map<
       string,
       { totalAdded: number; lastTransferredAt: string | null }
@@ -481,11 +478,12 @@ export class DashboardService {
     }
 
     return params.branches.map((branch) => {
-      const latestBalance = latestBalanceByBranch.get(branch.id);
       const transferred = transferredSummaryByBranch.get(branch.id);
-      const startingBalance = this.toMoney(latestBalance?.starting_balance);
-      const computedCurrentBalance = Number(
-        (startingBalance + (transferred?.totalAdded ?? 0)).toFixed(2),
+      const snap = computeBranchDaySnapshot(
+        params.balanceRows,
+        branch.id,
+        params.asOfDate,
+        { carryForward: false },
       );
 
       return {
@@ -494,15 +492,13 @@ export class DashboardService {
         name: branch.name,
         location: branch.location ?? null,
         status: branch.status ?? 'Unknown',
-        startingBalance,
-        currentBalance: latestBalance
-          ? this.toMoney(latestBalance?.ending_balance)
-          : computedCurrentBalance,
+        startingBalance: snap.startingBalance,
+        currentBalance: snap.endingBalance,
         totalAdded: transferred?.totalAdded ?? 0,
         totalTransferred: 0,
         lastUpdated:
-          latestBalance?.updated_at ??
-          latestBalance?.record_date ??
+          snap.updatedAt ??
+          snap.recordDate ??
           transferred?.lastTransferredAt ??
           null,
       };
@@ -584,7 +580,8 @@ export class DashboardService {
             .select(
               'branch_id, record_date, starting_balance, ending_balance, updated_at',
             )
-            .order('record_date', { ascending: false }),
+            .order('record_date', { ascending: false })
+            .limit(4000),
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
@@ -670,10 +667,10 @@ export class DashboardService {
           },
           branchBalances: this.buildBranchFinanceSummaries({
             branches: (branchesResult.data ?? []) as BranchRecord[],
-            latestBalances: (latestBalancesResult.data ??
-              []) as DailyBalanceRow[],
+            balanceRows: (latestBalancesResult.data ?? []) as DailyBalanceRow[],
             transferredFunds: (transferredFundsResult.data ??
               []) as TransferredFundRow[],
+            asOfDate: new Date().toISOString().split('T')[0],
           }),
           recentFundRequests: (recentRequestsResult.data ?? []).map((row) =>
             this.mapDashboardFundRequest(row),
@@ -717,11 +714,12 @@ export class DashboardService {
             .order('created_at', { ascending: false }),
           client
             .from('daily_balances')
-            .select('ending_balance, record_date')
+            .select(
+              'branch_id, record_date, starting_balance, ending_balance, updated_at',
+            )
             .eq('branch_id', branchId)
             .order('record_date', { ascending: false })
-            .limit(1)
-            .maybeSingle(),
+            .limit(90),
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
@@ -740,23 +738,25 @@ export class DashboardService {
           throw new InternalServerErrorException(errors[0]?.message);
         }
 
+        const todayStrAdmin = new Date().toISOString().split('T')[0];
+        const adminBalanceRows = (latestBalanceResult.data ??
+          []) as DailyBalanceRow[];
+        const adminFinance =
+          this.buildBranchFinanceSummaries({
+            branches: branchResult.data
+              ? [branchResult.data as BranchRecord]
+              : [],
+            balanceRows: adminBalanceRows,
+            transferredFunds: (transferredFundsResult.data ??
+              []) as TransferredFundRow[],
+            asOfDate: todayStrAdmin,
+          })[0] ?? null;
+
         return {
           view: 'admin',
           branch: branchResult.data,
-          branchFinance:
-            this.buildBranchFinanceSummaries({
-              branches: branchResult.data
-                ? [branchResult.data as BranchRecord]
-                : [],
-              latestBalances: latestBalanceResult.data
-                ? [latestBalanceResult.data as DailyBalanceRow]
-                : [],
-              transferredFunds: (transferredFundsResult.data ??
-                []) as TransferredFundRow[],
-            })[0] ?? null,
-          currentBalance: this.toMoney(
-            latestBalanceResult.data?.ending_balance,
-          ),
+          branchFinance: adminFinance,
+          currentBalance: adminFinance?.currentBalance ?? 0,
           fundRequests: {
             summary: this.summarizeFundRequests(fundRowsResult.data ?? []),
             recent: (fundRowsResult.data ?? [])
@@ -799,11 +799,12 @@ export class DashboardService {
             .order('created_at', { ascending: false }),
           client
             .from('daily_balances')
-            .select('ending_balance, record_date, starting_balance')
+            .select(
+              'branch_id, record_date, starting_balance, ending_balance, updated_at',
+            )
             .eq('branch_id', employeeBranchId)
             .order('record_date', { ascending: false })
-            .limit(1)
-            .maybeSingle(),
+            .limit(90),
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
@@ -822,23 +823,25 @@ export class DashboardService {
           throw new InternalServerErrorException(employeeErrors[0]?.message);
         }
 
+        const todayStrEmp = new Date().toISOString().split('T')[0];
+        const empBalanceRows = (employeeLatestBalanceResult.data ??
+          []) as DailyBalanceRow[];
+        const empFinance =
+          this.buildBranchFinanceSummaries({
+            branches: employeeBranchResult.data
+              ? [employeeBranchResult.data as BranchRecord]
+              : [],
+            balanceRows: empBalanceRows,
+            transferredFunds: (employeeTransferredFundsResult.data ??
+              []) as TransferredFundRow[],
+            asOfDate: todayStrEmp,
+          })[0] ?? null;
+
         return {
           view: 'employee',
           branch: employeeBranchResult.data,
-          branchFinance:
-            this.buildBranchFinanceSummaries({
-              branches: employeeBranchResult.data
-                ? [employeeBranchResult.data as BranchRecord]
-                : [],
-              latestBalances: employeeLatestBalanceResult.data
-                ? [employeeLatestBalanceResult.data as DailyBalanceRow]
-                : [],
-              transferredFunds: (employeeTransferredFundsResult.data ??
-                []) as TransferredFundRow[],
-            })[0] ?? null,
-          currentBalance: this.toMoney(
-            employeeLatestBalanceResult.data?.ending_balance,
-          ),
+          branchFinance: empFinance,
+          currentBalance: empFinance?.currentBalance ?? 0,
           fundRequests: {
             summary: this.summarizeFundRequests(
               employeeFundRowsResult.data ?? [],
