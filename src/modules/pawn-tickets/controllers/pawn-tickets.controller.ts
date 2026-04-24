@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Req, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, Query, Param } from '@nestjs/common';
+import { Public } from '../../../common/decorators';
 import { PawnTicketsService } from '../services/pawn-tickets.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
@@ -39,5 +40,11 @@ export class PawnTicketsController {
   @Get('next-serial-number')
   getNextSerialNumber(@Req() req: { user: AuthenticatedUserProfile }) {
     return this.pawnTicketsService.generateNextSerialNumber(req.user);
+  }
+
+  @Public()
+  @Get('public/:unitCode')
+  findByUnitCode(@Param('unitCode') unitCode: string) {
+    return this.pawnTicketsService.findByUnitCode(unitCode);
   }
 }
