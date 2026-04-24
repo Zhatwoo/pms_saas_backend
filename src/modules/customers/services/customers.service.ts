@@ -727,8 +727,8 @@ export class CustomersService {
       throw new InternalServerErrorException(error.message);
     }
 
-    // Find admin users in this branch and notify each one directly (not a branch broadcast)
-    // so employees in the same branch do NOT receive this notification
+    // Find admin users in this branch and notify each one directly.
+    // Do not fall back to a branch broadcast so employees never receive these alerts.
     try {
       const branchId = user.branchId || customer.branch_id;
       if (branchId) {
@@ -753,17 +753,6 @@ export class CustomersService {
               }),
             ),
           );
-        } else {
-          // Fallback: branch broadcast if no admin found
-          await this.notificationsService.create({
-            title: 'Customer Edit Request',
-            subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
-            category: 'Requests',
-            user_id: undefined,
-            branch_id: branchId,
-            customer_id: id,
-            ...(requestLog?.id ? { log_id: requestLog.id } : {}),
-          });
         }
       }
     } catch (notifErr) {
