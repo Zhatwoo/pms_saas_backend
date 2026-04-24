@@ -671,7 +671,8 @@ export class CustomersService {
           subtitle: notifSubtitle,
           category: 'Requests',
           user_id: requestingEmployeeId,
-          branch_id: user.branchId || undefined,
+          customer_id: id,
+          ...(logId ? { log_id: logId } : {}),
         });
       } catch (notifErr) {
         console.error('[CustomersService] Failed to create employee notification:', notifErr);
@@ -708,7 +709,7 @@ export class CustomersService {
 
     const actorLabel = `${user.fullName ?? user.email} (Employee)`;
 
-    const { error } = await client.from('activity_logs').insert({
+    const { data: requestLog, error } = await client.from('activity_logs').insert({
       user_id: user.id,
       branch_id: customer.branch_id || null,
       action: 'CUSTOMER_EDIT_REQUESTED',
@@ -721,7 +722,7 @@ export class CustomersService {
         branchName,
         actorLabel,
       }),
-    });
+    }).select('id').single<{ id: string }>();
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
@@ -747,7 +748,8 @@ export class CustomersService {
                 subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
                 category: 'Requests',
                 user_id: admin.id,
-                branch_id: branchId,
+                customer_id: id,
+                ...(requestLog?.id ? { log_id: requestLog.id } : {}),
               }),
             ),
           );
@@ -759,6 +761,8 @@ export class CustomersService {
             category: 'Requests',
             user_id: undefined,
             branch_id: branchId,
+            customer_id: id,
+            ...(requestLog?.id ? { log_id: requestLog.id } : {}),
           });
         }
       }
@@ -806,21 +810,14 @@ export class CustomersService {
     const actorLabel = typeof parsedDetails.actorLabel === 'string'
       ? parsedDetails.actorLabel
       : `${user.fullName ?? user.email} (Employee)`;
-    const subtitle = `${actorLabel} requested an edit for ${requestCustomerName}`;
-    const branchId = log.branch_id || customer.branch_id || user.branchId || null;
+    const { error: notificationError } = await client
+      .from('notifications')
+      .delete()
+      .eq('category', 'Requests')
+      .eq('log_id', logId);
 
-    if (branchId) {
-      const { error: notificationError } = await client
-        .from('notifications')
-        .delete()
-        .eq('title', 'Customer Edit Request')
-        .eq('category', 'Requests')
-        .eq('branch_id', branchId)
-        .eq('subtitle', subtitle);
-
-      if (notificationError) {
-        throw new InternalServerErrorException(notificationError.message);
-      }
+    if (notificationError) {
+      throw new InternalServerErrorException(notificationError.message);
     }
 
     const { error: deleteError } = await client
