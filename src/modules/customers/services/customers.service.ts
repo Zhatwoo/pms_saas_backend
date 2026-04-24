@@ -769,6 +769,72 @@ export class CustomersService {
     return { message: 'Edit request submitted successfully' };
   }
 
+  async cancelRequestEdit(user: AuthenticatedUserProfile, id: string, logId: string) {
+    const client = this.supabase.getClient();
+    const customer = await this.findOne(user, id);
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    const { data: log, error: logError } = await client
+      .from('activity_logs')
+      .select('id, user_id, action, details, branch_id')
+      .eq('id', logId)
+      .maybeSingle();
+
+    if (logError) {
+      throw new InternalServerErrorException(logError.message);
+    }
+
+    if (!log || log.action !== 'CUSTOMER_EDIT_REQUESTED' || log.user_id !== user.id) {
+      throw new NotFoundException('Edit request not found');
+    }
+
+    let parsedDetails: Record<string, unknown> = {};
+    try {
+      const rawDetails = typeof log.details === 'string'
+        ? log.details
+        : JSON.stringify(log.details ?? {});
+      parsedDetails = JSON.parse(rawDetails) as Record<string, unknown>;
+    } catch {
+      parsedDetails = {};
+    }
+
+    const requestCustomerName = typeof parsedDetails.customerName === 'string'
+      ? parsedDetails.customerName
+      : customer.full_name;
+    const actorLabel = typeof parsedDetails.actorLabel === 'string'
+      ? parsedDetails.actorLabel
+      : `${user.fullName ?? user.email} (Employee)`;
+    const subtitle = `${actorLabel} requested an edit for ${requestCustomerName}`;
+    const branchId = log.branch_id || customer.branch_id || user.branchId || null;
+
+    if (branchId) {
+      const { error: notificationError } = await client
+        .from('notifications')
+        .delete()
+        .eq('title', 'Customer Edit Request')
+        .eq('category', 'Requests')
+        .eq('branch_id', branchId)
+        .eq('subtitle', subtitle);
+
+      if (notificationError) {
+        throw new InternalServerErrorException(notificationError.message);
+      }
+    }
+
+    const { error: deleteError } = await client
+      .from('activity_logs')
+      .delete()
+      .eq('id', logId);
+
+    if (deleteError) {
+      throw new InternalServerErrorException(deleteError.message);
+    }
+
+    return { message: 'Edit request canceled successfully' };
+  }
+
   async mergeDuplicateCustomers(
     user: UserWithBranch & { id: string },
     branchId?: string,
