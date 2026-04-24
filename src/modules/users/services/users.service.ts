@@ -326,6 +326,8 @@ export class UsersService {
     actor?: AuthenticatedUserProfile,
   ) {
     if (
+      dto.fullName === undefined &&
+      dto.avatarUrl === undefined &&
       dto.accountStatus === undefined &&
       dto.role === undefined &&
       dto.branchId === undefined
@@ -357,6 +359,44 @@ export class UsersService {
     }
 
     const roleNorm = (existing.role ?? '').toLowerCase();
+
+    if (actor?.role === Role.ADMIN) {
+      const normalizedTargetRole = this.normalizeStoredRole(roleNorm);
+      const actorId = String(actor.id ?? '').trim();
+      const actorAuthId = String(actor.authId ?? '').trim();
+      const actorEmail = String(actor.email ?? '').trim().toLowerCase();
+      const targetId = String(existing.id ?? '').trim();
+      const targetAuthId = String(existing.auth_id ?? '').trim();
+      const targetEmail = String(existing.email ?? '').trim().toLowerCase();
+      const isSelf =
+        (actorId && targetId && actorId === targetId) ||
+        (actorAuthId && targetAuthId && actorAuthId === targetAuthId) ||
+        (actorEmail && targetEmail && actorEmail === targetEmail);
+
+      if (normalizedTargetRole === 'super_admin') {
+        throw new ForbiddenException('Admin cannot edit Super Admin accounts');
+      }
+
+      if (!isSelf && normalizedTargetRole !== 'employee') {
+        throw new ForbiddenException(
+          'Admin can only edit employee accounts or their own profile',
+        );
+      }
+
+      const hasDisallowedField =
+        dto.role !== undefined ||
+        dto.accountStatus !== undefined ||
+        dto.branchId !== undefined ||
+        dto.avatarUrl !== undefined ||
+        dto.currentPassword !== undefined;
+
+      if (hasDisallowedField) {
+        throw new ForbiddenException(
+          'Admin updates are limited to full name only',
+        );
+      }
+    }
+
     if (roleNorm === 'super_admin' || roleNorm === 'superadmin') {
       if (dto.accountStatus === 'rejected') {
         throw new ForbiddenException('Cannot reject a Super Admin account');
