@@ -78,7 +78,7 @@ export class InventoryController {
     return this.inventoryService.updatePawned(req.user, id, dto);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Delete('pawned/:id')
   deletePawned(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -107,7 +107,7 @@ export class InventoryController {
     return this.inventoryService.addRemark(req.user, id, dto.remark);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post('pawned/:id/expire')
   expireItem(
     @Req() req: { user: AuthenticatedUserProfile },
