@@ -422,10 +422,6 @@ export class InventoryService {
         `[InventoryService] Error fetching sale item ${cleanId}:`,
         saleError,
       );
-      console.error(
-        `[InventoryService] Error fetching sale item ${cleanId}:`,
-        saleError,
-      );
     }
 
     if (saleData) {
@@ -445,9 +441,6 @@ export class InventoryService {
       };
     }
 
-    throw new NotFoundException(
-      `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
-    );
     throw new NotFoundException(
       `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
     );
@@ -1036,6 +1029,26 @@ export class InventoryService {
       .eq('id', itemId);
     if (updateErr) {
       throw new InternalServerErrorException(updateErr.message);
+    }
+
+    // Create a transactions row so ledger, reports, and dashboard all see this sale.
+    const today = new Date().toISOString().split('T')[0];
+    const { error: txErr } = await client.from('transactions').insert([{
+      transaction_no: `SALE-${Date.now()}`,
+      branch_id: branchId,
+      branch: item.branch ?? 'Unknown',
+      purpose: 'Sold Item',
+      transaction_date: today,
+      transaction_time: new Date().toTimeString().slice(0, 8),
+      cash_in: soldPrice,
+      cash_out: 0,
+      unit: item.item_name ?? null,
+      unit_code: item.item_id ?? null,
+      details: `Item sold: ${item.item_name ?? 'Unknown'} for ₱${soldPrice.toLocaleString()}`,
+      related_sale_item_id: itemId,
+    }]);
+    if (txErr) {
+      console.error('[InventoryService] Failed to create sale transaction', txErr);
     }
 
     await adjustDailyBalance(client, branchId, soldPrice);

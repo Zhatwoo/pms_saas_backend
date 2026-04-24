@@ -2,6 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
+import { isNonRevenuePurpose } from '../../../common/enums';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -69,10 +70,10 @@ export class ReportsService {
     if (branchId) txnQuery = txnQuery.eq('branch_id', branchId);
     const { count: txnCount } = await txnQuery;
 
-    // Total sales for the period (cash_in)
+    // Total sales for the period (cash_in from revenue-generating purposes only)
     let salesQuery = client
       .from('transactions')
-      .select('cash_in');
+      .select('cash_in, purpose');
     if (isDaily) {
       salesQuery = salesQuery.eq('transaction_date', todayStr);
     } else {
@@ -82,7 +83,7 @@ export class ReportsService {
     const { data: salesData } = await salesQuery;
 
     const totalSales = (salesData || []).reduce(
-      (sum, row) => sum + this.toMoney(row.cash_in),
+      (sum, row) => isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in),
       0,
     );
 
@@ -108,7 +109,7 @@ export class ReportsService {
 
     let periodTxnQuery = client
       .from('transactions')
-      .select('branch_id, cash_in');
+      .select('branch_id, cash_in, purpose');
     if (isDaily) {
       periodTxnQuery = periodTxnQuery.eq('transaction_date', todayStr);
     } else {
@@ -121,7 +122,9 @@ export class ReportsService {
       const entry = branchSalesMap.get(txn.branch_id);
       if (entry) {
         entry.txn += 1;
-        entry.sales += this.toMoney(txn.cash_in);
+        if (!isNonRevenuePurpose(txn.purpose)) {
+          entry.sales += this.toMoney(txn.cash_in);
+        }
       }
     }
 
@@ -143,7 +146,7 @@ export class ReportsService {
     trendStart.setDate(trendStart.getDate() - (trendDays - 1));
     let trendQuery = client
       .from('transactions')
-      .select('cash_in, transaction_date')
+      .select('cash_in, transaction_date, purpose')
       .gte('transaction_date', trendStart.toISOString().split('T')[0])
       .order('transaction_date', { ascending: true });
     if (branchId) trendQuery = trendQuery.eq('branch_id', branchId);
@@ -157,7 +160,7 @@ export class ReportsService {
     }
 
     for (const row of trendData || []) {
-      if (!row.transaction_date) continue;
+      if (!row.transaction_date || isNonRevenuePurpose(row.purpose)) continue;
       const current = trendMap.get(row.transaction_date);
       if (current !== undefined) {
         trendMap.set(row.transaction_date, current + this.toMoney(row.cash_in));
@@ -197,10 +200,10 @@ export class ReportsService {
       salesTrend[0] || { date: '-', sales: 0 },
     );
 
-    // DSR (expenses)
+    // DSR (expenses — excludes journal entries)
     let cashOutQuery = client
       .from('transactions')
-      .select('cash_out');
+      .select('cash_out, purpose');
     if (isDaily) {
       cashOutQuery = cashOutQuery.eq('transaction_date', todayStr);
     } else {
@@ -210,7 +213,11 @@ export class ReportsService {
     const { data: cashOutData } = await cashOutQuery;
 
     const totalExpenses = (cashOutData || []).reduce(
-      (sum, row) => sum + this.toMoney(row.cash_out),
+      (sum, row) => {
+        const p = (row.purpose ?? '').trim().toLowerCase();
+        if (p === 'start' || p === 'end') return sum;
+        return sum + this.toMoney(row.cash_out);
+      },
       0,
     );
 

@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import nodemailer, { type Transporter } from 'nodemailer';
-import { Role } from '../../../common/enums';
+import { Role, isNonRevenuePurpose } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -957,7 +957,7 @@ export class DashboardService {
     // 7. Revenue from transactions for the selected period
     let revenueQuery = client
       .from('transactions')
-      .select('cash_in')
+      .select('cash_in, purpose')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
     if (branchId) revenueQuery = revenueQuery.eq('branch_id', branchId);
@@ -976,7 +976,7 @@ export class DashboardService {
     // 9. Revenue trend (last 6 months)
     let revenueTrendQuery = client
       .from('transactions')
-      .select('cash_in, transaction_date')
+      .select('cash_in, transaction_date, purpose')
       .gte('transaction_date', sixMonthsAgo.toISOString().split('T')[0]);
     if (branchId)
       revenueTrendQuery = revenueTrendQuery.eq('branch_id', branchId);
@@ -1025,9 +1025,10 @@ export class DashboardService {
       totalSalesQuery,
     ]);
 
-    // Compute monthly revenue
+    // Compute monthly revenue (only revenue-generating purposes)
     const monthlyRevenue = (revenueResult.data || []).reduce(
-      (sum: number, row: any) => sum + this.toMoney(row.cash_in),
+      (sum: number, row: any) =>
+        isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in),
       0,
     );
 
@@ -1089,7 +1090,7 @@ export class DashboardService {
       revenueTrendMap.set(key, 0);
     }
     for (const row of revenueTrendResult.data || []) {
-      if (!row.transaction_date) continue;
+      if (!row.transaction_date || isNonRevenuePurpose(row.purpose)) continue;
       const key = row.transaction_date.substring(0, 7);
       const current = revenueTrendMap.get(key);
       if (current !== undefined) {
