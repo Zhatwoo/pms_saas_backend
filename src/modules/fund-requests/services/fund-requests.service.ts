@@ -1318,6 +1318,18 @@ export class FundRequestsService {
         this.toMoneyOrNull(existing.amount_requested) ??
         0,
     );
+    const transferAmount = this.normalizeMoney(
+      this.toMoneyOrNull(existing.amount_transferred) ??
+        this.toMoneyOrNull(existing.approved_amount) ??
+        this.toMoneyOrNull(existing.amount_requested) ??
+        0,
+    );
+
+    if (sentAmount > transferAmount) {
+      throw new BadRequestException(
+        'Sent amount cannot exceed the amount released for transfer',
+      );
+    }
 
     const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
     if (sourceBalance < sentAmount) {
@@ -1440,6 +1452,12 @@ export class FundRequestsService {
     const confirmedAmount = this.normalizeMoney(
       dto.receivedAmount ?? transferAmount ?? 0,
     );
+
+    if (transferAmount != null && confirmedAmount > transferAmount) {
+      throw new BadRequestException(
+        'Received amount cannot exceed the amount released for transfer',
+      );
+    }
 
     let inboundTransactionId: string | null = null;
     try {
