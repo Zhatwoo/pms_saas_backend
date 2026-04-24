@@ -6,10 +6,12 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { Role } from '../../../common/enums';
 import { CreateCustomerDto } from '../dto/create-customer.dto';
+import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 
 type CustomerRow = {
@@ -43,7 +45,10 @@ type CustomerMergeCandidate = {
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
     if (!storedUrl) {
@@ -371,7 +376,7 @@ export class CustomersService {
 
     let query = client
       .from('activity_logs')
-      .select('id, action, details, created_at, users(full_name, email)')
+      .select('id, action, details, created_at, user_id, users(full_name, email)')
       .order('created_at', { ascending: false });
 
     if (user.role !== Role.SUPER_ADMIN) {
@@ -386,15 +391,20 @@ export class CustomersService {
 
     const customerLogs = (data || [])
       .map((log: any) => {
-        const rawDetails = typeof log.details === 'string' ? log.details : '';
+        const rawDetails = typeof log.details === 'string' ? log.details : (log.details ? JSON.stringify(log.details) : '');
 
         let parsedDetails: Record<string, unknown> = {};
         if (rawDetails) {
           try {
             parsedDetails = JSON.parse(rawDetails) as Record<string, unknown>;
           } catch {
-            parsedDetails = {};
+            // If details is already an object (jsonb), use it directly
+            if (log.details && typeof log.details === 'object') {
+              parsedDetails = log.details as Record<string, unknown>;
+            }
           }
+        } else if (log.details && typeof log.details === 'object') {
+          parsedDetails = log.details as Record<string, unknown>;
         }
 
         const detailsCustomerId =
@@ -414,6 +424,7 @@ export class CustomersService {
           details: parsedDetails,
           createdAt: log.created_at,
           actorName: log.users?.full_name || log.users?.email || 'System',
+          userId: log.user_id || null,
         };
       })
       .filter(Boolean);
@@ -460,25 +471,218 @@ export class CustomersService {
   }
 
   // Update customer information (admin / super admin only)
-  async update(user: UserWithBranch, id: string, updateDto: any) {
+  async update(user: AuthenticatedUserProfile, id: string, updateDto: UpdateCustomerDto) {
     const client = this.supabase.getClient();
     // Ensure the customer exists and is within the allowed branch scope
     const existing = await this.findOne(user, id);
     if (!existing) {
       throw new NotFoundException('Customer not found');
     }
+
+    // Capture old field values for diff
+    const trackedFields = ['full_name', 'contact_number', 'email', 'address', 'barangay', 'city', 'region'] as const;
+    const oldValues: Record<string, string | null> = {};
+    for (const field of trackedFields) {
+      oldValues[field] = (existing as Record<string, unknown>)[field] as string | null ?? null;
+    }
+
+    // Whitelist only actual customers table columns so DTO-only fields never reach Supabase.
+    const requestingEmployeeId = updateDto.requestingEmployeeId?.trim() || undefined;
+    const logId = updateDto.logId?.trim() || undefined;
+    const supabasePayload = Object.fromEntries(
+      Object.entries({
+        full_name: updateDto.full_name,
+        contact_number: updateDto.contact_number,
+        email: updateDto.email,
+        address: updateDto.address,
+        barangay: updateDto.barangay,
+        city: updateDto.city,
+        region: updateDto.region,
+        id_presented: updateDto.id_presented,
+      }).filter(([, value]) => value !== undefined),
+    ) as Record<string, string>;
+
     const { error } = await client
       .from('customers')
-      .update(updateDto)
+      .update(supabasePayload)
       .eq('id', id);
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
+
+    // Compute changedFields diff
+    const changedFields: Record<string, { from: string | null; to: string | null }> = {};
+    for (const field of trackedFields) {
+      const newVal = supabasePayload[field];
+      if (newVal === undefined || newVal === null) continue;
+      const oldVal = oldValues[field];
+      if (String(newVal) !== String(oldVal ?? '')) {
+        changedFields[field] = { from: oldVal, to: newVal as string };
+      }
+    }
+
+    // Resolve branchName for the admin
+    let branchName: string = user.branchName ?? 'Unknown Branch';
+    if (user.branchId) {
+      const { data: branch } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', user.branchId)
+        .maybeSingle<{ name: string }>();
+      if (branch?.name) {
+        branchName = branch.name;
+      }
+    }
+
+    const actorLabel = `${user.fullName ?? user.email} (Admin)`;
+
+    // Determine the reviewed field and old/new values from changedFields
+    const reviewedField = Object.keys(changedFields)[0] ?? null;
+    const oldValue = reviewedField ? (changedFields[reviewedField]?.from ?? null) : null;
+    const newValue = reviewedField ? (changedFields[reviewedField]?.to ?? null) : null;
+
+    if (logId) {
+      // Try to update the existing CUSTOMER_EDIT_REQUESTED row in-place
+      try {
+        const { data: existingLog } = await client
+          .from('activity_logs')
+          .select('id, action, details')
+          .eq('id', logId)
+          .maybeSingle();
+
+        if (existingLog && existingLog.action === 'CUSTOMER_EDIT_REQUESTED') {
+          // Parse original details
+          let originalDetails: Record<string, unknown> = {};
+          try {
+            const raw = typeof existingLog.details === 'string'
+              ? existingLog.details
+              : JSON.stringify(existingLog.details ?? {});
+            originalDetails = JSON.parse(raw) as Record<string, unknown>;
+          } catch { /* keep empty */ }
+
+          const mergedDetails = {
+            ...originalDetails,
+            processedAt: new Date().toISOString(),
+            adminName: user.fullName ?? user.email,
+            adminId: user.id,
+            reviewedField,
+            oldValue,
+            newValue,
+            actorLabel,
+            branchName,
+          };
+
+          const { error: updateLogError } = await client
+            .from('activity_logs')
+            .update({
+              action: 'CUSTOMER_EDIT_PROCESSED',
+              details: JSON.stringify(mergedDetails),
+            })
+            .eq('id', logId);
+
+          if (updateLogError) {
+            console.error('[CustomersService] Failed to update activity log in-place, falling back to insert:', updateLogError);
+            // Fall through to insert below
+            await client.from('activity_logs').insert({
+              user_id: user.id,
+              branch_id: user.branchId || (existing as Record<string, unknown>).branch_id || null,
+              action: 'CUSTOMER_EDIT_PROCESSED',
+              details: JSON.stringify({
+                customerId: id,
+                customerName: existing.full_name,
+                changedFields,
+                actorName: user.fullName ?? user.email,
+                actorRole: 'Admin',
+                actorLabel,
+                branchName,
+                reviewedField,
+                oldValue,
+                newValue,
+              }),
+            });
+          }
+        } else {
+          // Row not found or unexpected action — fall back to insert
+          console.warn('[CustomersService] logId row not found or unexpected action, falling back to insert');
+          await client.from('activity_logs').insert({
+            user_id: user.id,
+            branch_id: user.branchId || (existing as Record<string, unknown>).branch_id || null,
+            action: 'CUSTOMER_EDIT_PROCESSED',
+            details: JSON.stringify({
+              customerId: id,
+              customerName: existing.full_name,
+              changedFields,
+              actorName: user.fullName ?? user.email,
+              actorRole: 'Admin',
+              actorLabel,
+              branchName,
+              reviewedField,
+              oldValue,
+              newValue,
+            }),
+          });
+        }
+      } catch (logErr) {
+        console.error('[CustomersService] Failed to write CUSTOMER_EDIT_PROCESSED log:', logErr);
+      }
+    } else {
+      // No logId — existing behavior: insert new row
+      try {
+        await client.from('activity_logs').insert({
+          user_id: user.id,
+          branch_id: user.branchId || (existing as Record<string, unknown>).branch_id || null,
+          action: 'CUSTOMER_EDIT_PROCESSED',
+          details: JSON.stringify({
+            customerId: id,
+            customerName: existing.full_name,
+            changedFields,
+            actorName: user.fullName ?? user.email,
+            actorRole: 'Admin',
+            actorLabel,
+            branchName,
+          }),
+        });
+      } catch (logErr) {
+        console.error('[CustomersService] Failed to write CUSTOMER_EDIT_PROCESSED log:', logErr);
+      }
+    }
+
+    // Notify the originating employee if present (silent on failure)
+    if (requestingEmployeeId) {
+      try {
+        const fieldLabelMap: Record<string, string> = {
+          full_name: 'Full Name',
+          contact_number: 'Contact Number',
+          address: 'Address',
+          email: 'Email Address',
+          barangay: 'Barangay',
+          city: 'City',
+          region: 'Region',
+          id_presented: 'ID Presented',
+        };
+        const fieldLabel = reviewedField ? (fieldLabelMap[reviewedField] ?? reviewedField) : 'profile';
+        const notifTitle = logId ? 'Edit Approved' : 'Edit Request Processed';
+        const notifSubtitle = logId && oldValue && newValue
+          ? `${actorLabel} updated ${fieldLabel}: ${oldValue} → ${newValue}`
+          : `${actorLabel} updated ${existing.full_name}'s profile`;
+
+        await this.notificationsService.create({
+          title: notifTitle,
+          subtitle: notifSubtitle,
+          category: 'Requests',
+          user_id: requestingEmployeeId,
+          branch_id: user.branchId || undefined,
+        });
+      } catch (notifErr) {
+        console.error('[CustomersService] Failed to create employee notification:', notifErr);
+      }
+    }
+
     return { message: 'Customer updated successfully' };
   }
 
   // Employee request to edit customer details (adds a note for review)
-  async requestEdit(user: AuthenticatedUserProfile, id: string, notes: string) {
+  async requestEdit(user: AuthenticatedUserProfile, id: string, notes: string, field?: string, mode?: string) {
     const client = this.supabase.getClient();
     const customer = await this.findOne(user, id);
     if (!customer) {
@@ -488,15 +692,80 @@ export class CustomersService {
     if (!trimmed) {
       throw new BadRequestException('Edit request notes are required');
     }
+
+    // Resolve branch name
+    let branchName: string = user.branchName ?? 'Unknown Branch';
+    if (user.branchId) {
+      const { data: branch } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', user.branchId)
+        .maybeSingle<{ name: string }>();
+      if (branch?.name) {
+        branchName = branch.name;
+      }
+    }
+
+    const actorLabel = `${user.fullName ?? user.email} (Employee)`;
+
     const { error } = await client.from('activity_logs').insert({
       user_id: user.id,
       branch_id: customer.branch_id || null,
       action: 'CUSTOMER_EDIT_REQUESTED',
-      details: JSON.stringify({ customerId: id, notes: trimmed }),
+      details: JSON.stringify({
+        customerId: id,
+        customerName: customer.full_name,
+        notes: trimmed,
+        field: field?.trim() || null,
+        mode: mode?.trim() || 'freeform',
+        branchName,
+        actorLabel,
+      }),
     });
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
+
+    // Find admin users in this branch and notify each one directly (not a branch broadcast)
+    // so employees in the same branch do NOT receive this notification
+    try {
+      const branchId = user.branchId || customer.branch_id;
+      if (branchId) {
+        const { data: admins } = await client
+          .from('users')
+          .select('id')
+          .eq('branch_id', branchId)
+          .eq('role', 'admin');
+
+        const adminUsers = (admins || []) as Array<{ id: string }>;
+
+        if (adminUsers.length > 0) {
+          await Promise.all(
+            adminUsers.map((admin) =>
+              this.notificationsService.create({
+                title: 'Customer Edit Request',
+                subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
+                category: 'Requests',
+                user_id: admin.id,
+                branch_id: branchId,
+              }),
+            ),
+          );
+        } else {
+          // Fallback: branch broadcast if no admin found
+          await this.notificationsService.create({
+            title: 'Customer Edit Request',
+            subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
+            category: 'Requests',
+            user_id: undefined,
+            branch_id: branchId,
+          });
+        }
+      }
+    } catch (notifErr) {
+      console.error('[CustomersService] Failed to create edit request notification:', notifErr);
+    }
+
     return { message: 'Edit request submitted successfully' };
   }
 

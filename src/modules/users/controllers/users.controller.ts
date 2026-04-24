@@ -50,7 +50,7 @@ export class UsersController {
     return this.usersService.findOne(id, req.user);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Patch(':id')
   async update(
     @Req()
@@ -94,7 +94,7 @@ export class UsersController {
   }
 
   // NextJS Turbopack workaround using POST instead of PATCH/PUT
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post(':id/update')
   async updatePost(
     @Req()

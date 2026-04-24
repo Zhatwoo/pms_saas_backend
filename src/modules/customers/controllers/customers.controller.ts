@@ -85,9 +85,9 @@ export class CustomersController {
   requestEdit(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() dto: { notes: string },
+    @Body() dto: { notes: string; field?: string; mode?: string },
   ) {
-    return this.customersService.requestEdit(req.user, id, dto.notes);
+    return this.customersService.requestEdit(req.user, id, dto.notes, dto.field, dto.mode);
   }
 }
 
