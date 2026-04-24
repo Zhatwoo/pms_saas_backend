@@ -671,7 +671,8 @@ export class CustomersService {
           subtitle: notifSubtitle,
           category: 'Requests',
           user_id: requestingEmployeeId,
-          branch_id: user.branchId || undefined,
+          customer_id: id,
+          ...(logId ? { log_id: logId } : {}),
         });
       } catch (notifErr) {
         console.error('[CustomersService] Failed to create employee notification:', notifErr);
@@ -708,7 +709,7 @@ export class CustomersService {
 
     const actorLabel = `${user.fullName ?? user.email} (Employee)`;
 
-    const { error } = await client.from('activity_logs').insert({
+    const { data: requestLog, error } = await client.from('activity_logs').insert({
       user_id: user.id,
       branch_id: customer.branch_id || null,
       action: 'CUSTOMER_EDIT_REQUESTED',
@@ -721,13 +722,13 @@ export class CustomersService {
         branchName,
         actorLabel,
       }),
-    });
+    }).select('id').single<{ id: string }>();
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    // Find admin users in this branch and notify each one directly (not a branch broadcast)
-    // so employees in the same branch do NOT receive this notification
+    // Find admin users in this branch and notify each one directly.
+    // Do not fall back to a branch broadcast so employees never receive these alerts.
     try {
       const branchId = user.branchId || customer.branch_id;
       if (branchId) {
@@ -747,19 +748,11 @@ export class CustomersService {
                 subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
                 category: 'Requests',
                 user_id: admin.id,
-                branch_id: branchId,
+                customer_id: id,
+                ...(requestLog?.id ? { log_id: requestLog.id } : {}),
               }),
             ),
           );
-        } else {
-          // Fallback: branch broadcast if no admin found
-          await this.notificationsService.create({
-            title: 'Customer Edit Request',
-            subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
-            category: 'Requests',
-            user_id: undefined,
-            branch_id: branchId,
-          });
         }
       }
     } catch (notifErr) {
@@ -767,6 +760,65 @@ export class CustomersService {
     }
 
     return { message: 'Edit request submitted successfully' };
+  }
+
+  async cancelRequestEdit(user: AuthenticatedUserProfile, id: string, logId: string) {
+    const client = this.supabase.getClient();
+    const customer = await this.findOne(user, id);
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    const { data: log, error: logError } = await client
+      .from('activity_logs')
+      .select('id, user_id, action, details, branch_id')
+      .eq('id', logId)
+      .maybeSingle();
+
+    if (logError) {
+      throw new InternalServerErrorException(logError.message);
+    }
+
+    if (!log || log.action !== 'CUSTOMER_EDIT_REQUESTED' || log.user_id !== user.id) {
+      throw new NotFoundException('Edit request not found');
+    }
+
+    let parsedDetails: Record<string, unknown> = {};
+    try {
+      const rawDetails = typeof log.details === 'string'
+        ? log.details
+        : JSON.stringify(log.details ?? {});
+      parsedDetails = JSON.parse(rawDetails) as Record<string, unknown>;
+    } catch {
+      parsedDetails = {};
+    }
+
+    const requestCustomerName = typeof parsedDetails.customerName === 'string'
+      ? parsedDetails.customerName
+      : customer.full_name;
+    const actorLabel = typeof parsedDetails.actorLabel === 'string'
+      ? parsedDetails.actorLabel
+      : `${user.fullName ?? user.email} (Employee)`;
+    const { error: notificationError } = await client
+      .from('notifications')
+      .delete()
+      .eq('category', 'Requests')
+      .eq('log_id', logId);
+
+    if (notificationError) {
+      throw new InternalServerErrorException(notificationError.message);
+    }
+
+    const { error: deleteError } = await client
+      .from('activity_logs')
+      .delete()
+      .eq('id', logId);
+
+    if (deleteError) {
+      throw new InternalServerErrorException(deleteError.message);
+    }
+
+    return { message: 'Edit request canceled successfully' };
   }
 
   async mergeDuplicateCustomers(
