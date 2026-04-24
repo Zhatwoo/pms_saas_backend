@@ -32,4 +32,12 @@ export class UpdateCustomerDto {
   @IsOptional()
   @IsString()
   id_presented?: string;
+
+  @IsOptional()
+  @IsString()
+  requestingEmployeeId?: string;
+
+  @IsOptional()
+  @IsString()
+  logId?: string;
 }
