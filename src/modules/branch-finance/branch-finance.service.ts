@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException, BadRequestException } from '@nestjs/common';
-import { Role } from '../../common/enums';
+import { Role, TransactionPurpose } from '../../common/enums';
 import type { UserWithBranch } from '../../common/utils/branch-scope.util';
 import {
   effectiveBranchIdForQuery,
@@ -47,6 +47,7 @@ interface BranchRow {
 
 export type LedgerEntryType =
   | 'pawn'
+  | 'redeem'
   | 'buy_back'
   | 'renewal'
   | 'sale'
@@ -81,6 +82,7 @@ export interface BranchFinanceSummary {
   todayCashOut: number;
   breakdown: {
     pawnOut: number;
+    redeemIn: number;
     buyBackIn: number;
     renewalIn: number;
     saleIn: number;
@@ -118,10 +120,13 @@ export class BranchFinanceService {
     if (purpose === 'pawn' || purpose === 'new pawn') {
       return 'pawn';
     }
+    if (purpose === 'redeem') {
+      return 'redeem';
+    }
     if (purpose === 'buy back') {
       return 'buy_back';
     }
-    if (purpose === 'renew' || purpose === 'renewal') {
+    if (purpose === 'renew' || purpose === 'renewal' || purpose === 'reappraise') {
       return 'renewal';
     }
     if (
@@ -146,6 +151,9 @@ export class BranchFinanceService {
     switch (type) {
       case 'pawn':
         parts.push('New Pawn');
+        break;
+      case 'redeem':
+        parts.push('Redeem');
         break;
       case 'buy_back':
         parts.push('Buy Back');
@@ -296,6 +304,7 @@ export class BranchFinanceService {
 
         const breakdown = {
           pawnOut: 0,
+          redeemIn: 0,
           buyBackIn: 0,
           renewalIn: 0,
           saleIn: 0,
@@ -323,6 +332,9 @@ export class BranchFinanceService {
           switch (type) {
             case 'pawn':
               breakdown.pawnOut += co;
+              break;
+            case 'redeem':
+              breakdown.redeemIn += ci;
               break;
             case 'buy_back':
               breakdown.buyBackIn += ci;
@@ -376,6 +388,7 @@ export class BranchFinanceService {
           todayCashOut: Number(todayCashOut.toFixed(2)),
           breakdown: {
             pawnOut: Number(breakdown.pawnOut.toFixed(2)),
+            redeemIn: Number(breakdown.redeemIn.toFixed(2)),
             buyBackIn: Number(breakdown.buyBackIn.toFixed(2)),
             renewalIn: Number(breakdown.renewalIn.toFixed(2)),
             saleIn: Number(breakdown.saleIn.toFixed(2)),
@@ -514,27 +527,45 @@ export class BranchFinanceService {
       }
     }
 
-    // Create a transaction row so it appears in ledger and reports' opening balance query
-    const purpose = type === 'starting' ? 'Start' : 'End';
+    // Upsert a journal transaction so it appears in ledger.
+    // cash_in/cash_out are ZERO — Start/End are not real cash movement;
+    // they only record the confirmed balance in daily_balances.
+    const purpose = type === 'starting' ? TransactionPurpose.START : TransactionPurpose.END;
     const { data: branch } = await client
       .from('branches')
       .select('name')
       .eq('id', branchId)
       .maybeSingle();
 
-    await client.from('transactions').insert([
-      {
-        transaction_no: `${purpose.toUpperCase()}-${Date.now()}`,
-        branch_id: branchId,
-        branch: branch?.name ?? 'Unknown',
-        purpose,
-        transaction_date: today,
-        transaction_time: new Date().toTimeString().slice(0, 8),
-        cash_in: type === 'starting' ? confirmedAmount : 0,
-        cash_out: 0,
-        details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
-      },
-    ]);
+    // Idempotency: one Start and one End per branch per day (update if exists).
+    const { data: existingTx } = await client
+      .from('transactions')
+      .select('id')
+      .eq('branch_id', branchId)
+      .eq('transaction_date', today)
+      .eq('purpose', purpose)
+      .maybeSingle();
+
+    const txPayload = {
+      transaction_no: `${purpose.toUpperCase()}-${Date.now()}`,
+      branch_id: branchId,
+      branch: branch?.name ?? 'Unknown',
+      purpose,
+      transaction_date: today,
+      transaction_time: new Date().toTimeString().slice(0, 8),
+      cash_in: 0,
+      cash_out: 0,
+      details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
+    };
+
+    if (existingTx) {
+      await client
+        .from('transactions')
+        .update(txPayload)
+        .eq('id', existingTx.id);
+    } else {
+      await client.from('transactions').insert([txPayload]);
+    }
 
     return { success: true, type, amount: confirmedAmount, date: today };
   }
