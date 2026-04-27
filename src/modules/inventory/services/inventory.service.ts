@@ -378,6 +378,7 @@ export class InventoryService {
         id: pawnedData.id,
         itemId: pawnedData.item_id,
         itemName: pawnedData.item_name,
+        serialNumber: pawnedData.serial_number,
         category: pawnedData.category,
         branch: pawnedData.branch,
         pawnDate: pawnedData.pawn_date,
