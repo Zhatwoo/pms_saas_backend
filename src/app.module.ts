@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import appConfig from './config/app.config';
 
 import { JwtAuthGuard, RolesGuard } from './common/guards';
@@ -31,6 +32,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
       load: [appConfig],
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     SupabaseModule,
     AuthModule,
     UsersModule,
