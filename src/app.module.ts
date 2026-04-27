@@ -22,6 +22,7 @@ import { FundRequestsModule } from './modules/fund-requests/fund-requests.module
 import { BranchFinanceModule } from './modules/branch-finance/branch-finance.module';
 import { ShopSettingsModule } from './modules/shop-settings/shop-settings.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PasswordChangeRequestsModule } from './modules/password-change-requests/password-change-requests.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
@@ -49,6 +50,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     BranchFinanceModule,
     ShopSettingsModule,
     NotificationsModule,
+    PasswordChangeRequestsModule,
   ],
   providers: [
     {
