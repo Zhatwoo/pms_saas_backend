@@ -287,9 +287,12 @@ export class TransactionsService {
       endingBalance: 0,
     };
 
-    // If a specific branch is scoped, load today's daily_balances row or carry-forward snapshot
+    // If a specific branch is scoped, compute balance dynamically:
+    // End Day = Start Day (employee input) + Σ(cash_in) - Σ(cash_out)
     if (scoped) {
       const balanceDate = date || new Date().toISOString().split('T')[0];
+
+      // 1. Get starting balance from daily_balances or carry-forward
       const { data: balanceData } = await client
         .from('daily_balances')
         .select('starting_balance, ending_balance')
@@ -299,44 +302,39 @@ export class TransactionsService {
 
       if (balanceData) {
         stats.startingBalance = Number(balanceData.starting_balance || 0);
-        stats.endingBalance = Number(balanceData.ending_balance || 0);
       } else {
-        const { data: recentRows } = await client
+        // Carry forward previous day's ending balance
+        const { data: priorRow } = await client
           .from('daily_balances')
-          .select('branch_id, record_date, starting_balance, ending_balance')
+          .select('ending_balance')
           .eq('branch_id', scoped)
+          .lt('record_date', balanceDate)
           .order('record_date', { ascending: false })
-          .limit(120);
-        const snap = computeBranchDaySnapshot(
-          recentRows ?? [],
-          scoped,
-          balanceDate,
-          { carryForward: false },
-        );
-        stats.startingBalance = snap.startingBalance;
-        stats.endingBalance = snap.endingBalance;
-        const txsMatchBalanceDate =
-          filtered.length === 0 ||
-          filtered.every(
-            (t: any) => String(t.transaction_date) === balanceDate,
-          );
-        if (txsMatchBalanceDate && filtered.length > 0) {
-          const net = filtered.reduce((sum: number, t: any) => {
-            const p = String(t.purpose ?? '')
-              .toLowerCase()
-              .trim();
-            if (p === 'start' || p === 'end') return sum;
-            return (
-              sum +
-              (parseFloat(String(t.cash_in ?? 0)) || 0) -
-              (parseFloat(String(t.cash_out ?? 0)) || 0)
-            );
-          }, 0);
-          stats.endingBalance = Number(
-            (snap.startingBalance + net).toFixed(2),
-          );
-        }
+          .limit(1)
+          .maybeSingle();
+        stats.startingBalance = Number(priorRow?.ending_balance || 0);
       }
+
+      // 2. Always compute ending balance dynamically from ALL today's transactions
+      const { data: allTodayTxs } = await client
+        .from('transactions')
+        .select('purpose, cash_in, cash_out')
+        .eq('branch_id', scoped)
+        .eq('transaction_date', balanceDate);
+
+      const todayNet = (allTodayTxs ?? []).reduce((sum: number, tx: any) => {
+        const p = String(tx.purpose ?? '').toLowerCase().trim();
+        if (p === 'start' || p === 'end') return sum;
+        return (
+          sum +
+          (parseFloat(String(tx.cash_in ?? 0)) || 0) -
+          (parseFloat(String(tx.cash_out ?? 0)) || 0)
+        );
+      }, 0);
+
+      stats.endingBalance = Number(
+        (stats.startingBalance + todayNet).toFixed(2),
+      );
     }
 
     return { transactions: filtered, stats };

@@ -496,7 +496,7 @@ export class DashboardService {
         params.balanceRows,
         branch.id,
         params.asOfDate,
-        { carryForward: false },
+        { carryForward: true },
       );
 
       return {
