@@ -1564,17 +1564,19 @@ export class FundRequestsService {
         transferNotes:
           this.compactText(dto.confirmationNotes) ??
           this.compactText(existing.transfer_notes),
-        direction: 'in',
+        direction: existing.purpose?.toLowerCase().includes('expense') ? 'out' : 'in',
       });
       inboundTransactionId = inboundTransaction.id;
-      await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
+      const balanceDelta = existing.purpose?.toLowerCase().includes('expense') ? -confirmedAmount : confirmedAmount;
+      await this.adjustDailyBalance(existing.branch_id, balanceDelta);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
         // Allow confirmation to proceed even if legacy transactions purpose
         // constraint rejects fund-transfer journal entries.
-        await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
+        const balanceDeltaFallback = existing.purpose?.toLowerCase().includes('expense') ? -confirmedAmount : confirmedAmount;
+        await this.adjustDailyBalance(existing.branch_id, balanceDeltaFallback);
       } else {
         throw err;
       }
@@ -1640,7 +1642,7 @@ export class FundRequestsService {
       action: 'BRANCH_CASH_ON_HAND_UPDATED',
       details: {
         requestNo: mapped.requestNo,
-        delta: mapped.confirmedReceivedAmount,
+        delta: existing.purpose?.toLowerCase().includes('expense') && mapped.confirmedReceivedAmount ? -mapped.confirmedReceivedAmount : mapped.confirmedReceivedAmount,
       },
     });
     return mapped;
