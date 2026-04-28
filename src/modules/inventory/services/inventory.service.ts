@@ -378,6 +378,7 @@ export class InventoryService {
         id: pawnedData.id,
         itemId: pawnedData.item_id,
         itemName: pawnedData.item_name,
+        serialNumber: pawnedData.serial_number,
         category: pawnedData.category,
         branch: pawnedData.branch,
         pawnDate: pawnedData.pawn_date,
@@ -422,10 +423,6 @@ export class InventoryService {
         `[InventoryService] Error fetching sale item ${cleanId}:`,
         saleError,
       );
-      console.error(
-        `[InventoryService] Error fetching sale item ${cleanId}:`,
-        saleError,
-      );
     }
 
     if (saleData) {
@@ -445,9 +442,6 @@ export class InventoryService {
       };
     }
 
-    throw new NotFoundException(
-      `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
-    );
     throw new NotFoundException(
       `Item ID "${cleanId}" not found in branch inventory. Please verify the ID or contact admin.`,
     );
@@ -887,12 +881,18 @@ export class InventoryService {
 
     if (filters.viewMode === 'history') {
       query = query.eq('status', 'Sold');
+    } else if (!filters.status || filters.status === 'all') {
+      // No status filter — show all
     } else {
-      query = query.eq('status', 'Available');
+      query = query.eq('status', filters.status);
     }
 
     if (filters.status && filters.status !== 'all') {
       query = query.eq('status', filters.status);
+    }
+
+    if (filters.date) {
+      query = query.gte('available_date', filters.date).lt('available_date', this.nextDay(filters.date));
     }
 
     const from = (filters.page - 1) * filters.limit;
@@ -914,9 +914,95 @@ export class InventoryService {
         price: item.price,
         stockLevel: item.stock_level || 1,
         status: item.status || 'Available',
+        originalPawnId: item.original_pawn_id || null,
       })),
       total: count || 0,
     };
+  }
+
+  async findForSaleStats(user: UserWithBranch, branch?: string): Promise<{
+    totalAvailable: number;
+    totalSold: number;
+    unpricedCount: number;
+    soldThisMonth: number;
+    revenueThisMonth: number;
+  }> {
+    const client = this.supabase.getClient();
+    const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
+
+    let query = client.from('sale_items').select('status, price, available_date');
+    if (branchId) query = query.eq('branch_id', branchId);
+    else if (branchNameIlike) query = query.ilike('branch', `%${branchNameIlike}%`);
+
+    const { data, error } = await query;
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    let totalAvailable = 0, totalSold = 0, unpricedCount = 0, soldThisMonth = 0, revenueThisMonth = 0;
+    for (const row of data || []) {
+      if (row.status === 'Available') {
+        totalAvailable++;
+        if (!row.price || row.price === 0) unpricedCount++;
+      } else if (row.status === 'Sold') {
+        totalSold++;
+        const dateKey = String(row.available_date || '').slice(0, 7);
+        if (dateKey === monthPrefix) {
+          soldThisMonth++;
+          revenueThisMonth += Number(row.price) || 0;
+        }
+      }
+    }
+    return { totalAvailable, totalSold, unpricedCount, soldThisMonth, revenueThisMonth };
+  }
+
+  async findForSaleCategories(user: UserWithBranch, branch?: string): Promise<{ category: string; count: number }[]> {
+    const client = this.supabase.getClient();
+    const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
+
+    let query = client.from('sale_items').select('category');
+    if (branchId) query = query.eq('branch_id', branchId);
+    else if (branchNameIlike) query = query.ilike('branch', `%${branchNameIlike}%`);
+
+    const { data, error } = await query;
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const counts: Record<string, number> = {};
+    for (const row of data || []) {
+      const cat = (row.category || 'Uncategorized').trim();
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+    return Object.entries(counts).map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count);
+  }
+
+  async findForSaleCalendar(user: UserWithBranch, branch?: string, month?: string): Promise<Record<string, { available: number; sold: number }>> {
+    const client = this.supabase.getClient();
+    const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
+
+    let query = client.from('sale_items').select('available_date, status');
+    if (branchId) query = query.eq('branch_id', branchId);
+    else if (branchNameIlike) query = query.ilike('branch', `%${branchNameIlike}%`);
+
+    if (month) {
+      const [y, m] = month.split('-').map(Number);
+      const firstDay = `${month}-01`;
+      const lastDay = new Date(y, m, 0).toISOString().split('T')[0];
+      query = query.gte('available_date', firstDay).lte('available_date', lastDay);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const result: Record<string, { available: number; sold: number }> = {};
+    for (const row of data || []) {
+      if (!row.available_date) continue;
+      const dateKey = String(row.available_date).slice(0, 10);
+      if (!result[dateKey]) result[dateKey] = { available: 0, sold: 0 };
+      if (row.status === 'Sold') result[dateKey].sold++;
+      else result[dateKey].available++;
+    }
+    return result;
   }
 
   async markSoldAndAddToBalance(
@@ -944,6 +1030,26 @@ export class InventoryService {
       .eq('id', itemId);
     if (updateErr) {
       throw new InternalServerErrorException(updateErr.message);
+    }
+
+    // Create a transactions row so ledger, reports, and dashboard all see this sale.
+    const today = new Date().toISOString().split('T')[0];
+    const { error: txErr } = await client.from('transactions').insert([{
+      transaction_no: `SALE-${Date.now()}`,
+      branch_id: branchId,
+      branch: item.branch ?? 'Unknown',
+      purpose: 'Sold Item',
+      transaction_date: today,
+      transaction_time: new Date().toTimeString().slice(0, 8),
+      cash_in: soldPrice,
+      cash_out: 0,
+      unit: item.item_name ?? null,
+      unit_code: item.item_id ?? null,
+      details: `Item sold: ${item.item_name ?? 'Unknown'} for ₱${soldPrice.toLocaleString()}`,
+      related_sale_item_id: itemId,
+    }]);
+    if (txErr) {
+      console.error('[InventoryService] Failed to create sale transaction', txErr);
     }
 
     await adjustDailyBalance(client, branchId, soldPrice);

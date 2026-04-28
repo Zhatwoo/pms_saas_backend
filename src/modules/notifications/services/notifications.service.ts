@@ -89,6 +89,8 @@ export class NotificationsService {
     category: 'Transactions' | 'Alerts' | 'Requests';
     user_id?: string;
     branch_id?: string;
+    customer_id?: string;
+    log_id?: string;
   }) {
     const client = this.supabase.getClient();
     const { data, error } = await client

@@ -16,6 +16,7 @@ import {
 import { adjustDailyBalance as sharedAdjustDailyBalance } from '../../../common/utils/daily-balance.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 import { ConfirmFundRequestDto } from '../dto/confirm-fund-request.dto';
 import { CreateDirectTransferDto } from '../dto/create-direct-transfer.dto';
 import { CreateFundRequestDto } from '../dto/create-fund-request.dto';
@@ -152,6 +153,7 @@ export class FundRequestsService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly activityLogsService: ActivityLogsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private toDatePart(date: Date): string {
@@ -742,6 +744,22 @@ export class FundRequestsService {
     });
   }
 
+  private async notifyBranch(params: {
+    branchId: string | null | undefined;
+    title: string;
+    subtitle: string;
+    category: 'Transactions' | 'Alerts' | 'Requests';
+  }) {
+    if (!params.branchId) return;
+
+    await this.notificationsService.create({
+      title: params.title,
+      subtitle: params.subtitle,
+      category: params.category,
+      branch_id: params.branchId,
+    });
+  }
+
   private async resolveReceiver(dto: {
     receiverUserId?: string;
     receiverRole?: 'admin' | 'employee';
@@ -838,6 +856,18 @@ export class FundRequestsService {
         flowType: mapped.flowType,
       },
     });
+
+    try {
+      await this.notifyBranch({
+        branchId: branch.id,
+        title: 'New fund request submitted',
+        subtitle: `${mapped.branch?.name ?? 'A branch'} submitted ${mapped.requestNo} for ₱${mapped.amountRequested.toFixed(2)}${mapped.purpose ? ` (${mapped.purpose})` : ''}.`,
+        category: 'Requests',
+      });
+    } catch (notifErr) {
+      console.error('[FundRequestsService] Failed to notify super admins about fund request creation:', notifErr);
+    }
+
     return mapped;
   }
 
@@ -979,6 +1009,39 @@ export class FundRequestsService {
         awaitingSourceConfirmation: !!sourceBranch,
       },
     });
+
+    try {
+      const transferSubtitle = sourceBranch
+        ? `${mapped.requestNo} is awaiting source confirmation from ${sourceBranch.name} before ${destinationBranch.name} can receive ₱${mapped.amountTransferred?.toFixed(2) ?? amount.toFixed(2)}.`
+        : `${mapped.requestNo} is ready for ${destinationBranch.name} to confirm receipt of ₱${mapped.amountTransferred?.toFixed(2) ?? amount.toFixed(2)}.`;
+
+      if (sourceBranch) {
+        await Promise.all([
+          this.notifyBranch({
+            branchId: sourceBranch.id,
+            title: 'Branch transfer requires source confirmation',
+            subtitle: `${mapped.requestNo} will be deducted from ${sourceBranch.name} for ${destinationBranch.name}.`,
+            category: 'Requests',
+          }),
+          this.notifyBranch({
+            branchId: destinationBranch.id,
+            title: 'Incoming branch transfer scheduled',
+            subtitle: transferSubtitle,
+            category: 'Requests',
+          }),
+        ]);
+      } else {
+        await this.notifyBranch({
+          branchId: destinationBranch.id,
+          title: 'Fund transfer awaiting receipt confirmation',
+          subtitle: transferSubtitle,
+          category: 'Requests',
+        });
+      }
+    } catch (notifErr) {
+      console.error('[FundRequestsService] Failed to notify direct transfer recipients:', notifErr);
+    }
+
     return mapped;
   }
 
@@ -1117,6 +1180,24 @@ export class FundRequestsService {
         approvedAmount: mapped.approvedAmount,
       },
     });
+
+    try {
+      await this.notifyBranch({
+        branchId: mapped.branchId,
+        title:
+          dto.decision === FundRequestReviewDecision.APPROVED
+            ? 'Fund request approved'
+            : 'Fund request rejected',
+        subtitle:
+          dto.decision === FundRequestReviewDecision.APPROVED
+            ? `${mapped.requestNo} was approved for ₱${(mapped.approvedAmount ?? mapped.amountRequested).toFixed(2)}.`
+            : `${mapped.requestNo} was rejected by Super Admin.`,
+        category: 'Requests',
+      });
+    } catch (notifErr) {
+      console.error('[FundRequestsService] Failed to notify branch about review result:', notifErr);
+    }
+
     return mapped;
   }
 
@@ -1318,6 +1399,18 @@ export class FundRequestsService {
         this.toMoneyOrNull(existing.amount_requested) ??
         0,
     );
+    const transferAmount = this.normalizeMoney(
+      this.toMoneyOrNull(existing.amount_transferred) ??
+        this.toMoneyOrNull(existing.approved_amount) ??
+        this.toMoneyOrNull(existing.amount_requested) ??
+        0,
+    );
+
+    if (sentAmount > transferAmount) {
+      throw new BadRequestException(
+        'Sent amount cannot exceed the amount released for transfer',
+      );
+    }
 
     const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
     if (sourceBalance < sentAmount) {
@@ -1391,6 +1484,18 @@ export class FundRequestsService {
         relatedTransactionId: outboundTransactionId,
       },
     });
+
+    try {
+      await this.notifyBranch({
+        branchId: destinationBranch.id,
+        title: 'Branch transfer ready for receipt confirmation',
+        subtitle: `${mapped.requestNo} was released by ${sourceBranch.name} for ₱${sentAmount.toFixed(2)} and is waiting for ${destinationBranch.name} to confirm receipt.`,
+        category: 'Requests',
+      });
+    } catch (notifErr) {
+      console.error('[FundRequestsService] Failed to notify destination branch after source confirmation:', notifErr);
+    }
+
     return mapped;
   }
 
@@ -1441,6 +1546,12 @@ export class FundRequestsService {
       dto.receivedAmount ?? transferAmount ?? 0,
     );
 
+    if (transferAmount != null && confirmedAmount > transferAmount) {
+      throw new BadRequestException(
+        'Received amount cannot exceed the amount released for transfer',
+      );
+    }
+
     let inboundTransactionId: string | null = null;
     try {
       const inboundTransaction = await this.createTransferTransaction({
@@ -1453,17 +1564,19 @@ export class FundRequestsService {
         transferNotes:
           this.compactText(dto.confirmationNotes) ??
           this.compactText(existing.transfer_notes),
-        direction: 'in',
+        direction: existing.purpose?.toLowerCase().includes('expense') ? 'out' : 'in',
       });
       inboundTransactionId = inboundTransaction.id;
-      await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
+      const balanceDelta = existing.purpose?.toLowerCase().includes('expense') ? -confirmedAmount : confirmedAmount;
+      await this.adjustDailyBalance(existing.branch_id, balanceDelta);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
         // Allow confirmation to proceed even if legacy transactions purpose
         // constraint rejects fund-transfer journal entries.
-        await this.adjustDailyBalance(existing.branch_id, confirmedAmount);
+        const balanceDeltaFallback = existing.purpose?.toLowerCase().includes('expense') ? -confirmedAmount : confirmedAmount;
+        await this.adjustDailyBalance(existing.branch_id, balanceDeltaFallback);
       } else {
         throw err;
       }
@@ -1509,13 +1622,27 @@ export class FundRequestsService {
         confirmationProofUrl: mapped.confirmationProofUrl,
       },
     });
+
+    try {
+      if (mapped.sourceBranchId) {
+        await this.notifyBranch({
+          branchId: mapped.sourceBranchId,
+          title: 'Branch transfer completed',
+          subtitle: `${mapped.requestNo} was received by ${resolvedDestinationBranch.name} for ₱${mapped.confirmedReceivedAmount?.toFixed(2) ?? confirmedAmount.toFixed(2)}.`,
+          category: 'Requests',
+        });
+      }
+    } catch (notifErr) {
+      console.error('[FundRequestsService] Failed to notify source branch after transfer confirmation:', notifErr);
+    }
+
     await this.writeFundLog({
       user,
       branchId: mapped.branchId,
       action: 'BRANCH_CASH_ON_HAND_UPDATED',
       details: {
         requestNo: mapped.requestNo,
-        delta: mapped.confirmedReceivedAmount,
+        delta: existing.purpose?.toLowerCase().includes('expense') && mapped.confirmedReceivedAmount ? -mapped.confirmedReceivedAmount : mapped.confirmedReceivedAmount,
       },
     });
     return mapped;

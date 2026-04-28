@@ -4,6 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { CreateUserDto } from '../dto/create-user.dto';
@@ -79,6 +80,21 @@ export class UsersService {
       return 'employee';
     }
     return role;
+  }
+
+  private async verifyActorPassword(
+    actor: AuthenticatedUserProfile,
+    password: string,
+  ): Promise<void> {
+    const authClient = this.supabaseService.getAuthClient();
+    const { error } = await authClient.auth.signInWithPassword({
+      email: actor.email,
+      password,
+    });
+
+    if (error) {
+      throw new UnauthorizedException('Invalid password');
+    }
   }
 
   private mapToResponse(row: UserRow, branchName: string | null) {
@@ -195,15 +211,26 @@ export class UsersService {
     const email = dto.email.trim().toLowerCase();
     const fullName = dto.fullName.trim();
     const normalizedRole = this.normalizeStoredRole(dto.role);
+    const isSuperAdmin = normalizedRole === 'super_admin';
+    const effectiveBranchId = isSuperAdmin ? null : (dto.branchId ?? null);
+    let branch: { id: string; status: string; name: string } | null = null;
 
-    const { data: branch, error: branchError } = await client
-      .from('branches')
-      .select('id, status, name')
-      .eq('id', dto.branchId)
-      .maybeSingle<{ id: string; status: string; name: string }>();
+    if (!isSuperAdmin) {
+      const { data: foundBranch, error: branchError } = await client
+        .from('branches')
+        .select('id, status, name')
+        .eq('id', effectiveBranchId)
+        .maybeSingle<{ id: string; status: string; name: string }>();
 
-    if (branchError || !branch || !this.isActiveBranchStatus(branch.status)) {
-      throw new BadRequestException('Invalid or inactive branch');
+      if (
+        branchError ||
+        !foundBranch ||
+        !this.isActiveBranchStatus(foundBranch.status)
+      ) {
+        throw new BadRequestException('Invalid or inactive branch');
+      }
+
+      branch = foundBranch;
     }
 
     const { data: authData, error: authError } =
@@ -214,7 +241,7 @@ export class UsersService {
         user_metadata: { full_name: fullName },
         app_metadata: {
           role: normalizedRole,
-          branch_id: dto.branchId,
+          branch_id: effectiveBranchId,
         },
       });
 
@@ -227,72 +254,80 @@ export class UsersService {
     }
 
     const authId = authData.user.id;
+    const selectColumns =
+      'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at';
 
-    const { error: syncAuthError } = await client.auth.admin.updateUserById(
-      authId,
-      {
-        email,
-        user_metadata: { full_name: fullName },
-        app_metadata: {
-          role: normalizedRole,
-          branch_id: dto.branchId,
-        },
-      },
-    );
-
-    if (syncAuthError) {
-      await client.auth.admin.deleteUser(authId);
-      throw new InternalServerErrorException(syncAuthError.message);
-    }
-
-    const { data: updatedRows, error: updateError } = await client
+    const { data: createdRow, error: createdRowError } = await client
       .from('users')
-      .update({
-        email,
-        full_name: fullName,
-        role: normalizedRole,
-        branch_id: dto.branchId,
-        account_status: 'active',
-      })
+      .select(selectColumns)
       .eq('auth_id', authId)
-      .select(
-        'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
-      );
+      .maybeSingle<UserRow>();
 
-    if (updateError) {
+    if (createdRowError || !createdRow) {
       await client.auth.admin.deleteUser(authId);
       throw new InternalServerErrorException(
-        this.formatSupabaseError(updateError),
+        createdRowError
+          ? this.formatSupabaseError(createdRowError)
+          : 'Failed to load created user profile',
       );
     }
 
-    let inserted = (updatedRows ?? [])[0] as UserRow | undefined;
-    if (!inserted) {
-      const { data: fetchedRow, error: fetchError } = await client
-        .from('users')
-        .select(
-          'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, created_at',
-        )
-        .eq('auth_id', authId)
-        .maybeSingle<UserRow>();
+    const profilePatch: Record<string, unknown> = {};
+    if (createdRow.email !== email) {
+      profilePatch.email = email;
+    }
+    if ((createdRow.full_name ?? '') !== fullName) {
+      profilePatch.full_name = fullName;
+    }
+    if (this.normalizeStoredRole(createdRow.role ?? '') !== normalizedRole) {
+      profilePatch.role = normalizedRole;
+    }
+    if (
+      String(createdRow.branch_id ?? '') !== String(effectiveBranchId ?? '')
+    ) {
+      profilePatch.branch_id = effectiveBranchId;
+    }
+    if ((createdRow.account_status ?? 'active') !== 'active') {
+      profilePatch.account_status = 'active';
+    }
 
-      if (fetchError || !fetchedRow) {
+    let inserted = createdRow;
+    if (Object.keys(profilePatch).length > 0) {
+      const { data: updatedRows, error: updateError } = await client
+        .from('users')
+        .update(profilePatch)
+        .eq('auth_id', authId)
+        .select(selectColumns);
+
+      if (updateError) {
         await client.auth.admin.deleteUser(authId);
         throw new InternalServerErrorException(
-          fetchError
-            ? this.formatSupabaseError(fetchError)
-            : 'Failed to load created user profile',
+          this.formatSupabaseError(updateError),
         );
       }
 
-      inserted = fetchedRow;
+      const updated = (updatedRows ?? [])[0] as UserRow | undefined;
+      if (!updated) {
+        await client.auth.admin.deleteUser(authId);
+        throw new InternalServerErrorException(
+          'Failed to load created user profile after sync',
+        );
+      }
+
+      inserted = updated;
     }
 
-    return this.mapToResponse(inserted, branch.name);
+    return this.mapToResponse(inserted, branch?.name ?? null);
   }
 
-  async update(id: string, dto: UpdateUserDto) {
+  async update(
+    id: string,
+    dto: UpdateUserDto,
+    actor?: AuthenticatedUserProfile,
+  ) {
     if (
+      dto.fullName === undefined &&
+      dto.avatarUrl === undefined &&
       dto.accountStatus === undefined &&
       dto.role === undefined &&
       dto.branchId === undefined
@@ -324,6 +359,44 @@ export class UsersService {
     }
 
     const roleNorm = (existing.role ?? '').toLowerCase();
+
+    if (actor?.role === Role.ADMIN) {
+      const normalizedTargetRole = this.normalizeStoredRole(roleNorm);
+      const actorId = String(actor.id ?? '').trim();
+      const actorAuthId = String(actor.authId ?? '').trim();
+      const actorEmail = String(actor.email ?? '').trim().toLowerCase();
+      const targetId = String(existing.id ?? '').trim();
+      const targetAuthId = String(existing.auth_id ?? '').trim();
+      const targetEmail = String(existing.email ?? '').trim().toLowerCase();
+      const isSelf =
+        (actorId && targetId && actorId === targetId) ||
+        (actorAuthId && targetAuthId && actorAuthId === targetAuthId) ||
+        (actorEmail && targetEmail && actorEmail === targetEmail);
+
+      if (normalizedTargetRole === 'super_admin') {
+        throw new ForbiddenException('Admin cannot edit Super Admin accounts');
+      }
+
+      if (!isSelf && normalizedTargetRole !== 'employee') {
+        throw new ForbiddenException(
+          'Admin can only edit employee accounts or their own profile',
+        );
+      }
+
+      const hasDisallowedField =
+        dto.role !== undefined ||
+        dto.accountStatus !== undefined ||
+        dto.branchId !== undefined ||
+        dto.avatarUrl !== undefined ||
+        dto.currentPassword !== undefined;
+
+      if (hasDisallowedField) {
+        throw new ForbiddenException(
+          'Admin updates are limited to full name only',
+        );
+      }
+    }
+
     if (roleNorm === 'super_admin' || roleNorm === 'superadmin') {
       if (dto.accountStatus === 'rejected') {
         throw new ForbiddenException('Cannot reject a Super Admin account');
@@ -331,6 +404,33 @@ export class UsersService {
     }
 
     const payload: Record<string, unknown> = {};
+    const nextRole =
+      dto.role !== undefined ? this.normalizeStoredRole(dto.role) : undefined;
+
+    const crossesSuperAdminBoundary =
+      nextRole !== undefined &&
+      ((nextRole === 'super_admin' &&
+        roleNorm !== 'super_admin' &&
+        roleNorm !== 'superadmin') ||
+        ((roleNorm === 'super_admin' || roleNorm === 'superadmin') &&
+          nextRole !== 'super_admin'));
+
+    if (crossesSuperAdminBoundary) {
+      if (!actor) {
+        throw new UnauthorizedException(
+          'Password confirmation is required to change Super Admin access.',
+        );
+      }
+
+      const currentPassword = dto.currentPassword?.trim();
+      if (!currentPassword) {
+        throw new UnauthorizedException(
+          'Password confirmation is required to change Super Admin access.',
+        );
+      }
+
+      await this.verifyActorPassword(actor, currentPassword);
+    }
 
     if (dto.fullName !== undefined) {
       const trimmed = dto.fullName.trim();
@@ -347,22 +447,18 @@ export class UsersService {
       payload.account_status = dto.accountStatus;
     }
 
-    if (dto.role !== undefined) {
-      const next = this.normalizeStoredRole(dto.role);
-      if (
-        next === 'super_admin' &&
-        roleNorm !== 'super_admin' &&
-        roleNorm !== 'superadmin'
-      ) {
-        throw new ForbiddenException(
-          'Cannot assign Super Admin via this endpoint',
-        );
+    if (nextRole !== undefined) {
+      payload.role = nextRole;
+      if (nextRole === 'super_admin') {
+        payload.branch_id = null;
       }
-      payload.role = next;
     }
 
     if (dto.branchId !== undefined) {
-      if (dto.branchId === null) {
+      const effectiveRole = nextRole ?? this.normalizeStoredRole(existing.role ?? '');
+      if (effectiveRole === 'super_admin') {
+        payload.branch_id = null;
+      } else if (dto.branchId === null) {
         payload.branch_id = null;
       } else {
         const { data: branch, error: branchError } = await client
@@ -422,6 +518,25 @@ export class UsersService {
       throw new InternalServerErrorException(
         'User update returned no row (check database policies and users table).',
       );
+    }
+
+    if (dto.role !== undefined || dto.branchId !== undefined) {
+      const { error: syncAuthError } = await client.auth.admin.updateUserById(
+        authId,
+        {
+          app_metadata: {
+            role: updated.role,
+            branch_id:
+              this.normalizeStoredRole(updated.role ?? '') === 'super_admin'
+                ? null
+                : updated.branch_id,
+          },
+        },
+      );
+
+      if (syncAuthError) {
+        throw new InternalServerErrorException(syncAuthError.message);
+      }
     }
 
     let branchName: string | null = null;

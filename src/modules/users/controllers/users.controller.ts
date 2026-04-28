@@ -50,7 +50,7 @@ export class UsersController {
     return this.usersService.findOne(id, req.user);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Patch(':id')
   async update(
     @Req()
@@ -61,7 +61,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
   ) {
-    const updated = await this.usersService.update(id, updateUserDto);
+    const updated = await this.usersService.update(id, updateUserDto, req.user);
     req.auditLogContext = {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,
@@ -94,7 +94,7 @@ export class UsersController {
   }
 
   // NextJS Turbopack workaround using POST instead of PATCH/PUT
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post(':id/update')
   async updatePost(
     @Req()
@@ -105,7 +105,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
   ) {
-    const updated = await this.usersService.update(id, updateUserDto);
+    const updated = await this.usersService.update(id, updateUserDto, req.user);
     req.auditLogContext = {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,

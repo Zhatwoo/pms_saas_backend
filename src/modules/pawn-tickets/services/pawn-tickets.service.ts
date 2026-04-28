@@ -600,4 +600,106 @@ export class PawnTicketsService {
   private buildBranchScopedUploadPath(branchId: string, prefix: string) {
     return `${branchId}/${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
   }
+
+  async findByUnitCode(unitCode: string) {
+    const client = this.supabase.getClient();
+    const cleanCode = unitCode.trim().toUpperCase();
+
+    const { data: item, error: itemError } = await client
+      .from('pawned_items')
+      .select('*, customer:customers(*), branch_info:branches(*)')
+      .eq('item_id', cleanCode)
+      .maybeSingle();
+
+    if (itemError || !item) {
+      throw new BadRequestException('Item not found or unit code is invalid.');
+    }
+
+    // Resolve storage URLs for photos
+    const [profilePhoto, itemPhotos, idPhoto, idBackPhoto] = await Promise.all([
+      this.resolveStorageUrl(item.profile_photo),
+      this.resolveStorageUrls(item.item_photos ?? []),
+      this.resolveStorageUrl(item.id_photo),
+      this.resolveStorageUrl(item.id_back_photo),
+    ]);
+
+    return {
+      ...item,
+      profile_photo: profilePhoto,
+      item_photos: itemPhotos,
+      id_photo: idPhoto,
+      id_back_photo: idBackPhoto,
+    };
+  }
+
+  private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
+    if (!storedUrl) {
+      return '';
+    }
+
+    if (!storedUrl.startsWith('http')) {
+      // If it's a relative path like "bucket/path"
+      const parts = storedUrl.split('/');
+      if (parts.length < 2) return storedUrl;
+      const bucket = parts[0];
+      const path = parts.slice(1).join('/');
+      
+      const { data } = await this.supabase
+        .getClient()
+        .storage.from(bucket)
+        .createSignedUrl(path, 60 * 60 * 24 * 7);
+        
+      return data?.signedUrl || storedUrl;
+    }
+
+    try {
+      const parsedUrl = new URL(storedUrl);
+      const storagePrefix = '/storage/v1/object/public/';
+
+      if (!parsedUrl.pathname.includes(storagePrefix)) {
+        return storedUrl;
+      }
+
+      const storagePath = parsedUrl.pathname.split(storagePrefix)[1];
+      if (!storagePath) {
+        return storedUrl;
+      }
+
+      const [bucketName, ...objectPathParts] = storagePath.split('/');
+      const objectPath = objectPathParts.join('/');
+
+      if (!bucketName || !objectPath) {
+        return storedUrl;
+      }
+
+      const { data, error } = await this.supabase
+        .getClient()
+        .storage.from(bucketName)
+        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+
+      if (error || !data?.signedUrl) {
+        return storedUrl;
+      }
+
+      return data.signedUrl;
+    } catch {
+      return storedUrl;
+    }
+  }
+
+  private async resolveStorageUrls(
+    storedUrls?: Array<string | null> | string | null,
+  ): Promise<string[]> {
+    const urls = Array.isArray(storedUrls)
+      ? storedUrls
+      : typeof storedUrls === 'string' && storedUrls.trim()
+        ? [storedUrls]
+        : [];
+
+    return Promise.all(
+      urls
+        .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+        .map((url) => this.resolveStorageUrl(url)),
+    );
+  }
 }

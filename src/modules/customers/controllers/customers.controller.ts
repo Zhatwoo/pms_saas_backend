@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req, Get, Query, Param, Put } from '@nestjs/common';
+import { Controller, Post, Body, Req, Get, Query, Param, Put, Delete } from '@nestjs/common';
 import { CustomersService } from '../services/customers.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
@@ -85,9 +85,19 @@ export class CustomersController {
   requestEdit(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() dto: { notes: string },
+    @Body() dto: { notes: string; field?: string; mode?: string },
   ) {
-    return this.customersService.requestEdit(req.user, id, dto.notes);
+    return this.customersService.requestEdit(req.user, id, dto.notes, dto.field, dto.mode);
+  }
+
+  @Roles(Role.EMPLOYEE)
+  @Delete(':id/request-edit/:logId')
+  cancelRequestEdit(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Param('logId') logId: string,
+  ) {
+    return this.customersService.cancelRequestEdit(req.user, id, logId);
   }
 }
 

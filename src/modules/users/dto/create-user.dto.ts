@@ -1,4 +1,11 @@
-import { IsEmail, IsIn, IsString, IsUUID, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsIn,
+  IsString,
+  IsUUID,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateUserDto {
   @IsString()
@@ -12,9 +19,13 @@ export class CreateUserDto {
   @MinLength(6)
   password: string;
 
-  @IsIn(['admin', 'employee'])
-  role: 'admin' | 'employee';
+  @IsIn(['super_admin', 'superadmin', 'admin', 'employee', 'branch'])
+  role: 'super_admin' | 'superadmin' | 'admin' | 'employee' | 'branch';
 
+  @ValidateIf(
+    (o: CreateUserDto) =>
+      o.role !== 'super_admin' && o.role !== 'superadmin',
+  )
   @IsUUID()
-  branchId: string;
+  branchId?: string | null;
 }

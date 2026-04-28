@@ -100,7 +100,7 @@ export class InventoryController {
     return this.inventoryService.updatePawned(req.user, id, dto);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Delete('pawned/:id')
   deletePawned(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -129,7 +129,7 @@ export class InventoryController {
     return this.inventoryService.addRemark(req.user, id, dto.remark);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post('pawned/:id/expire')
   expireItem(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -248,6 +248,34 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('for-sale-stats')
+  findForSaleStats(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.findForSaleStats(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('for-sale-categories')
+  findForSaleCategories(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.findForSaleCategories(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('for-sale-calendar')
+  findForSaleCalendar(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.inventoryService.findForSaleCalendar(req.user, branch, month);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get('for-sale')
   findAllForSale(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -256,6 +284,7 @@ export class InventoryController {
     @Query('status') status?: string,
     @Query('search') search?: string,
     @Query('viewMode') viewMode?: string,
+    @Query('date') date?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -265,6 +294,7 @@ export class InventoryController {
       status,
       search,
       viewMode,
+      date,
       page: parseInt(page || '1'),
       limit: parseInt(limit || '10'),
     });

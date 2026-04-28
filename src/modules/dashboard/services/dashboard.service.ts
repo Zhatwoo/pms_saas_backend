@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import nodemailer, { type Transporter } from 'nodemailer';
-import { Role } from '../../../common/enums';
+import { Role, isNonRevenuePurpose } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -383,6 +383,19 @@ export class DashboardService {
     return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
   }
 
+  private formatRelativeTime(isoString: string): string {
+    if (!isoString) return '';
+    const diff = Date.now() - new Date(isoString).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(isoString).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
   private summarizeFundRequests(
     rows: Array<{
       status: string;
@@ -483,7 +496,7 @@ export class DashboardService {
         params.balanceRows,
         branch.id,
         params.asOfDate,
-        { carryForward: false },
+        { carryForward: true },
       );
 
       return {
@@ -879,11 +892,28 @@ export class DashboardService {
     return { fromDate: from.toISOString().split('T')[0], toDate };
   }
 
-  async getPawnKpis(user: AuthenticatedUserProfile, branchFilter?: string, period?: string) {
+  async getPawnKpis(
+    user: AuthenticatedUserProfile,
+    branchFilter?: string,
+    period?: string,
+    customStartDate?: string,
+    customEndDate?: string,
+  ) {
     const client = this.supabaseService.getClient();
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
-    const { fromDate, toDate } = this.resolvePeriodRange(period);
+    
+    let fromDate: string;
+    let toDate: string;
+
+    if (customStartDate && customEndDate) {
+      fromDate = `${customStartDate} 00:00:00`;
+      toDate = `${customEndDate} 23:59:59`;
+    } else {
+      const range = this.resolvePeriodRange(period);
+      fromDate = `${range.fromDate} 00:00:00`;
+      toDate = `${range.toDate} 23:59:59`;
+    }
 
     // Determine branch scope
     const isAdmin = user?.role === Role.SUPER_ADMIN;
@@ -903,7 +933,9 @@ export class DashboardService {
       client
         .from('pawned_items')
         .select('id', { count: 'exact', head: true })
-        .eq('status', 'Active'),
+        .eq('status', 'Active')
+        .gte('pawn_date', fromDate)
+        .lte('pawn_date', toDate),
     );
     // 2. Items near expiration (maturity within 7 days)
     const twentyThreeDaysAgo = new Date(today);
@@ -924,27 +956,35 @@ export class DashboardService {
 
     // 4. Total contracts (overall)
     const totalContractsQuery = buildPawnQuery(
-      client.from('pawned_items').select('id', { count: 'exact', head: true }),
+      client
+        .from('pawned_items')
+        .select('id', { count: 'exact', head: true })
+        .gte('pawn_date', fromDate)
+        .lte('pawn_date', toDate),
     );
     // 5. Redeemed
     const redeemedQuery = buildPawnQuery(
       client
         .from('pawned_items')
         .select('id', { count: 'exact', head: true })
-        .eq('status', 'Redeemed'),
+        .eq('status', 'Redeemed')
+        .gte('pawn_date', fromDate)
+        .lte('pawn_date', toDate),
     );
     // 6. Expired (redeemed overdue)
     const expiredQuery = buildPawnQuery(
       client
         .from('pawned_items')
         .select('id', { count: 'exact', head: true })
-        .eq('status', 'Expired'),
+        .eq('status', 'Expired')
+        .gte('pawn_date', fromDate)
+        .lte('pawn_date', toDate),
     );
 
     // 7. Revenue from transactions for the selected period
     let revenueQuery = client
       .from('transactions')
-      .select('cash_in')
+      .select('cash_in, purpose')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
     if (branchId) revenueQuery = revenueQuery.eq('branch_id', branchId);
@@ -960,11 +1000,14 @@ export class DashboardService {
         .gte('pawn_date', sixMonthsAgo.toISOString().split('T')[0]),
     );
 
-    // 9. Revenue trend (last 6 months)
+    const yearStart = new Date(today.getFullYear(), 0, 1);
+    const yearStartStr = yearStart.toISOString().split('T')[0];
+
+    // 9. Revenue trend (year-to-date)
     let revenueTrendQuery = client
       .from('transactions')
-      .select('cash_in, transaction_date')
-      .gte('transaction_date', sixMonthsAgo.toISOString().split('T')[0]);
+      .select('cash_in, transaction_date, purpose')
+      .gte('transaction_date', yearStartStr);
     if (branchId)
       revenueTrendQuery = revenueTrendQuery.eq('branch_id', branchId);
 
@@ -980,11 +1023,22 @@ export class DashboardService {
     );
 
     // 11. Total sales revenue (sold items price)
-    let totalSalesQuery = client
-      .from('sale_items')
-      .select('price')
-      .eq('status', 'Sold');
-    if (branchId) totalSalesQuery = totalSalesQuery.eq('branch_id', branchId);
+    let branchSalesQuery = client
+      .from('transactions')
+      .select('cash_in')
+      .eq('purpose', 'Item Sale')
+      .gte('transaction_date', fromDate)
+      .lte('transaction_date', toDate);
+    if (branchId) branchSalesQuery = branchSalesQuery.eq('branch_id', branchId);
+
+    const allBranchSalesQuery = isAdmin
+      ? client
+          .from('transactions')
+          .select('cash_in')
+          .eq('purpose', 'Item Sale')
+          .gte('transaction_date', fromDate)
+          .lte('transaction_date', toDate)
+      : branchSalesQuery;
 
     const [
       activeResult,
@@ -997,7 +1051,8 @@ export class DashboardService {
       contractTrendResult,
       revenueTrendResult,
       attentionResult,
-      totalSalesResult,
+      branchSalesResult,
+      allBranchSalesResult,
     ] = await Promise.all([
       activeQuery,
       nearExpQuery,
@@ -1009,18 +1064,25 @@ export class DashboardService {
       contractTrendQuery,
       revenueTrendQuery,
       attentionQuery,
-      totalSalesQuery,
+      branchSalesQuery,
+      allBranchSalesQuery,
     ]);
 
-    // Compute monthly revenue
+    // Compute monthly revenue (only revenue-generating purposes)
     const monthlyRevenue = (revenueResult.data || []).reduce(
-      (sum: number, row: any) => sum + this.toMoney(row.cash_in),
+      (sum: number, row: any) =>
+        isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in),
       0,
     );
 
     // Compute total overall sales
-    const totalOverallSales = (totalSalesResult.data || []).reduce(
-      (sum: number, row: any) => sum + this.toMoney(row.price),
+    const branchSales = (branchSalesResult.data || []).reduce(
+      (sum: number, row: any) => sum + this.toMoney(row.cash_in),
+      0,
+    );
+
+    const allBranchSales = (allBranchSalesResult.data || []).reduce(
+      (sum: number, row: any) => sum + this.toMoney(row.cash_in),
       0,
     );
 
@@ -1070,13 +1132,13 @@ export class DashboardService {
 
     // Build revenue trend by month
     const revenueTrendMap = new Map<string, number>();
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(today.getFullYear(), today.getMonth() - 5 + i, 1);
+    for (let monthIndex = 0; monthIndex <= today.getMonth(); monthIndex++) {
+      const d = new Date(today.getFullYear(), monthIndex, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       revenueTrendMap.set(key, 0);
     }
     for (const row of revenueTrendResult.data || []) {
-      if (!row.transaction_date) continue;
+      if (!row.transaction_date || isNonRevenuePurpose(row.purpose)) continue;
       const key = row.transaction_date.substring(0, 7);
       const current = revenueTrendMap.get(key);
       if (current !== undefined) {
@@ -1119,32 +1181,32 @@ export class DashboardService {
       };
     });
 
-    // Notifications (recent items that expired)
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+    // Notifications (fetch from notifications table)
+    let notifQuery = client
+      .from('notifications')
+      .select('id, title, subtitle, created_at, is_read')
+      .order('created_at', { ascending: false })
+      .limit(10);
 
-    const notifQuery = buildPawnQuery(
-      client
-        .from('pawned_items')
-        .select('id, item_name, item_id, pawn_date')
-        .eq('status', 'Active')
-        .lte('pawn_date', thirtyDaysAgoStr)
-        .order('pawn_date', { ascending: true })
-        .limit(5),
-    );
+    if (user.role !== Role.SUPER_ADMIN) {
+      if (user.branchId) {
+        notifQuery = notifQuery.or(
+          `branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`,
+        );
+      } else {
+        notifQuery = notifQuery.or(`user_id.eq.${user.id},branch_id.is.null`);
+      }
+    } else if (branchId) {
+      notifQuery = notifQuery.or(`branch_id.eq.${branchId},branch_id.is.null`);
+    }
+
     const notifResult = await notifQuery;
-    const notifications = (notifResult.data || []).map(
-      (item: any, idx: number) => {
-        const matDate = new Date(item.pawn_date);
-        matDate.setDate(matDate.getDate() + 30);
-        return {
-          id: item.id || idx,
-          message: `${item.item_name} (${item.item_id}) has passed its maturity date`,
-          time: matDate.toISOString().split('T')[0],
-        };
-      },
-    );
+    const notifications = (notifResult.data || []).map((item: any) => ({
+      id: item.id,
+      message: item.title || item.subtitle || 'Notification',
+      time: this.formatRelativeTime(item.created_at),
+      branchId: item.branch_id || null,
+    }));
 
     return {
       overallData: {
@@ -1152,7 +1214,9 @@ export class DashboardService {
         active: activeResult.count ?? 0,
         redeemed: redeemedResult.count ?? 0,
         redeemedOverdue: expiredResult.count ?? 0,
-        totalOverallSales: `₱ ${totalOverallSales.toLocaleString()}`,
+        branchSales,
+        allBranchSales,
+        totalOverallSales: `₱ ${allBranchSales.toLocaleString()}`,
       },
       kpiData: {
         activeContracts: activeResult.count ?? 0,

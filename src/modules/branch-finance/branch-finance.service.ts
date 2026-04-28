@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException, BadRequestException } from '@nestjs/common';
-import { Role } from '../../common/enums';
+import { Role, TransactionPurpose } from '../../common/enums';
 import type { UserWithBranch } from '../../common/utils/branch-scope.util';
 import {
   effectiveBranchIdForQuery,
@@ -47,6 +47,7 @@ interface BranchRow {
 
 export type LedgerEntryType =
   | 'pawn'
+  | 'redeem'
   | 'buy_back'
   | 'renewal'
   | 'sale'
@@ -81,6 +82,7 @@ export interface BranchFinanceSummary {
   todayCashOut: number;
   breakdown: {
     pawnOut: number;
+    redeemIn: number;
     buyBackIn: number;
     renewalIn: number;
     saleIn: number;
@@ -118,10 +120,13 @@ export class BranchFinanceService {
     if (purpose === 'pawn' || purpose === 'new pawn') {
       return 'pawn';
     }
+    if (purpose === 'redeem') {
+      return 'redeem';
+    }
     if (purpose === 'buy back') {
       return 'buy_back';
     }
-    if (purpose === 'renew' || purpose === 'renewal') {
+    if (purpose === 'renew' || purpose === 'renewal' || purpose === 'reappraise') {
       return 'renewal';
     }
     if (
@@ -146,6 +151,9 @@ export class BranchFinanceService {
     switch (type) {
       case 'pawn':
         parts.push('New Pawn');
+        break;
+      case 'redeem':
+        parts.push('Redeem');
         break;
       case 'buy_back':
         parts.push('Buy Back');
@@ -296,6 +304,7 @@ export class BranchFinanceService {
 
         const breakdown = {
           pawnOut: 0,
+          redeemIn: 0,
           buyBackIn: 0,
           renewalIn: 0,
           saleIn: 0,
@@ -324,6 +333,9 @@ export class BranchFinanceService {
             case 'pawn':
               breakdown.pawnOut += co;
               break;
+            case 'redeem':
+              breakdown.redeemIn += ci;
+              break;
             case 'buy_back':
               breakdown.buyBackIn += ci;
               break;
@@ -346,17 +358,11 @@ export class BranchFinanceService {
 
         breakdown.startBalance = snap.startingBalance;
 
-        let endingBalance = snap.endingBalance;
-        const todayRowExists = balanceRows.some(
-          (r) => r.branch_id === branch.id && r.record_date === today,
+        // Always compute ending balance dynamically:
+        // End Day = Start Day + Σ(cash_in) - Σ(cash_out)
+        const endingBalance = Number(
+          (snap.startingBalance + netCashFromTransactions(operationalTx)).toFixed(2),
         );
-        if (!todayRowExists && operationalTx.length > 0) {
-          endingBalance = Number(
-            (snap.startingBalance + netCashFromTransactions(operationalTx)).toFixed(
-              2,
-            ),
-          );
-        }
 
         const fundReqSummary = { pending: 0, approved: 0, transferred: 0 };
         for (const fr of branchFundReqs) {
@@ -376,6 +382,7 @@ export class BranchFinanceService {
           todayCashOut: Number(todayCashOut.toFixed(2)),
           breakdown: {
             pawnOut: Number(breakdown.pawnOut.toFixed(2)),
+            redeemIn: Number(breakdown.redeemIn.toFixed(2)),
             buyBackIn: Number(breakdown.buyBackIn.toFixed(2)),
             renewalIn: Number(breakdown.renewalIn.toFixed(2)),
             saleIn: Number(breakdown.saleIn.toFixed(2)),
@@ -417,9 +424,9 @@ export class BranchFinanceService {
     let dbQuery = client
       .from('transactions')
       .select('*', { count: 'exact' })
-      .order('transaction_date', { ascending: false })
-      .order('transaction_time', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('transaction_date', { ascending: true })
+      .order('transaction_time', { ascending: true })
+      .order('created_at', { ascending: true });
 
     if (branchId) {
       dbQuery = dbQuery.eq('branch_id', branchId);
@@ -470,6 +477,27 @@ export class BranchFinanceService {
     const today = new Date().toISOString().split('T')[0];
     const confirmedAmount = Number(amount.toFixed(2));
 
+    // When setting starting balance, compute net of today's transactions
+    // so ending_balance = starting + net (not just starting, which would wipe adjustments).
+    let todayNet = 0;
+    if (type === 'starting') {
+      const { data: todayTxs } = await client
+        .from('transactions')
+        .select('purpose, cash_in, cash_out')
+        .eq('branch_id', branchId)
+        .eq('transaction_date', today);
+
+      todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
+        const p = String(tx.purpose ?? '').toLowerCase().trim();
+        if (p === 'start' || p === 'end') return sum;
+        return (
+          sum +
+          (parseFloat(String(tx.cash_in ?? 0)) || 0) -
+          (parseFloat(String(tx.cash_out ?? 0)) || 0)
+        );
+      }, 0);
+    }
+
     const { data: existing, error: existingError } = await client
       .from('daily_balances')
       .select('id, starting_balance, ending_balance')
@@ -484,7 +512,10 @@ export class BranchFinanceService {
     if (existing) {
       const update =
         type === 'starting'
-          ? { starting_balance: confirmedAmount, ending_balance: confirmedAmount }
+          ? {
+              starting_balance: confirmedAmount,
+              ending_balance: Number((confirmedAmount + todayNet).toFixed(2)),
+            }
           : { ending_balance: confirmedAmount };
       const { error: updateError } = await client
         .from('daily_balances')
@@ -500,10 +531,25 @@ export class BranchFinanceService {
       };
       if (type === 'starting') {
         row.starting_balance = confirmedAmount;
-        row.ending_balance = confirmedAmount;
+        row.ending_balance = Number((confirmedAmount + todayNet).toFixed(2));
       } else {
-        // Do not carry previous day into today's closing-only row.
-        row.starting_balance = 0;
+        // Carry forward the previous day's ending balance as today's starting balance.
+        let carryForwardBalance = 0;
+        const { data: priorRow } = await client
+          .from('daily_balances')
+          .select('ending_balance')
+          .eq('branch_id', branchId)
+          .lt('record_date', today)
+          .order('record_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (priorRow) {
+          carryForwardBalance = Number(
+            Number(priorRow.ending_balance ?? 0).toFixed(2),
+          );
+        }
+        row.starting_balance = carryForwardBalance;
         row.ending_balance = confirmedAmount;
       }
       const { error: insertError } = await client
@@ -514,27 +560,45 @@ export class BranchFinanceService {
       }
     }
 
-    // Create a transaction row so it appears in ledger and reports' opening balance query
-    const purpose = type === 'starting' ? 'Start' : 'End';
+    // Upsert a journal transaction so it appears in ledger.
+    // cash_in/cash_out are ZERO — Start/End are not real cash movement;
+    // they only record the confirmed balance in daily_balances.
+    const purpose = type === 'starting' ? TransactionPurpose.START : TransactionPurpose.END;
     const { data: branch } = await client
       .from('branches')
       .select('name')
       .eq('id', branchId)
       .maybeSingle();
 
-    await client.from('transactions').insert([
-      {
-        transaction_no: `${purpose.toUpperCase()}-${Date.now()}`,
-        branch_id: branchId,
-        branch: branch?.name ?? 'Unknown',
-        purpose,
-        transaction_date: today,
-        transaction_time: new Date().toTimeString().slice(0, 8),
-        cash_in: type === 'starting' ? confirmedAmount : 0,
-        cash_out: 0,
-        details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
-      },
-    ]);
+    // Idempotency: one Start and one End per branch per day (update if exists).
+    const { data: existingTx } = await client
+      .from('transactions')
+      .select('id')
+      .eq('branch_id', branchId)
+      .eq('transaction_date', today)
+      .eq('purpose', purpose)
+      .maybeSingle();
+
+    const txPayload = {
+      transaction_no: `${purpose.toUpperCase()}-${Date.now()}`,
+      branch_id: branchId,
+      branch: branch?.name ?? 'Unknown',
+      purpose,
+      transaction_date: today,
+      transaction_time: new Date().toTimeString().slice(0, 8),
+      cash_in: 0,
+      cash_out: 0,
+      details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
+    };
+
+    if (existingTx) {
+      await client
+        .from('transactions')
+        .update(txPayload)
+        .eq('id', existingTx.id);
+    } else {
+      await client.from('transactions').insert([txPayload]);
+    }
 
     return { success: true, type, amount: confirmedAmount, date: today };
   }
@@ -552,7 +616,10 @@ export class BranchFinanceService {
     const client = this.supabaseService.getClient();
     const today = new Date().toISOString().split('T')[0];
 
-    // Try today first, then fall back to most recent
+    // 1. Get starting balance
+    let startingBalance = 0;
+    let recordDate: string | null = null;
+
     const { data: todayRow } = await client
       .from('daily_balances')
       .select('starting_balance, ending_balance, record_date')
@@ -561,31 +628,46 @@ export class BranchFinanceService {
       .maybeSingle();
 
     if (todayRow) {
-      return {
-        startingBalance: this.toMoney(todayRow.starting_balance),
-        endingBalance: this.toMoney(todayRow.ending_balance),
-        date: todayRow.record_date,
-      };
+      startingBalance = this.toMoney(todayRow.starting_balance);
+      recordDate = todayRow.record_date;
+    } else {
+      // Carry forward previous day's ending balance
+      const { data: priorRow } = await client
+        .from('daily_balances')
+        .select('ending_balance, record_date')
+        .eq('branch_id', branchId)
+        .lt('record_date', today)
+        .order('record_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (priorRow) {
+        startingBalance = this.toMoney(priorRow.ending_balance);
+        recordDate = priorRow.record_date;
+      }
     }
 
-    const { data: recentRows } = await client
-      .from('daily_balances')
-      .select('branch_id, record_date, starting_balance, ending_balance')
+    // 2. Dynamically compute ending balance from today's transactions
+    const { data: todayTxs } = await client
+      .from('transactions')
+      .select('purpose, cash_in, cash_out')
       .eq('branch_id', branchId)
-      .order('record_date', { ascending: false })
-      .limit(120);
+      .eq('transaction_date', today);
 
-    const snap = computeBranchDaySnapshot(
-      (recentRows ?? []) as DailyBalanceRow[],
-      branchId,
-      today,
-      { carryForward: false },
-    );
+    const todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
+      const p = String(tx.purpose ?? '').toLowerCase().trim();
+      if (p === 'start' || p === 'end') return sum;
+      return (
+        sum +
+        (parseFloat(String(tx.cash_in ?? 0)) || 0) -
+        (parseFloat(String(tx.cash_out ?? 0)) || 0)
+      );
+    }, 0);
 
     return {
-      startingBalance: snap.startingBalance,
-      endingBalance: snap.endingBalance,
-      date: snap.recordDate,
+      startingBalance,
+      endingBalance: Number((startingBalance + todayNet).toFixed(2)),
+      date: recordDate,
     };
   }
 }

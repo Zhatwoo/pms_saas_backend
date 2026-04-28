@@ -4,7 +4,8 @@ import { InternalServerErrorException } from '@nestjs/common';
  * Adjusts the daily balance for a branch by a given delta.
  *
  * If today's row exists, updates ending_balance.
- * If not, creates a new row starting from zero for the current day.
+ * If not, creates a new row carrying forward the previous day's ending
+ * balance as today's starting_balance.
  */
 export async function adjustDailyBalance(
   client: {
@@ -46,11 +47,27 @@ export async function adjustDailyBalance(
     return;
   }
 
-  const startingBalance = 0;
+  // Carry forward the previous day's ending balance as today's starting balance.
+  let startingBalance = 0;
+  const { data: priorRow } = await client
+    .from('daily_balances')
+    .select('ending_balance')
+    .eq('branch_id', branchId)
+    .lt('record_date', today)
+    .order('record_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (priorRow) {
+    startingBalance = Number(
+      Number(priorRow.ending_balance ?? 0).toFixed(2),
+    );
+  }
+
   const { error: insertError } = await client.from('daily_balances').insert({
     branch_id: branchId,
     record_date: today,
-    starting_balance: Number(startingBalance.toFixed(2)),
+    starting_balance: startingBalance,
     ending_balance: Number((startingBalance + amount).toFixed(2)),
   });
 

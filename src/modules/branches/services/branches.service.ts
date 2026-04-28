@@ -66,14 +66,15 @@ export class BranchesService {
   }
 
   async create(createBranchDto: CreateBranchDto) {
-    let payload: CreateBranchDto = {
-      ...createBranchDto,
+    let payload = {
       name: this.normalizeBranchName(createBranchDto.name),
       branch_code: createBranchDto.branch_code.trim(),
+      location: createBranchDto.location.trim(),
       contact_number: this.resolveContactNumber(
         createBranchDto.contact_number,
         createBranchDto.contactNumber,
       ),
+      status: createBranchDto.status,
     };
 
     let { data, error } = await this.supabaseService
@@ -182,10 +183,12 @@ export class BranchesService {
   }
 
   async update(id: string, updateBranchDto: UpdateBranchDto) {
-    const payload: UpdateBranchDto = {
-      ...updateBranchDto,
+    const payload = {
       ...(updateBranchDto.name
         ? { name: this.normalizeBranchName(updateBranchDto.name) }
+        : {}),
+      ...(updateBranchDto.location
+        ? { location: updateBranchDto.location.trim() }
         : {}),
       ...(updateBranchDto.contact_number || updateBranchDto.contactNumber
         ? {
@@ -195,6 +198,7 @@ export class BranchesService {
             ),
           }
         : {}),
+      ...(updateBranchDto.status ? { status: updateBranchDto.status } : {}),
     };
 
     const { data, error } = await this.supabaseService
