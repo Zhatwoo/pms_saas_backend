@@ -358,17 +358,11 @@ export class BranchFinanceService {
 
         breakdown.startBalance = snap.startingBalance;
 
-        let endingBalance = snap.endingBalance;
-        const todayRowExists = balanceRows.some(
-          (r) => r.branch_id === branch.id && r.record_date === today,
+        // Always compute ending balance dynamically:
+        // End Day = Start Day + Σ(cash_in) - Σ(cash_out)
+        const endingBalance = Number(
+          (snap.startingBalance + netCashFromTransactions(operationalTx)).toFixed(2),
         );
-        if (!todayRowExists && operationalTx.length > 0) {
-          endingBalance = Number(
-            (snap.startingBalance + netCashFromTransactions(operationalTx)).toFixed(
-              2,
-            ),
-          );
-        }
 
         const fundReqSummary = { pending: 0, approved: 0, transferred: 0 };
         for (const fr of branchFundReqs) {
@@ -430,9 +424,9 @@ export class BranchFinanceService {
     let dbQuery = client
       .from('transactions')
       .select('*', { count: 'exact' })
-      .order('transaction_date', { ascending: false })
-      .order('transaction_time', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('transaction_date', { ascending: true })
+      .order('transaction_time', { ascending: true })
+      .order('created_at', { ascending: true });
 
     if (branchId) {
       dbQuery = dbQuery.eq('branch_id', branchId);
@@ -483,6 +477,27 @@ export class BranchFinanceService {
     const today = new Date().toISOString().split('T')[0];
     const confirmedAmount = Number(amount.toFixed(2));
 
+    // When setting starting balance, compute net of today's transactions
+    // so ending_balance = starting + net (not just starting, which would wipe adjustments).
+    let todayNet = 0;
+    if (type === 'starting') {
+      const { data: todayTxs } = await client
+        .from('transactions')
+        .select('purpose, cash_in, cash_out')
+        .eq('branch_id', branchId)
+        .eq('transaction_date', today);
+
+      todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
+        const p = String(tx.purpose ?? '').toLowerCase().trim();
+        if (p === 'start' || p === 'end') return sum;
+        return (
+          sum +
+          (parseFloat(String(tx.cash_in ?? 0)) || 0) -
+          (parseFloat(String(tx.cash_out ?? 0)) || 0)
+        );
+      }, 0);
+    }
+
     const { data: existing, error: existingError } = await client
       .from('daily_balances')
       .select('id, starting_balance, ending_balance')
@@ -497,7 +512,10 @@ export class BranchFinanceService {
     if (existing) {
       const update =
         type === 'starting'
-          ? { starting_balance: confirmedAmount, ending_balance: confirmedAmount }
+          ? {
+              starting_balance: confirmedAmount,
+              ending_balance: Number((confirmedAmount + todayNet).toFixed(2)),
+            }
           : { ending_balance: confirmedAmount };
       const { error: updateError } = await client
         .from('daily_balances')
@@ -513,10 +531,25 @@ export class BranchFinanceService {
       };
       if (type === 'starting') {
         row.starting_balance = confirmedAmount;
-        row.ending_balance = confirmedAmount;
+        row.ending_balance = Number((confirmedAmount + todayNet).toFixed(2));
       } else {
-        // Do not carry previous day into today's closing-only row.
-        row.starting_balance = 0;
+        // Carry forward the previous day's ending balance as today's starting balance.
+        let carryForwardBalance = 0;
+        const { data: priorRow } = await client
+          .from('daily_balances')
+          .select('ending_balance')
+          .eq('branch_id', branchId)
+          .lt('record_date', today)
+          .order('record_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (priorRow) {
+          carryForwardBalance = Number(
+            Number(priorRow.ending_balance ?? 0).toFixed(2),
+          );
+        }
+        row.starting_balance = carryForwardBalance;
         row.ending_balance = confirmedAmount;
       }
       const { error: insertError } = await client
@@ -583,7 +616,10 @@ export class BranchFinanceService {
     const client = this.supabaseService.getClient();
     const today = new Date().toISOString().split('T')[0];
 
-    // Try today first, then fall back to most recent
+    // 1. Get starting balance
+    let startingBalance = 0;
+    let recordDate: string | null = null;
+
     const { data: todayRow } = await client
       .from('daily_balances')
       .select('starting_balance, ending_balance, record_date')
@@ -592,31 +628,46 @@ export class BranchFinanceService {
       .maybeSingle();
 
     if (todayRow) {
-      return {
-        startingBalance: this.toMoney(todayRow.starting_balance),
-        endingBalance: this.toMoney(todayRow.ending_balance),
-        date: todayRow.record_date,
-      };
+      startingBalance = this.toMoney(todayRow.starting_balance);
+      recordDate = todayRow.record_date;
+    } else {
+      // Carry forward previous day's ending balance
+      const { data: priorRow } = await client
+        .from('daily_balances')
+        .select('ending_balance, record_date')
+        .eq('branch_id', branchId)
+        .lt('record_date', today)
+        .order('record_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (priorRow) {
+        startingBalance = this.toMoney(priorRow.ending_balance);
+        recordDate = priorRow.record_date;
+      }
     }
 
-    const { data: recentRows } = await client
-      .from('daily_balances')
-      .select('branch_id, record_date, starting_balance, ending_balance')
+    // 2. Dynamically compute ending balance from today's transactions
+    const { data: todayTxs } = await client
+      .from('transactions')
+      .select('purpose, cash_in, cash_out')
       .eq('branch_id', branchId)
-      .order('record_date', { ascending: false })
-      .limit(120);
+      .eq('transaction_date', today);
 
-    const snap = computeBranchDaySnapshot(
-      (recentRows ?? []) as DailyBalanceRow[],
-      branchId,
-      today,
-      { carryForward: false },
-    );
+    const todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
+      const p = String(tx.purpose ?? '').toLowerCase().trim();
+      if (p === 'start' || p === 'end') return sum;
+      return (
+        sum +
+        (parseFloat(String(tx.cash_in ?? 0)) || 0) -
+        (parseFloat(String(tx.cash_out ?? 0)) || 0)
+      );
+    }, 0);
 
     return {
-      startingBalance: snap.startingBalance,
-      endingBalance: snap.endingBalance,
-      date: snap.recordDate,
+      startingBalance,
+      endingBalance: Number((startingBalance + todayNet).toFixed(2)),
+      date: recordDate,
     };
   }
 }
