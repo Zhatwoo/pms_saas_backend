@@ -115,6 +115,14 @@ export class CreatePawnTicketTransactionDto {
 
   @IsOptional()
   @IsString()
+  transactionDate?: string;
+
+  @IsOptional()
+  @IsString()
+  transactionTime?: string;
+
+  @IsOptional()
+  @IsString()
   details?: string;
 }
 

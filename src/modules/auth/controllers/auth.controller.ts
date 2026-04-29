@@ -6,6 +6,7 @@ import {
   Body,
   Req,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthService } from '../services/auth.service';
 import { BranchesService } from '../../branches/services/branches.service';
@@ -57,7 +58,7 @@ export class AuthController {
     );
 
     if (!isValid) {
-      throw new UnauthorizedException('Invalid password');
+      throw new BadRequestException('Invalid password');
     }
 
     return { success: true };

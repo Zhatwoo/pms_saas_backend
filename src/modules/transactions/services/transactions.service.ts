@@ -93,28 +93,51 @@ export class TransactionsService {
   }
 
   async create(user: UserWithBranch, dto: any) {
+    // Drop client-only fields that are not real DB columns.
+    // This prevents 500s when UI sends extra metadata.
+    const { layaway: _layaway, ...dtoClean } = dto ?? {};
+
     // 1. Resolve Branch Info
     const branchId =
-      dto.branch_id ||
+      dtoClean.branch_id ||
       (user.role !== Role.SUPER_ADMIN ? requireUserBranchId(user) : null);
-    if (!branchId) {
+    
+    // Allow branchless transactions only for Super Admin creating system-wide expenses
+    const isSystemExpense =
+      !branchId &&
+      user.role === Role.SUPER_ADMIN &&
+      dtoClean.purpose === 'Expense';
+
+    if (!branchId && !isSystemExpense) {
       throw new InternalServerErrorException(
         'Missing branch_id for transaction.',
       );
     }
 
-    const branchName = dto.branch || 'Unknown Branch';
+    const branchName = isSystemExpense
+      ? 'System / Head Office'
+      : (dtoClean.branch || 'Unknown Branch');
 
     // Generate transaction number if not provided
     const transactionNo =
-      dto.transaction_no ||
-      `${dto.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
+      dtoClean.transaction_no ||
+      `${dtoClean.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
 
     const payload = {
-      ...dto,
+      ...dtoClean,
       transaction_no: transactionNo,
-      branch_id: branchId,
+      branch_id: branchId || null,
       branch: branchName,
+      transaction_date:
+        dtoClean.transaction_date || new Date().toISOString().split('T')[0],
+      transaction_time:
+        dtoClean.transaction_time || new Date().toTimeString().slice(0, 8),
+      created_by_user_id: dtoClean.created_by_user_id || user?.id,
+      return_amount: dtoClean.return_amount ?? 0,
+      storage_fee: dtoClean.storage_fee ?? 0,
+      pawn_amount: dtoClean.pawn_amount ?? 0,
+      cash_in: dtoClean.cash_in ?? 0,
+      cash_out: dtoClean.cash_out ?? 0,
     };
 
     const { cash_in, cash_out } = payload;
@@ -140,13 +163,13 @@ export class TransactionsService {
     // 3. Create Notification
     try {
       const title =
-        dto.purpose === 'Buy Back'
+        dtoClean.purpose === 'Buy Back'
           ? `Successful buyback completed - ${transactionNo}`
-          : `New ${dto.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
+          : `New ${dtoClean.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
 
-      const subtitle = dto.unit
-        ? `Transaction Alert: ${dto.purpose?.toLowerCase() || 'item'} [${dto.unit}]`
-        : `Transaction Alert: ${dto.purpose?.toLowerCase() || 'activity'}`;
+      const subtitle = dtoClean.unit
+        ? `Transaction Alert: ${dtoClean.purpose?.toLowerCase() || 'item'} [${dtoClean.unit}]`
+        : `Transaction Alert: ${dtoClean.purpose?.toLowerCase() || 'activity'}`;
 
       await this.notificationsService.create({
         title,
@@ -179,6 +202,9 @@ export class TransactionsService {
           customer:customers (
             full_name,
             address,
+            barangay,
+            city,
+            region,
             contact_number
           )
         )
@@ -235,7 +261,9 @@ export class TransactionsService {
         // If range is 'all', we don't apply any date filter
       } else if (range === 'daily' || !range) {
         // Keep daily default for general transaction list calls (when no customerId).
-        const filterDate = date || new Date().toISOString().split('T')[0];
+        const filterDate =
+          date ||
+          new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
         query = query.eq('transaction_date', filterDate);
       }
     }

@@ -91,8 +91,17 @@ export class InventoryController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Put('pawned/:id')
+  updatePawnedPut(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.updatePawned(req.user, id, dto);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Patch('pawned/:id')
-  updatePawned(
+  updatePawnedPatch(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
     @Body() dto: any,
@@ -300,7 +309,16 @@ export class InventoryController {
     });
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Post('for-sale')
+  createForSale(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.createForSale(req.user, dto);
+  }
+
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post('for-sale/:id/mark-sold')
   markSold(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -324,7 +342,7 @@ export class InventoryController {
     return this.inventoryService.findOneForSale(req.user, id);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Put('for-sale/:id')
   updateForSale(
     @Req() req: { user: AuthenticatedUserProfile },
