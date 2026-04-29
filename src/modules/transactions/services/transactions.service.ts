@@ -333,17 +333,6 @@ export class TransactionsService {
         throw new InternalServerErrorException(layawayError.message);
       }
 
-      if (reservationStatus !== 'COMPLETED') {
-        const { error: holdError } = await client
-          .from('sale_items')
-          .update({ status: 'Reserved' })
-          .eq('id', dto.related_sale_item_id);
-
-        if (holdError) {
-          console.error('[Layaway Hold Error]', holdError);
-          throw new InternalServerErrorException(holdError.message);
-        }
-      }
     }
 
     if (branchId && (cash_in || cash_out)) {
