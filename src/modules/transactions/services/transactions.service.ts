@@ -179,6 +179,9 @@ export class TransactionsService {
           customer:customers (
             full_name,
             address,
+            barangay,
+            city,
+            region,
             contact_number
           )
         )
@@ -235,7 +238,9 @@ export class TransactionsService {
         // If range is 'all', we don't apply any date filter
       } else if (range === 'daily' || !range) {
         // Keep daily default for general transaction list calls (when no customerId).
-        const filterDate = date || new Date().toISOString().split('T')[0];
+        const filterDate =
+          date ||
+          new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
         query = query.eq('transaction_date', filterDate);
       }
     }

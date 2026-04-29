@@ -119,9 +119,9 @@ export class PawnTicketsService {
       .from('pawned_items')
       .select('serial_number')
       .eq('branch_id', branchId)
-      .eq('pawn_date', serialDate)
-      .order('created_at', { ascending: false })
-      .limit(200);
+      .ilike('serial_number', `${serialPrefix}%`)
+      .order('serial_number', { ascending: false })
+      .limit(100);
 
     if (itemsError) {
       throw new InternalServerErrorException(itemsError.message);
@@ -441,8 +441,8 @@ export class PawnTicketsService {
       branch_id: branchId,
       branch: branchName,
       purpose: 'Pawn',
-      transaction_date: new Date().toISOString().split('T')[0],
-      transaction_time: new Date().toTimeString().slice(0, 8),
+      transaction_date: dto.transaction.transactionDate || new Date().toLocaleDateString('en-CA'),
+      transaction_time: dto.transaction.transactionTime || new Date().toTimeString().slice(0, 8),
       // Pawn disbursement is a cash outflow from branch to customer.
       cash_in: 0,
       cash_out: dto.transaction.pawnAmount ?? 0,
@@ -513,14 +513,18 @@ export class PawnTicketsService {
       );
     }
 
-    // 2. Get the most recent items to find the highest sequence number
-    // We fetch the latest items for this branch to see what the last number used was.
+    // 2. Get the highest numeric sequence for this branch's pattern
+    // Pattern: [branchCode]-jclb-%
+    const branchCode = (branch as { branch_code: string }).branch_code;
+    const pattern = `${branchCode}-jclb-%`;
+
     const { data: items, error: itemsError } = await client
       .from('pawned_items')
       .select('item_id')
       .eq('branch_id', branchId)
-      .order('created_at', { ascending: false })
-      .limit(50);
+      .ilike('item_id', pattern)
+      .order('item_id', { ascending: false })
+      .limit(100);
 
     if (itemsError) {
       throw new InternalServerErrorException(itemsError.message);
@@ -528,8 +532,6 @@ export class PawnTicketsService {
 
     let maxNumber = 0;
 
-    // Parse the item_id (unit_code) to find the numeric sequence part
-    // Format: [branch]-jclb-[number]
     if (items && items.length > 0) {
       items.forEach((item) => {
         const parts = item.item_id.split('-');
