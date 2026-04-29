@@ -6,7 +6,10 @@ import {
 import nodemailer, { type Transporter } from 'nodemailer';
 import { Role, isNonRevenuePurpose } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
-import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
+import {
+  computeBranchDaySnapshot,
+  netCashFromTransactions,
+} from '../../../common/utils/daily-balance-aggregate.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
@@ -573,6 +576,7 @@ export class DashboardService {
           fundRowsResult,
           recentRequestsResult,
           recentTransfersResult,
+          systemExpensesResult,
         ] = await Promise.all([
           client.from('branches').select('id', { count: 'exact', head: true }),
           client
@@ -643,6 +647,11 @@ export class DashboardService {
             .eq('status', 'transferred')
             .order('transferred_at', { ascending: false })
             .limit(8),
+          client
+            .from('transactions')
+            .select('cash_out')
+            .eq('purpose', 'Expense')
+            .is('branch_id', null),
         ]);
 
         const errors = [
@@ -656,6 +665,7 @@ export class DashboardService {
           fundRowsResult.error,
           recentRequestsResult.error,
           recentTransfersResult.error,
+          systemExpensesResult.error,
         ].filter(Boolean);
 
         if (errors.length > 0) {
@@ -677,6 +687,10 @@ export class DashboardService {
               pendingApproval: pendingUsersCountResult.count ?? 0,
             },
             fundRequests: this.summarizeFundRequests(fundRowsResult.data ?? []),
+            systemExpenses: (systemExpensesResult.data ?? []).reduce(
+              (sum, row) => sum + Number(row.cash_out || 0),
+              0,
+            ),
           },
           branchBalances: this.buildBranchFinanceSummaries({
             branches: (branchesResult.data ?? []) as BranchRecord[],
@@ -700,6 +714,7 @@ export class DashboardService {
           fundRowsResult,
           latestBalanceResult,
           transferredFundsResult,
+          todayTransactionsResult,
         ] = await Promise.all([
           client
             .from('branches')
@@ -738,6 +753,11 @@ export class DashboardService {
             .select('branch_id, amount_transferred, transferred_at')
             .eq('branch_id', branchId)
             .eq('status', 'transferred'),
+          client
+            .from('transactions')
+            .select('purpose, cash_in, cash_out')
+            .eq('branch_id', branchId)
+            .eq('transaction_date', new Date().toISOString().split('T')[0]),
         ]);
 
         const errors = [
@@ -745,6 +765,7 @@ export class DashboardService {
           fundRowsResult.error,
           latestBalanceResult.error,
           transferredFundsResult.error,
+          todayTransactionsResult.error,
         ].filter(Boolean);
 
         if (errors.length > 0) {
@@ -764,12 +785,27 @@ export class DashboardService {
               []) as TransferredFundRow[],
             asOfDate: todayStrAdmin,
           })[0] ?? null;
+        const adminTodayNet = netCashFromTransactions(
+          (todayTransactionsResult.data ?? []) as Array<{
+            purpose?: string | null;
+            cash_in?: unknown;
+            cash_out?: unknown;
+          }>,
+        );
+        const adminFinanceAligned = adminFinance
+          ? {
+              ...adminFinance,
+              currentBalance: Number(
+                (adminFinance.startingBalance + adminTodayNet).toFixed(2),
+              ),
+            }
+          : null;
 
         return {
           view: 'admin',
           branch: branchResult.data,
-          branchFinance: adminFinance,
-          currentBalance: adminFinance?.currentBalance ?? 0,
+          branchFinance: adminFinanceAligned,
+          currentBalance: adminFinanceAligned?.currentBalance ?? 0,
           fundRequests: {
             summary: this.summarizeFundRequests(fundRowsResult.data ?? []),
             recent: (fundRowsResult.data ?? [])
@@ -785,6 +821,7 @@ export class DashboardService {
           employeeFundRowsResult,
           employeeLatestBalanceResult,
           employeeTransferredFundsResult,
+          employeeTodayTransactionsResult,
         ] = await Promise.all([
           client
             .from('branches')
@@ -823,6 +860,11 @@ export class DashboardService {
             .select('branch_id, amount_transferred, transferred_at')
             .eq('branch_id', employeeBranchId)
             .eq('status', 'transferred'),
+          client
+            .from('transactions')
+            .select('purpose, cash_in, cash_out')
+            .eq('branch_id', employeeBranchId)
+            .eq('transaction_date', new Date().toISOString().split('T')[0]),
         ]);
 
         const employeeErrors = [
@@ -830,6 +872,7 @@ export class DashboardService {
           employeeFundRowsResult.error,
           employeeLatestBalanceResult.error,
           employeeTransferredFundsResult.error,
+          employeeTodayTransactionsResult.error,
         ].filter(Boolean);
 
         if (employeeErrors.length > 0) {
@@ -849,12 +892,27 @@ export class DashboardService {
               []) as TransferredFundRow[],
             asOfDate: todayStrEmp,
           })[0] ?? null;
+        const employeeTodayNet = netCashFromTransactions(
+          (employeeTodayTransactionsResult.data ?? []) as Array<{
+            purpose?: string | null;
+            cash_in?: unknown;
+            cash_out?: unknown;
+          }>,
+        );
+        const empFinanceAligned = empFinance
+          ? {
+              ...empFinance,
+              currentBalance: Number(
+                (empFinance.startingBalance + employeeTodayNet).toFixed(2),
+              ),
+            }
+          : null;
 
         return {
           view: 'employee',
           branch: employeeBranchResult.data,
-          branchFinance: empFinance,
-          currentBalance: empFinance?.currentBalance ?? 0,
+          branchFinance: empFinanceAligned,
+          currentBalance: empFinanceAligned?.currentBalance ?? 0,
           fundRequests: {
             summary: this.summarizeFundRequests(
               employeeFundRowsResult.data ?? [],

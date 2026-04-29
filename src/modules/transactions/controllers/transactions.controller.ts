@@ -9,7 +9,7 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
-  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Post()
   create(
     @Req() req: { user: AuthenticatedUserProfile },

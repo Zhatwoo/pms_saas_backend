@@ -606,6 +606,7 @@ export class FundRequestsService {
     amount: number;
     transferReference: string | null;
     transferNotes: string | null;
+    referenceId?: string | null;
     direction: 'in' | 'out';
     counterpartBranchName?: string | null;
   }): Promise<{ id: string }> {
@@ -652,10 +653,65 @@ export class FundRequestsService {
         cash_out: isInbound ? 0 : params.amount,
         return_amount: 0,
         unit: isInbound ? 'fund_transfer' : 'fund_transfer_out',
-        unit_code: params.request.request_no,
+        unit_code: params.referenceId ?? params.request.request_no,
         pawn_amount: 0,
         storage_fee: 0,
         details: detailsParts.join(' | '),
+      })
+      .select('id')
+      .single<{ id: string }>();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data;
+  }
+
+  private async createOwnerOutTransferTransaction(params: {
+    request: FundRequestRow;
+    amount: number;
+    transferReference: string | null;
+    transferNotes: string | null;
+    referenceId: string;
+    destinationBranchName: string;
+  }): Promise<{ id: string }> {
+    const now = new Date();
+    const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+    const transactionNo = await this.getNextCode(
+      'transactions',
+      'transaction_no',
+      prefix,
+    );
+
+    const details = [
+      `Owner transfer out for ${params.request.request_no}`,
+      `Destination: ${params.destinationBranchName}`,
+      params.transferReference ? `Reference: ${params.transferReference}` : '',
+      params.transferNotes ? `Notes: ${params.transferNotes}` : '',
+      `Linked Ref ID: ${params.referenceId}`,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .from('transactions')
+      .insert({
+        transaction_no: transactionNo,
+        branch_id: null,
+        branch: 'System / Head Office',
+        purpose: 'Fund Transfer',
+        transaction_date: this.toDatePart(now),
+        transaction_time: this.toTimePart(now),
+        cash_in: 0,
+        cash_out: params.amount,
+        return_amount: 0,
+        unit: 'fund_transfer_out',
+        unit_code: params.referenceId,
+        pawn_amount: 0,
+        storage_fee: 0,
+        details,
       })
       .select('id')
       .single<{ id: string }>();
@@ -1433,6 +1489,10 @@ export class FundRequestsService {
         transferNotes:
           this.compactText(dto.confirmationNotes) ??
           this.compactText(existing.transfer_notes),
+        referenceId:
+          this.compactText(existing.transfer_reference_no) ??
+          this.compactText(existing.transfer_reference) ??
+          existing.request_no,
         direction: 'out',
         counterpartBranchName: destinationBranch.name,
       });
@@ -1553,7 +1613,32 @@ export class FundRequestsService {
     }
 
     let inboundTransactionId: string | null = null;
+    let ownerOutTransactionId: string | null = null;
     try {
+      const referenceId =
+        this.compactText(existing.transfer_reference_no) ??
+        this.compactText(existing.transfer_reference) ??
+        existing.request_no;
+      const isExpenseTransfer = existing.purpose
+        ?.toLowerCase()
+        .includes('expense');
+
+      if (!existing.source_branch_id && !isExpenseTransfer) {
+        const ownerOutTransaction = await this.createOwnerOutTransferTransaction({
+          request: existing,
+          amount: confirmedAmount,
+          transferReference:
+            this.compactText(existing.transfer_reference_no) ??
+            this.compactText(existing.transfer_reference),
+          transferNotes:
+            this.compactText(dto.confirmationNotes) ??
+            this.compactText(existing.transfer_notes),
+          referenceId,
+          destinationBranchName: resolvedDestinationBranch.name,
+        });
+        ownerOutTransactionId = ownerOutTransaction.id;
+      }
+
       const inboundTransaction = await this.createTransferTransaction({
         branch: resolvedDestinationBranch,
         request: existing,
@@ -1564,10 +1649,11 @@ export class FundRequestsService {
         transferNotes:
           this.compactText(dto.confirmationNotes) ??
           this.compactText(existing.transfer_notes),
-        direction: existing.purpose?.toLowerCase().includes('expense') ? 'out' : 'in',
+        referenceId,
+        direction: isExpenseTransfer ? 'out' : 'in',
       });
       inboundTransactionId = inboundTransaction.id;
-      const balanceDelta = existing.purpose?.toLowerCase().includes('expense') ? -confirmedAmount : confirmedAmount;
+      const balanceDelta = isExpenseTransfer ? -confirmedAmount : confirmedAmount;
       await this.adjustDailyBalance(existing.branch_id, balanceDelta);
     } catch (err) {
       const errorMessage =
@@ -1575,7 +1661,11 @@ export class FundRequestsService {
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
         // Allow confirmation to proceed even if legacy transactions purpose
         // constraint rejects fund-transfer journal entries.
-        const balanceDeltaFallback = existing.purpose?.toLowerCase().includes('expense') ? -confirmedAmount : confirmedAmount;
+        const balanceDeltaFallback = existing.purpose
+          ?.toLowerCase()
+          .includes('expense')
+          ? -confirmedAmount
+          : confirmedAmount;
         await this.adjustDailyBalance(existing.branch_id, balanceDeltaFallback);
       } else {
         throw err;
@@ -1598,7 +1688,7 @@ export class FundRequestsService {
         destination_confirmation_notes: this.compactText(dto.confirmationNotes),
         destination_received_amount: confirmedAmount,
         destination_confirmation_proof_url: this.compactText(dto.proofUrl),
-        related_transaction_id: inboundTransactionId,
+        related_transaction_id: inboundTransactionId ?? ownerOutTransactionId,
       })
       .eq('id', id)
       .select(FUND_REQUEST_SELECT)
