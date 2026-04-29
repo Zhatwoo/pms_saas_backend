@@ -18,10 +18,19 @@ export class ReportsService {
     return 0;
   }
 
-  private resolveDateRange(period?: string): { fromDate: string; toDate: string; trendDays: number } {
+  private resolveDateRange(period?: string, startDate?: string, endDate?: string): { fromDate: string; toDate: string; trendDays: number } {
     const today = new Date();
-    const toDate = today.toISOString().split('T')[0];
+    const todayStr = today.toISOString().split('T')[0];
     const p = (period ?? 'daily').toLowerCase() as Period;
+
+    // If explicit dates are provided, use them directly
+    if (startDate && endDate) {
+      const from = new Date(startDate);
+      const to = new Date(endDate);
+      const diffMs = to.getTime() - from.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+      return { fromDate: startDate, toDate: endDate, trendDays: diffDays };
+    }
 
     const from = new Date(today);
     let trendDays = 14;
@@ -45,40 +54,31 @@ export class ReportsService {
         break;
     }
 
-    const fromDate = p === 'daily' ? toDate : from.toISOString().split('T')[0];
-    return { fromDate, toDate, trendDays };
+    const fromDate = p === 'daily' ? todayStr : from.toISOString().split('T')[0];
+    return { fromDate, toDate: todayStr, trendDays };
   }
 
-  async getSystemReport(user: AuthenticatedUserProfile, branchQuery?: string, period?: string) {
+  async getSystemReport(user: AuthenticatedUserProfile, branchQuery?: string, period?: string, startDate?: string, endDate?: string) {
     const client = this.supabaseService.getClient();
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    const { fromDate, toDate, trendDays } = this.resolveDateRange(period);
-    const isDaily = fromDate === toDate;
+    const { fromDate, toDate, trendDays } = this.resolveDateRange(period, startDate, endDate);
 
     const branchId = effectiveBranchIdForQuery(user, branchQuery);
 
     // Total transactions for the period
     let txnQuery = client
       .from('transactions')
-      .select('id', { count: 'exact', head: true });
-    if (isDaily) {
-      txnQuery = txnQuery.eq('transaction_date', todayStr);
-    } else {
-      txnQuery = txnQuery.gte('transaction_date', fromDate).lte('transaction_date', toDate);
-    }
+      .select('id', { count: 'exact', head: true })
+      .gte('transaction_date', fromDate)
+      .lte('transaction_date', toDate);
     if (branchId) txnQuery = txnQuery.eq('branch_id', branchId);
     const { count: txnCount } = await txnQuery;
 
     // Total sales for the period (cash_in from revenue-generating purposes only)
     let salesQuery = client
       .from('transactions')
-      .select('cash_in, purpose');
-    if (isDaily) {
-      salesQuery = salesQuery.eq('transaction_date', todayStr);
-    } else {
-      salesQuery = salesQuery.gte('transaction_date', fromDate).lte('transaction_date', toDate);
-    }
+      .select('cash_in, purpose')
+      .gte('transaction_date', fromDate)
+      .lte('transaction_date', toDate);
     if (branchId) salesQuery = salesQuery.eq('branch_id', branchId);
     const { data: salesData } = await salesQuery;
 
@@ -109,12 +109,9 @@ export class ReportsService {
 
     let periodTxnQuery = client
       .from('transactions')
-      .select('branch_id, cash_in, purpose');
-    if (isDaily) {
-      periodTxnQuery = periodTxnQuery.eq('transaction_date', todayStr);
-    } else {
-      periodTxnQuery = periodTxnQuery.gte('transaction_date', fromDate).lte('transaction_date', toDate);
-    }
+      .select('branch_id, cash_in, purpose')
+      .gte('transaction_date', fromDate)
+      .lte('transaction_date', toDate);
     if (branchId) periodTxnQuery = periodTxnQuery.eq('branch_id', branchId);
     const { data: periodTxns } = await periodTxnQuery;
 
@@ -141,21 +138,23 @@ export class ReportsService {
     const scopedBranchCount = branchSalesMap.size || 1;
     const avgPerBranch = Math.round(totalSales / scopedBranchCount);
 
-    // Sales trend
-    const trendStart = new Date(today);
-    trendStart.setDate(trendStart.getDate() - (trendDays - 1));
+    // Sales trend — use the actual date range from the request
+    const trendStart = fromDate;
+    const trendEnd = toDate;
     let trendQuery = client
       .from('transactions')
       .select('cash_in, transaction_date, purpose')
-      .gte('transaction_date', trendStart.toISOString().split('T')[0])
+      .gte('transaction_date', trendStart)
+      .lte('transaction_date', trendEnd)
       .order('transaction_date', { ascending: true });
     if (branchId) trendQuery = trendQuery.eq('branch_id', branchId);
     const { data: trendData } = await trendQuery;
 
     const trendMap = new Map<string, number>();
-    for (let i = 0; i < trendDays; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - (trendDays - 1) + i);
+    // Build a map for every day in the range
+    const rangeStart = new Date(trendStart);
+    const rangeEnd = new Date(trendEnd);
+    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
       trendMap.set(d.toISOString().split('T')[0], 0);
     }
 
@@ -203,12 +202,9 @@ export class ReportsService {
     // DSR (expenses — excludes journal entries)
     let cashOutQuery = client
       .from('transactions')
-      .select('cash_out, purpose');
-    if (isDaily) {
-      cashOutQuery = cashOutQuery.eq('transaction_date', todayStr);
-    } else {
-      cashOutQuery = cashOutQuery.gte('transaction_date', fromDate).lte('transaction_date', toDate);
-    }
+      .select('cash_out, purpose')
+      .gte('transaction_date', fromDate)
+      .lte('transaction_date', toDate);
     if (branchId) cashOutQuery = cashOutQuery.eq('branch_id', branchId);
     const { data: cashOutData } = await cashOutQuery;
 
@@ -251,7 +247,7 @@ export class ReportsService {
         peakSales: peakEntry?.sales ?? 0,
       },
       dailyReport: {
-        date: fromDate === toDate ? todayStr : `${fromDate} – ${toDate}`,
+        date: fromDate === toDate ? fromDate : `${fromDate} – ${toDate}`,
         openingBalance,
         totalSales,
         totalExpenses,
@@ -260,11 +256,11 @@ export class ReportsService {
     };
   }
 
-  async getBranchSummary(user: AuthenticatedUserProfile, branchQuery?: string, period?: string) {
-    return this.getSystemReport(user, branchQuery, period);
+  async getBranchSummary(user: AuthenticatedUserProfile, branchQuery?: string, period?: string, startDate?: string, endDate?: string) {
+    return this.getSystemReport(user, branchQuery, period, startDate, endDate);
   }
 
-  async getTransactionReport(user: AuthenticatedUserProfile, branchQuery?: string, period?: string) {
-    return this.getSystemReport(user, branchQuery, period);
+  async getTransactionReport(user: AuthenticatedUserProfile, branchQuery?: string, period?: string, startDate?: string, endDate?: string) {
+    return this.getSystemReport(user, branchQuery, period, startDate, endDate);
   }
 }
