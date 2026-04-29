@@ -323,13 +323,14 @@ export class InventoryController {
   markSold(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() dto: { sold_price: number; branch_id: number | string },
+    @Body() dto: { sold_price: number; branch_id: number | string; customer_id?: string },
   ) {
     return this.inventoryService.markSoldAndAddToBalance(
       req.user,
       id,
       dto.sold_price,
       dto.branch_id,
+      dto.customer_id,
     );
   }
 
