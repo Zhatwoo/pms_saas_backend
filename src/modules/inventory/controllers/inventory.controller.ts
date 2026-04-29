@@ -300,7 +300,7 @@ export class InventoryController {
     });
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post('for-sale/:id/mark-sold')
   markSold(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -324,7 +324,7 @@ export class InventoryController {
     return this.inventoryService.findOneForSale(req.user, id);
   }
 
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Put('for-sale/:id')
   updateForSale(
     @Req() req: { user: AuthenticatedUserProfile },

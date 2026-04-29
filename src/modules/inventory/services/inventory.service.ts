@@ -1035,7 +1035,7 @@ export class InventoryService {
     // Create a transactions row so ledger, reports, and dashboard all see this sale.
     const today = new Date().toISOString().split('T')[0];
     const { error: txErr } = await client.from('transactions').insert([{
-      transaction_no: `SALE-${Date.now()}`,
+      transaction_no: `SELL-${Date.now()}`,
       branch_id: branchId,
       branch: item.branch ?? 'Unknown',
       purpose: 'Sold Item',
