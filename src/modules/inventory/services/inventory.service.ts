@@ -854,6 +854,91 @@ export class InventoryService {
   // ITEMS FOR SALE
   // ═══════════════════════════════════════════════════════════
 
+  private async uploadPhoto(
+    base64: string,
+    path: string,
+    bucket: string,
+  ): Promise<string> {
+    const client = this.supabase.getClient();
+    const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
+    const buf = Buffer.from(base64Data, 'base64');
+
+    const { data, error } = await client.storage
+      .from(bucket)
+      .upload(path, buf, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+
+    if (error) {
+      throw new InternalServerErrorException(`Photo upload failed: ${error.message}`);
+    }
+
+    const { data: signedData, error: signError } = await client.storage
+      .from(bucket)
+      .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+    if (signError || !signedData?.signedUrl) {
+      return `${bucket}/${path}`;
+    }
+
+    return signedData.signedUrl;
+  }
+
+  async createForSale(user: UserWithBranch, dto: any) {
+    const client = this.supabase.getClient();
+
+    // Ensure branch_id is set
+    let branchId = dto.branch_id;
+    if (!branchId && user.role !== Role.SUPER_ADMIN) {
+      branchId = requireUserBranchId(user);
+    }
+
+    if (!branchId) {
+      throw new BadRequestException('Branch ID is required');
+    }
+
+    // Check branch name if not provided
+    let branchName = dto.branch;
+    if (!branchName) {
+      const { data: branchData } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', branchId)
+        .single();
+      branchName = branchData?.name || 'Unknown';
+    }
+
+    let imageUrl = dto.image_url;
+    if (imageUrl && imageUrl.startsWith('data:image')) {
+      const path = `sales_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+      imageUrl = await this.uploadPhoto(imageUrl, path, 'pawned_items');
+    }
+
+    const { data, error } = await client
+      .from('sale_items')
+      .insert([{
+        item_id: dto.item_id || `SALE-${Date.now()}`,
+        item_name: dto.item_name,
+        category: dto.category,
+        branch: branchName,
+        branch_id: branchId,
+        available_date: new Date().toISOString().split('T')[0],
+        price: dto.price || 0,
+        status: dto.status || 'Available',
+        image_url: imageUrl || null,
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('SUPABASE INSERT ERROR:', error);
+      require('fs').appendFileSync('supabase-error.log', JSON.stringify(error) + '\n');
+      throw new InternalServerErrorException(error.message);
+    }
+    return data;
+  }
+
   async findAllForSale(user: UserWithBranch, filters: QueryFilters) {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(

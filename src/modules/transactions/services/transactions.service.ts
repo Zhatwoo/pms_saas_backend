@@ -115,6 +115,11 @@ export class TransactionsService {
       transaction_no: transactionNo,
       branch_id: branchId,
       branch: branchName,
+      transaction_time: dto.transaction_time || new Date().toTimeString().slice(0, 8),
+      created_by_user_id: dto.created_by_user_id || user?.id,
+      return_amount: dto.return_amount ?? 0,
+      storage_fee: dto.storage_fee ?? 0,
+      pawn_amount: dto.pawn_amount ?? 0,
     };
 
     const { cash_in, cash_out } = payload;
