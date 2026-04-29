@@ -14,7 +14,7 @@ import {
 interface TransactionRow {
   id: string;
   transaction_no: string | null;
-  branch_id: string;
+  branch_id: string | null;
   branch: string | null;
   purpose: string | null;
   transaction_date: string | null;
@@ -66,7 +66,7 @@ export interface LedgerEntry {
   itemName: string | null;
   cashIn: number;
   cashOut: number;
-  branchId: string;
+  branchId: string | null;
   branchName: string | null;
   reference: string | null;
 }
@@ -418,15 +418,18 @@ export class BranchFinanceService {
         : requireUserBranchId(user);
 
     const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 50));
+    // Allow wider pages for all-branch daily views so opening/closing rows
+    // from every branch are not dropped when transaction volume is high.
+    const limit = Math.min(1000, Math.max(1, query.limit ?? 200));
     const from = (page - 1) * limit;
 
     let dbQuery = client
       .from('transactions')
       .select('*', { count: 'exact' })
-      .order('transaction_date', { ascending: true })
-      .order('transaction_time', { ascending: true })
-      .order('created_at', { ascending: true });
+      // Show newest entries first so limited pages include latest opening/closing rows.
+      .order('transaction_date', { ascending: false })
+      .order('transaction_time', { ascending: false })
+      .order('created_at', { ascending: false });
 
     if (branchId) {
       dbQuery = dbQuery.eq('branch_id', branchId);
