@@ -14,7 +14,7 @@ import {
 interface TransactionRow {
   id: string;
   transaction_no: string | null;
-  branch_id: string;
+  branch_id: string | null;
   branch: string | null;
   purpose: string | null;
   transaction_date: string | null;
@@ -66,7 +66,7 @@ export interface LedgerEntry {
   itemName: string | null;
   cashIn: number;
   cashOut: number;
-  branchId: string;
+  branchId: string | null;
   branchName: string | null;
   reference: string | null;
 }
@@ -418,15 +418,18 @@ export class BranchFinanceService {
         : requireUserBranchId(user);
 
     const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 50));
+    // Allow wider pages for all-branch daily views so opening/closing rows
+    // from every branch are not dropped when transaction volume is high.
+    const limit = Math.min(1000, Math.max(1, query.limit ?? 200));
     const from = (page - 1) * limit;
 
     let dbQuery = client
       .from('transactions')
       .select('*', { count: 'exact' })
-      .order('transaction_date', { ascending: true })
-      .order('transaction_time', { ascending: true })
-      .order('created_at', { ascending: true });
+      // Show newest entries first so limited pages include latest opening/closing rows.
+      .order('transaction_date', { ascending: false })
+      .order('transaction_time', { ascending: false })
+      .order('created_at', { ascending: false });
 
     if (branchId) {
       dbQuery = dbQuery.eq('branch_id', branchId);
@@ -477,26 +480,22 @@ export class BranchFinanceService {
     const today = new Date().toISOString().split('T')[0];
     const confirmedAmount = Number(amount.toFixed(2));
 
-    // When setting starting balance, compute net of today's transactions
-    // so ending_balance = starting + net (not just starting, which would wipe adjustments).
-    let todayNet = 0;
-    if (type === 'starting') {
-      const { data: todayTxs } = await client
-        .from('transactions')
-        .select('purpose, cash_in, cash_out')
-        .eq('branch_id', branchId)
-        .eq('transaction_date', today);
+    // Always compute net of today's operational transactions (exclude start/end markers).
+    const { data: todayTxs } = await client
+      .from('transactions')
+      .select('purpose, cash_in, cash_out')
+      .eq('branch_id', branchId)
+      .eq('transaction_date', today);
 
-      todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
-        const p = String(tx.purpose ?? '').toLowerCase().trim();
-        if (p === 'start' || p === 'end') return sum;
-        return (
-          sum +
-          (parseFloat(String(tx.cash_in ?? 0)) || 0) -
-          (parseFloat(String(tx.cash_out ?? 0)) || 0)
-        );
-      }, 0);
-    }
+    const todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
+      const p = String(tx.purpose ?? '').toLowerCase().trim();
+      if (p === 'start' || p === 'end') return sum;
+      return (
+        sum +
+        (parseFloat(String(tx.cash_in ?? 0)) || 0) -
+        (parseFloat(String(tx.cash_out ?? 0)) || 0)
+      );
+    }, 0);
 
     const { data: existing, error: existingError } = await client
       .from('daily_balances')
@@ -510,13 +509,15 @@ export class BranchFinanceService {
     }
 
     if (existing) {
-      const update =
-        type === 'starting'
-          ? {
-              starting_balance: confirmedAmount,
-              ending_balance: Number((confirmedAmount + todayNet).toFixed(2)),
-            }
-          : { ending_balance: confirmedAmount };
+      // For starting: update start + recompute end.
+      // For ending: recompute end dynamically (start + net) — do NOT use employee raw input as override.
+      const startBal = type === 'starting'
+        ? confirmedAmount
+        : Number(existing.starting_balance ?? 0);
+      const update = {
+        ...(type === 'starting' ? { starting_balance: confirmedAmount } : {}),
+        ending_balance: Number((startBal + todayNet).toFixed(2)),
+      };
       const { error: updateError } = await client
         .from('daily_balances')
         .update(update)
@@ -525,16 +526,12 @@ export class BranchFinanceService {
         throw new InternalServerErrorException(updateError.message);
       }
     } else {
-      const row: Record<string, unknown> = {
-        branch_id: branchId,
-        record_date: today,
-      };
+      // No record yet for today — create one.
+      let startBal = 0;
       if (type === 'starting') {
-        row.starting_balance = confirmedAmount;
-        row.ending_balance = Number((confirmedAmount + todayNet).toFixed(2));
+        startBal = confirmedAmount;
       } else {
-        // Carry forward the previous day's ending balance as today's starting balance.
-        let carryForwardBalance = 0;
+        // Carry forward previous day's ending balance.
         const { data: priorRow } = await client
           .from('daily_balances')
           .select('ending_balance')
@@ -543,15 +540,14 @@ export class BranchFinanceService {
           .order('record_date', { ascending: false })
           .limit(1)
           .maybeSingle();
-
-        if (priorRow) {
-          carryForwardBalance = Number(
-            Number(priorRow.ending_balance ?? 0).toFixed(2),
-          );
-        }
-        row.starting_balance = carryForwardBalance;
-        row.ending_balance = confirmedAmount;
+        startBal = priorRow ? Number(Number(priorRow.ending_balance ?? 0).toFixed(2)) : 0;
       }
+      const row: Record<string, unknown> = {
+        branch_id: branchId,
+        record_date: today,
+        starting_balance: startBal,
+        ending_balance: Number((startBal + todayNet).toFixed(2)),
+      };
       const { error: insertError } = await client
         .from('daily_balances')
         .insert(row);
@@ -586,7 +582,10 @@ export class BranchFinanceService {
       purpose,
       transaction_date: today,
       transaction_time: new Date().toTimeString().slice(0, 8),
-      cash_in: 0,
+      // START: record cash_in so Opening Balance shows in the ledger.
+      // END: cash_in/cash_out = 0 — it's a reconciliation marker, not a cash movement.
+      // netCashFromTransactions() skips both start/end rows so no double-counting.
+      cash_in: type === 'starting' ? confirmedAmount : 0,
       cash_out: 0,
       details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
     };
