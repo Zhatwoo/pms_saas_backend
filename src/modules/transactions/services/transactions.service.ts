@@ -1,4 +1,9 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
@@ -22,6 +27,21 @@ type CustomerTimelineScope = {
   customer: CustomerGroupMatch;
   matchingCustomerIds: string[];
   matchingPawnedItemIds: string[];
+};
+
+type LayawayInput = {
+  customer?: {
+    firstName?: string;
+    middleName?: string;
+    lastName?: string;
+    contactNo?: string;
+    address?: string;
+  };
+  terms?: string;
+  itemPrice?: number;
+  downpayment?: number;
+  remainingBalance?: number;
+  processedByName?: string;
 };
 
 @Injectable()
@@ -110,15 +130,140 @@ export class TransactionsService {
       dto.transaction_no ||
       `${dto.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
 
+    // Generate transaction time if not provided
+    const now = new Date();
+    const transactionTime =
+      dto.transaction_time ||
+      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
     const payload = {
       ...dto,
       transaction_no: transactionNo,
+      transaction_time: transactionTime,
       branch_id: branchId,
       branch: branchName,
     };
+    const isLayaway =
+      String(payload.purpose || '').toLowerCase() === 'reserve / layaway' ||
+      String(payload.purpose || '').toLowerCase() === 'reserve';
+    const layawayInput = (dto.layaway || {}) as LayawayInput;
+
+    delete payload.layaway;
+    delete payload.terms;
+    delete payload.total_price;
+
+    // If this is a Reserve / Layaway, augment payload.details with layaway metadata
+    if (isLayaway) {
+      try {
+        const client = this.supabase.getClient();
+        const existingDetails =
+          payload.details && typeof payload.details === 'object'
+            ? payload.details
+            : {};
+
+        let price = Number(layawayInput.itemPrice || dto.total_price || 0);
+        if (dto.related_sale_item_id) {
+          const { data: saleItem, error: saleItemError } = await client
+            .from('sale_items')
+            .select('id, item_id, item_name, price, status, branch_id')
+            .eq('id', dto.related_sale_item_id)
+            .maybeSingle();
+          if (saleItemError) {
+            throw new InternalServerErrorException(saleItemError.message);
+          }
+          if (!saleItem) {
+            throw new BadRequestException('Selected sale item was not found.');
+          }
+          assertResourceBranch(user, saleItem.branch_id);
+          if (saleItem.status && saleItem.status !== 'Available') {
+            throw new ConflictException('Selected item is no longer available.');
+          }
+          price = Number(saleItem?.price ?? price ?? 0);
+          existingDetails.layaway = {
+            related_sale_item_id: dto.related_sale_item_id,
+            item_title: saleItem?.item_name ?? null,
+            total_price: price,
+            downpayment: Number(payload.cash_in || 0),
+            remaining_balance: Number((price - Number(payload.cash_in || 0)).toFixed(2)),
+            terms: layawayInput.terms || dto.terms || null,
+          };
+        } else {
+          throw new BadRequestException('Reserve / Layaway requires a selected sale item.');
+        }
+
+        if (typeof payload.details === 'object') {
+          existingDetails.layaway = {
+            ...existingDetails.layaway,
+            total_price: price,
+            downpayment: Number(payload.cash_in || 0),
+            remaining_balance: Number((price - Number(payload.cash_in || 0)).toFixed(2)),
+            terms: layawayInput.terms || dto.terms || null,
+          };
+          payload.details = existingDetails;
+        }
+      } catch (e) {
+        if (
+          e instanceof BadRequestException ||
+          e instanceof ConflictException ||
+          e instanceof InternalServerErrorException
+        ) {
+          throw e;
+        }
+        console.warn('[TransactionsService] Failed to validate layaway details', e);
+      }
+    }
 
     const { cash_in, cash_out } = payload;
     const client = this.supabase.getClient();
+    let layawayCustomer:
+      | {
+          firstName: string;
+          middleName: string | null;
+          lastName: string;
+          contactNo: string;
+          address: string;
+          fullName: string;
+        }
+      | null = null;
+
+    if (isLayaway) {
+      const customer = layawayInput.customer || {};
+      const firstName = customer.firstName?.trim();
+      const lastName = customer.lastName?.trim();
+      const middleName = customer.middleName?.trim() || null;
+      const contactNo = customer.contactNo?.trim();
+      const address = customer.address?.trim();
+
+      if (!firstName || !lastName || !contactNo || !address) {
+        throw new BadRequestException('Customer information is required for Reserve / Layaway.');
+      }
+
+      layawayCustomer = {
+        firstName,
+        middleName,
+        lastName,
+        contactNo,
+        address,
+        fullName: [firstName, middleName, lastName].filter(Boolean).join(' '),
+      };
+
+      const { data: activeReservation, error: activeReservationError } = await client
+        .from('layaway_reservations')
+        .select('id, status, related_sale_item_id')
+        .eq('related_sale_item_id', dto.related_sale_item_id)
+        .in('status', ['RESERVED', 'PARTIALLY_PAID'])
+        .maybeSingle();
+
+      if (activeReservationError) {
+        throw new InternalServerErrorException(activeReservationError.message);
+      }
+
+      if (activeReservation) {
+        throw new ConflictException(
+          'This item already has an active reserve/layaway record.',
+        );
+      }
+    }
 
     // 1. Insert Transaction
     const { data, error } = await client
@@ -130,6 +275,75 @@ export class TransactionsService {
     if (error) {
       console.error('[Transactions DB Error]', error);
       throw new InternalServerErrorException(error.message);
+    }
+
+    if (isLayaway) {
+      const { data: saleItem, error: saleItemError } = await client
+        .from('sale_items')
+        .select('id, item_id, item_name, price')
+        .eq('id', dto.related_sale_item_id)
+        .maybeSingle();
+
+      if (saleItemError) {
+        throw new InternalServerErrorException(saleItemError.message);
+      }
+      if (!saleItem) {
+        throw new BadRequestException('Selected sale item was not found.');
+      }
+
+      const itemPrice = Number(saleItem.price ?? layawayInput.itemPrice ?? 0);
+      const downpayment = Number(payload.cash_in || layawayInput.downpayment || 0);
+      const remainingBalance = Number(
+        Math.max(itemPrice - downpayment, 0).toFixed(2),
+      );
+      const reservationStatus =
+        remainingBalance <= 0
+          ? 'COMPLETED'
+          : downpayment > 0
+            ? 'PARTIALLY_PAID'
+            : 'RESERVED';
+
+      const { error: layawayError } = await client
+        .from('layaway_reservations')
+        .insert([
+          {
+            transaction_id: data.id,
+            related_sale_item_id: dto.related_sale_item_id,
+            branch_id: branchId,
+            customer_first_name: layawayCustomer?.firstName,
+            customer_middle_name: layawayCustomer?.middleName,
+            customer_last_name: layawayCustomer?.lastName,
+            customer_full_name: layawayCustomer?.fullName,
+            customer_contact_number: layawayCustomer?.contactNo,
+            customer_address: layawayCustomer?.address,
+            item_name: saleItem.item_name ?? payload.unit,
+            item_code: saleItem.item_id ?? payload.unit_code,
+            item_price: itemPrice,
+            downpayment,
+            remaining_balance: remainingBalance,
+            terms: layawayInput.terms || null,
+            status: reservationStatus,
+            processed_by_user_id: user.id,
+            processed_by_name: layawayInput.processedByName || null,
+          },
+        ]);
+
+      if (layawayError) {
+        console.error('[Layaway DB Error]', layawayError);
+        throw new InternalServerErrorException(layawayError.message);
+      }
+
+      if (reservationStatus !== 'COMPLETED') {
+        const { error: holdError } = await client
+          .from('sale_items')
+          .update({ status: 'Reserved' })
+          .eq('id', dto.related_sale_item_id);
+
+        if (holdError) {
+          console.error('[Layaway Hold Error]', holdError);
+          throw new InternalServerErrorException(holdError.message);
+        }
+      }
     }
 
     if (branchId && (cash_in || cash_out)) {
