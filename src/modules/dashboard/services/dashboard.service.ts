@@ -1084,7 +1084,7 @@ export class DashboardService {
     let branchSalesQuery = client
       .from('transactions')
       .select('cash_in')
-      .eq('purpose', 'Item Sale')
+      .eq('purpose', 'Sold Item')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
     if (branchId) branchSalesQuery = branchSalesQuery.eq('branch_id', branchId);
@@ -1093,7 +1093,7 @@ export class DashboardService {
       ? client
           .from('transactions')
           .select('cash_in')
-          .eq('purpose', 'Item Sale')
+          .eq('purpose', 'Sold Item')
           .gte('transaction_date', fromDate)
           .lte('transaction_date', toDate)
       : branchSalesQuery;
