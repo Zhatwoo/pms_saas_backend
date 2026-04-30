@@ -12,7 +12,7 @@ import {
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
 import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
-import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
@@ -446,8 +446,10 @@ export class TransactionsService {
 
     // If a specific branch is scoped, compute balance dynamically:
     // End Day = Start Day (employee input) + Σ(cash_in) - Σ(cash_out)
+    // Use PH calendar date (same as daily list filter) — UTC date was shifting
+    // stats onto yesterday's daily_balances row during PH mornings.
     if (scoped) {
-      const balanceDate = date || new Date().toISOString().split('T')[0];
+      const balanceDate = date || getPhCalendarDateString();
 
       // 1. Get starting balance from daily_balances or carry-forward
       const { data: balanceData } = await client
@@ -459,6 +461,7 @@ export class TransactionsService {
 
       if (balanceData) {
         stats.startingBalance = Number(balanceData.starting_balance || 0);
+        stats.endingBalance = Number(balanceData.ending_balance || 0);
       } else {
         // Carry forward previous day's ending balance
         const { data: priorRow } = await client
@@ -469,29 +472,10 @@ export class TransactionsService {
           .order('record_date', { ascending: false })
           .limit(1)
           .maybeSingle();
-        stats.startingBalance = Number(priorRow?.ending_balance || 0);
+        const carried = Number(priorRow?.ending_balance || 0);
+        stats.startingBalance = carried;
+        stats.endingBalance = carried;
       }
-
-      // 2. Always compute ending balance dynamically from ALL today's transactions
-      const { data: allTodayTxs } = await client
-        .from('transactions')
-        .select('purpose, cash_in, cash_out')
-        .eq('branch_id', scoped)
-        .eq('transaction_date', balanceDate);
-
-      const todayNet = (allTodayTxs ?? []).reduce((sum: number, tx: any) => {
-        const p = String(tx.purpose ?? '').toLowerCase().trim();
-        if (p === 'start' || p === 'end') return sum;
-        return (
-          sum +
-          (parseFloat(String(tx.cash_in ?? 0)) || 0) -
-          (parseFloat(String(tx.cash_out ?? 0)) || 0)
-        );
-      }, 0);
-
-      stats.endingBalance = Number(
-        (stats.startingBalance + todayNet).toFixed(2),
-      );
     }
 
     return { transactions: filtered, stats };
