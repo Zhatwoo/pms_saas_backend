@@ -12,6 +12,7 @@ import {
 } from '../../../common/utils/branch-scope.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
 import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 
@@ -84,7 +85,31 @@ export class PawnTicketsService {
   }
 
   private getTodayDateKey() {
-    return new Date().toISOString().split('T')[0];
+    return getPhCalendarDateString();
+  }
+
+  private formatSupabaseError(error: unknown): string {
+    if (error == null) {
+      return 'Unknown database error';
+    }
+    if (typeof error === 'string' && error.trim()) {
+      return error.trim();
+    }
+    if (typeof error !== 'object') {
+      return String(error);
+    }
+    const rec = error as Record<string, unknown>;
+    const parts = [rec.message, rec.details, rec.hint, rec.code].filter(
+      (v): v is string => typeof v === 'string' && v.trim().length > 0,
+    );
+    if (parts.length > 0) {
+      return parts.join(' — ');
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'Unknown database error';
+    }
   }
 
   private buildSerialPrefix(branchCode: string) {
@@ -380,7 +405,9 @@ export class PawnTicketsService {
         if (this.isPawnTicketMigrationMissing(customerError)) {
           this.throwMissingMigrationError();
         }
-        throw new InternalServerErrorException(customerError.message);
+        throw new InternalServerErrorException(
+          this.formatSupabaseError(customerError),
+        );
       }
 
       customer = createdCustomer;
@@ -392,8 +419,7 @@ export class PawnTicketsService {
       category: dto.item.category?.trim() || 'Miscellaneous',
       branch_id: branchId,
       branch: branchName,
-      pawn_date:
-        dto.item.purchasedDate || new Date().toISOString().split('T')[0],
+      pawn_date: dto.item.purchasedDate || getPhCalendarDateString(),
       status: 'Active',
       remarks: dto.item.remarks?.trim() ?? '',
       qr_code: dto.item.qrCode ?? null,
@@ -433,7 +459,9 @@ export class PawnTicketsService {
       if (this.isPawnTicketMigrationMissing(pawnedError)) {
         this.throwMissingMigrationError();
       }
-      throw new InternalServerErrorException(pawnedError.message);
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(pawnedError),
+      );
     }
 
     const transactionPayload = {
@@ -441,7 +469,8 @@ export class PawnTicketsService {
       branch_id: branchId,
       branch: branchName,
       purpose: 'Pawn',
-      transaction_date: dto.transaction.transactionDate || new Date().toLocaleDateString('en-CA'),
+      transaction_date:
+        dto.transaction.transactionDate || getPhCalendarDateString(),
       transaction_time: dto.transaction.transactionTime || new Date().toTimeString().slice(0, 8),
       // Pawn disbursement is a cash outflow from branch to customer.
       cash_in: 0,
@@ -466,7 +495,9 @@ export class PawnTicketsService {
       .single();
 
     if (transactionError) {
-      throw new InternalServerErrorException(transactionError.message);
+      throw new InternalServerErrorException(
+        this.formatSupabaseError(transactionError),
+      );
     }
 
     // 3b. Adjust daily balance for this pawn cash outflow
@@ -474,7 +505,20 @@ export class PawnTicketsService {
     const pawnCashOut = Number(transactionPayload.cash_out ?? 0);
     const netChange = pawnCashIn - pawnCashOut;
     if (netChange !== 0) {
-      await adjustDailyBalance(client, branchId, netChange);
+      try {
+        await adjustDailyBalance(client, branchId, netChange);
+      } catch (e) {
+        console.error(
+          '[PawnTicketsService] adjustDailyBalance failed after pawn create',
+          { branchId, netChange, transactionNo: transactionPayload.transaction_no },
+          e,
+        );
+        throw e instanceof InternalServerErrorException
+          ? e
+          : new InternalServerErrorException(
+              e instanceof Error ? e.message : this.formatSupabaseError(e),
+            );
+      }
     }
 
     // 4. Create Notification
