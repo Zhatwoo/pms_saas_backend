@@ -5,7 +5,11 @@ import {
   effectiveBranchIdForQuery,
   requireUserBranchId,
 } from '../../common/utils/branch-scope.util';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { getPhCalendarDateString } from '../../common/utils/branch-calendar-date.util';
+import {
+  SupabaseService,
+  type AuthenticatedUserProfile,
+} from '../../infrastructure/supabase/supabase.service';
 import {
   computeBranchDaySnapshot,
   netCashFromTransactions,
@@ -71,6 +75,18 @@ export interface LedgerEntry {
   reference: string | null;
 }
 
+export type DailyOpeningChecklistStep =
+  | 'CASH_ON_HAND'
+  | 'INVENTORY_AUDIT'
+  | 'COMPLETED';
+
+export interface EmployeeDailyOpeningStatus {
+  openingDate: string;
+  status: 'none' | 'pending' | 'completed';
+  checklistStep: DailyOpeningChecklistStep;
+  startingCash?: number;
+}
+
 export interface BranchFinanceSummary {
   branchId: string;
   branchName: string;
@@ -101,6 +117,164 @@ export interface BranchFinanceSummary {
 @Injectable()
 export class BranchFinanceService {
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  /**
+   * Opening checklist for employees: one row per employee per branch per PH calendar day.
+   */
+  async getEmployeeDailyOpeningStatus(
+    user: AuthenticatedUserProfile,
+  ): Promise<EmployeeDailyOpeningStatus> {
+    if (user.role !== Role.EMPLOYEE) {
+      const openingDate = getPhCalendarDateString();
+      return {
+        openingDate,
+        status: 'completed',
+        checklistStep: 'COMPLETED',
+      };
+    }
+
+    const branchId = requireUserBranchId(user);
+    const openingDate = getPhCalendarDateString();
+    const client = this.supabaseService.getClient();
+
+    const { data: row, error } = await client
+      .from('daily_opening')
+      .select('status, starting_cash')
+      .eq('employee_id', user.id)
+      .eq('branch_id', branchId)
+      .eq('opening_date', openingDate)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (row?.status === 'completed') {
+      return {
+        openingDate,
+        status: 'completed',
+        checklistStep: 'COMPLETED',
+        startingCash: this.toMoney(row.starting_cash),
+      };
+    }
+
+    if (row?.status === 'pending') {
+      return {
+        openingDate,
+        status: 'pending',
+        checklistStep: 'INVENTORY_AUDIT',
+        startingCash: this.toMoney(row.starting_cash),
+      };
+    }
+
+    const { count, error: countErr } = await client
+      .from('pawned_items')
+      .select('*', { count: 'exact', head: true })
+      .eq('branch_id', branchId);
+
+    if (countErr) {
+      throw new InternalServerErrorException(countErr.message);
+    }
+
+    const total = count ?? 0;
+    if (total === 0) {
+      const nowIso = new Date().toISOString();
+      const { error: upErr } = await client.from('daily_opening').upsert(
+        {
+          employee_id: user.id,
+          branch_id: branchId,
+          opening_date: openingDate,
+          starting_cash: 0,
+          status: 'completed',
+          updated_at: nowIso,
+        },
+        { onConflict: 'employee_id,branch_id,opening_date' },
+      );
+      if (upErr) {
+        throw new InternalServerErrorException(upErr.message);
+      }
+      return {
+        openingDate,
+        status: 'completed',
+        checklistStep: 'COMPLETED',
+        startingCash: 0,
+      };
+    }
+
+    return {
+      openingDate,
+      status: 'none',
+      checklistStep: 'CASH_ON_HAND',
+    };
+  }
+
+  async completeEmployeeDailyOpening(user: AuthenticatedUserProfile) {
+    if (user.role !== Role.EMPLOYEE) {
+      return { success: true, skipped: true as const };
+    }
+
+    const branchId = requireUserBranchId(user);
+    const openingDate = getPhCalendarDateString();
+    const client = this.supabaseService.getClient();
+    const nowIso = new Date().toISOString();
+
+    const { data: existing, error: selErr } = await client
+      .from('daily_opening')
+      .select('id, status')
+      .eq('employee_id', user.id)
+      .eq('branch_id', branchId)
+      .eq('opening_date', openingDate)
+      .maybeSingle();
+
+    if (selErr) {
+      throw new InternalServerErrorException(selErr.message);
+    }
+
+    if (!existing) {
+      throw new BadRequestException(
+        'No opening record for today. Confirm starting cash first.',
+      );
+    }
+
+    if (existing.status === 'completed') {
+      return { success: true, alreadyCompleted: true as const };
+    }
+
+    const { error: updErr } = await client
+      .from('daily_opening')
+      .update({ status: 'completed', updated_at: nowIso })
+      .eq('id', existing.id);
+
+    if (updErr) {
+      throw new InternalServerErrorException(updErr.message);
+    }
+
+    return { success: true };
+  }
+
+  private async upsertDailyOpeningPendingForEmployee(params: {
+    client: ReturnType<SupabaseService['getClient']>;
+    employeeId: string;
+    branchId: string;
+    openingDate: string;
+    startingCash: number;
+  }) {
+    const nowIso = new Date().toISOString();
+    const { error } = await params.client.from('daily_opening').upsert(
+      {
+        employee_id: params.employeeId,
+        branch_id: params.branchId,
+        opening_date: params.openingDate,
+        starting_cash: params.startingCash,
+        status: 'pending',
+        updated_at: nowIso,
+      },
+      { onConflict: 'employee_id,branch_id,opening_date' },
+    );
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+  }
 
   private toMoney(value: number | string | null | undefined): number {
     const parsed = Number(value ?? 0);
@@ -224,7 +398,7 @@ export class BranchFinanceService {
     branchQuery?: string,
   ): Promise<BranchFinanceSummary[]> {
     const client = this.supabaseService.getClient();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getPhCalendarDateString();
 
     const branchId =
       user.role === Role.SUPER_ADMIN
@@ -464,7 +638,7 @@ export class BranchFinanceService {
   }
 
   async confirmDailyBalance(
-    user: UserWithBranch,
+    user: AuthenticatedUserProfile,
     type: 'starting' | 'ending',
     amount: number,
   ) {
@@ -477,7 +651,7 @@ export class BranchFinanceService {
 
     const branchId = requireUserBranchId(user);
     const client = this.supabaseService.getClient();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getPhCalendarDateString();
     const confirmedAmount = Number(amount.toFixed(2));
 
     // Always compute net of today's operational transactions (exclude start/end markers).
@@ -599,6 +773,20 @@ export class BranchFinanceService {
       await client.from('transactions').insert([txPayload]);
     }
 
+    if (
+      type === 'starting' &&
+      user.role === Role.EMPLOYEE &&
+      user.id
+    ) {
+      await this.upsertDailyOpeningPendingForEmployee({
+        client,
+        employeeId: user.id,
+        branchId,
+        openingDate: today,
+        startingCash: confirmedAmount,
+      });
+    }
+
     return { success: true, type, amount: confirmedAmount, date: today };
   }
 
@@ -613,7 +801,7 @@ export class BranchFinanceService {
     }
 
     const client = this.supabaseService.getClient();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getPhCalendarDateString();
 
     // 1. Get starting balance
     let startingBalance = 0;
