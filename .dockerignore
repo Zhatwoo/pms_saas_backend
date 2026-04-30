@@ -1,0 +1,17 @@
+node_modules
+dist
+.env
+.env.*
+!.env.deploy.yaml
+.git
+.gitignore
+*.log
+backend.log
+supabase-error.log
+supabase
+test
+coverage
+.vscode
+.idea
+README.md
+AUTH.md

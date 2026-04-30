@@ -7,7 +7,7 @@ import {
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
 import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
-import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
@@ -93,14 +93,20 @@ export class TransactionsService {
   }
 
   async create(user: UserWithBranch, dto: any) {
+    // Drop client-only fields that are not real DB columns.
+    // This prevents 500s when UI sends extra metadata.
+    const { layaway: _layaway, ...dtoClean } = dto ?? {};
+
     // 1. Resolve Branch Info
     const branchId =
-      dto.branch_id ||
+      dtoClean.branch_id ||
       (user.role !== Role.SUPER_ADMIN ? requireUserBranchId(user) : null);
     
     // Allow branchless transactions only for Super Admin creating system-wide expenses
     const isSystemExpense =
-      !branchId && (user.role === Role.SUPER_ADMIN) && (dto.purpose === 'Expense');
+      !branchId &&
+      user.role === Role.SUPER_ADMIN &&
+      dtoClean.purpose === 'Expense';
 
     if (!branchId && !isSystemExpense) {
       throw new InternalServerErrorException(
@@ -108,26 +114,30 @@ export class TransactionsService {
       );
     }
 
-    const branchName = isSystemExpense ? 'System / Head Office' : (dto.branch || 'Unknown Branch');
+    const branchName = isSystemExpense
+      ? 'System / Head Office'
+      : (dtoClean.branch || 'Unknown Branch');
 
     // Generate transaction number if not provided
     const transactionNo =
-      dto.transaction_no ||
-      `${dto.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
+      dtoClean.transaction_no ||
+      `${dtoClean.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
 
     const payload = {
-      ...dto,
+      ...dtoClean,
       transaction_no: transactionNo,
       branch_id: branchId || null,
       branch: branchName,
-      transaction_date: dto.transaction_date || new Date().toISOString().split('T')[0],
-      transaction_time: dto.transaction_time || new Date().toTimeString().slice(0, 8),
-      created_by_user_id: dto.created_by_user_id || user?.id,
-      return_amount: dto.return_amount ?? 0,
-      storage_fee: dto.storage_fee ?? 0,
-      pawn_amount: dto.pawn_amount ?? 0,
-      cash_in: dto.cash_in ?? 0,
-      cash_out: dto.cash_out ?? 0,
+      transaction_date:
+        dtoClean.transaction_date || new Date().toISOString().split('T')[0],
+      transaction_time:
+        dtoClean.transaction_time || new Date().toTimeString().slice(0, 8),
+      created_by_user_id: dtoClean.created_by_user_id || user?.id,
+      return_amount: dtoClean.return_amount ?? 0,
+      storage_fee: dtoClean.storage_fee ?? 0,
+      pawn_amount: dtoClean.pawn_amount ?? 0,
+      cash_in: dtoClean.cash_in ?? 0,
+      cash_out: dtoClean.cash_out ?? 0,
     };
 
     const { cash_in, cash_out } = payload;
@@ -153,13 +163,13 @@ export class TransactionsService {
     // 3. Create Notification
     try {
       const title =
-        dto.purpose === 'Buy Back'
+        dtoClean.purpose === 'Buy Back'
           ? `Successful buyback completed - ${transactionNo}`
-          : `New ${dto.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
+          : `New ${dtoClean.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`;
 
-      const subtitle = dto.unit
-        ? `Transaction Alert: ${dto.purpose?.toLowerCase() || 'item'} [${dto.unit}]`
-        : `Transaction Alert: ${dto.purpose?.toLowerCase() || 'activity'}`;
+      const subtitle = dtoClean.unit
+        ? `Transaction Alert: ${dtoClean.purpose?.toLowerCase() || 'item'} [${dtoClean.unit}]`
+        : `Transaction Alert: ${dtoClean.purpose?.toLowerCase() || 'activity'}`;
 
       await this.notificationsService.create({
         title,
@@ -197,7 +207,8 @@ export class TransactionsService {
             region,
             contact_number
           )
-        )
+        ),
+        sale_item:sale_items (*)
       `,
       )
       .order('transaction_date', { ascending: false })
@@ -307,8 +318,10 @@ export class TransactionsService {
 
     // If a specific branch is scoped, compute balance dynamically:
     // End Day = Start Day (employee input) + Σ(cash_in) - Σ(cash_out)
+    // Use PH calendar date (same as daily list filter) — UTC date was shifting
+    // stats onto yesterday's daily_balances row during PH mornings.
     if (scoped) {
-      const balanceDate = date || new Date().toISOString().split('T')[0];
+      const balanceDate = date || getPhCalendarDateString();
 
       // 1. Get starting balance from daily_balances or carry-forward
       const { data: balanceData } = await client
@@ -320,6 +333,7 @@ export class TransactionsService {
 
       if (balanceData) {
         stats.startingBalance = Number(balanceData.starting_balance || 0);
+        stats.endingBalance = Number(balanceData.ending_balance || 0);
       } else {
         // Carry forward previous day's ending balance
         const { data: priorRow } = await client
@@ -330,29 +344,10 @@ export class TransactionsService {
           .order('record_date', { ascending: false })
           .limit(1)
           .maybeSingle();
-        stats.startingBalance = Number(priorRow?.ending_balance || 0);
+        const carried = Number(priorRow?.ending_balance || 0);
+        stats.startingBalance = carried;
+        stats.endingBalance = carried;
       }
-
-      // 2. Always compute ending balance dynamically from ALL today's transactions
-      const { data: allTodayTxs } = await client
-        .from('transactions')
-        .select('purpose, cash_in, cash_out')
-        .eq('branch_id', scoped)
-        .eq('transaction_date', balanceDate);
-
-      const todayNet = (allTodayTxs ?? []).reduce((sum: number, tx: any) => {
-        const p = String(tx.purpose ?? '').toLowerCase().trim();
-        if (p === 'start' || p === 'end') return sum;
-        return (
-          sum +
-          (parseFloat(String(tx.cash_in ?? 0)) || 0) -
-          (parseFloat(String(tx.cash_out ?? 0)) || 0)
-        );
-      }, 0);
-
-      stats.endingBalance = Number(
-        (stats.startingBalance + todayNet).toFixed(2),
-      );
     }
 
     return { transactions: filtered, stats };

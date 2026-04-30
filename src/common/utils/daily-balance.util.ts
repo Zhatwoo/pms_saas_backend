@@ -1,4 +1,5 @@
 import { InternalServerErrorException } from '@nestjs/common';
+import { getPhCalendarDateString } from './branch-calendar-date.util';
 
 /**
  * Adjusts the daily balance for a branch by a given delta.
@@ -6,6 +7,8 @@ import { InternalServerErrorException } from '@nestjs/common';
  * If today's row exists, updates ending_balance.
  * If not, creates a new row carrying forward the previous day's ending
  * balance as today's starting_balance.
+ *
+ * Uses Asia/Manila calendar date so this matches branch-finance / daily_opening.
  */
 export async function adjustDailyBalance(
   client: {
@@ -19,7 +22,7 @@ export async function adjustDailyBalance(
   }
 
   const amount = Number(delta.toFixed(2));
-  const today = new Date().toISOString().split('T')[0];
+  const today = getPhCalendarDateString();
 
   const { data: existing, error: existingError } = await client
     .from('daily_balances')

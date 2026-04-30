@@ -5,7 +5,11 @@ import {
   effectiveBranchIdForQuery,
   requireUserBranchId,
 } from '../../common/utils/branch-scope.util';
-import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { getPhCalendarDateString } from '../../common/utils/branch-calendar-date.util';
+import {
+  SupabaseService,
+  type AuthenticatedUserProfile,
+} from '../../infrastructure/supabase/supabase.service';
 import {
   computeBranchDaySnapshot,
   netCashFromTransactions,
@@ -71,6 +75,18 @@ export interface LedgerEntry {
   reference: string | null;
 }
 
+export type DailyOpeningChecklistStep =
+  | 'CASH_ON_HAND'
+  | 'INVENTORY_AUDIT'
+  | 'COMPLETED';
+
+export interface EmployeeDailyOpeningStatus {
+  openingDate: string;
+  status: 'none' | 'pending' | 'completed';
+  checklistStep: DailyOpeningChecklistStep;
+  startingCash?: number;
+}
+
 export interface BranchFinanceSummary {
   branchId: string;
   branchName: string;
@@ -101,6 +117,164 @@ export interface BranchFinanceSummary {
 @Injectable()
 export class BranchFinanceService {
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  /**
+   * Opening checklist for employees: one row per employee per branch per PH calendar day.
+   */
+  async getEmployeeDailyOpeningStatus(
+    user: AuthenticatedUserProfile,
+  ): Promise<EmployeeDailyOpeningStatus> {
+    if (user.role !== Role.EMPLOYEE) {
+      const openingDate = getPhCalendarDateString();
+      return {
+        openingDate,
+        status: 'completed',
+        checklistStep: 'COMPLETED',
+      };
+    }
+
+    const branchId = requireUserBranchId(user);
+    const openingDate = getPhCalendarDateString();
+    const client = this.supabaseService.getClient();
+
+    const { data: row, error } = await client
+      .from('daily_opening')
+      .select('status, starting_cash')
+      .eq('employee_id', user.id)
+      .eq('branch_id', branchId)
+      .eq('opening_date', openingDate)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (row?.status === 'completed') {
+      return {
+        openingDate,
+        status: 'completed',
+        checklistStep: 'COMPLETED',
+        startingCash: this.toMoney(row.starting_cash),
+      };
+    }
+
+    if (row?.status === 'pending') {
+      return {
+        openingDate,
+        status: 'pending',
+        checklistStep: 'INVENTORY_AUDIT',
+        startingCash: this.toMoney(row.starting_cash),
+      };
+    }
+
+    const { count, error: countErr } = await client
+      .from('pawned_items')
+      .select('*', { count: 'exact', head: true })
+      .eq('branch_id', branchId);
+
+    if (countErr) {
+      throw new InternalServerErrorException(countErr.message);
+    }
+
+    const total = count ?? 0;
+    if (total === 0) {
+      const nowIso = new Date().toISOString();
+      const { error: upErr } = await client.from('daily_opening').upsert(
+        {
+          employee_id: user.id,
+          branch_id: branchId,
+          opening_date: openingDate,
+          starting_cash: 0,
+          status: 'completed',
+          updated_at: nowIso,
+        },
+        { onConflict: 'employee_id,branch_id,opening_date' },
+      );
+      if (upErr) {
+        throw new InternalServerErrorException(upErr.message);
+      }
+      return {
+        openingDate,
+        status: 'completed',
+        checklistStep: 'COMPLETED',
+        startingCash: 0,
+      };
+    }
+
+    return {
+      openingDate,
+      status: 'none',
+      checklistStep: 'CASH_ON_HAND',
+    };
+  }
+
+  async completeEmployeeDailyOpening(user: AuthenticatedUserProfile) {
+    if (user.role !== Role.EMPLOYEE) {
+      return { success: true, skipped: true as const };
+    }
+
+    const branchId = requireUserBranchId(user);
+    const openingDate = getPhCalendarDateString();
+    const client = this.supabaseService.getClient();
+    const nowIso = new Date().toISOString();
+
+    const { data: existing, error: selErr } = await client
+      .from('daily_opening')
+      .select('id, status')
+      .eq('employee_id', user.id)
+      .eq('branch_id', branchId)
+      .eq('opening_date', openingDate)
+      .maybeSingle();
+
+    if (selErr) {
+      throw new InternalServerErrorException(selErr.message);
+    }
+
+    if (!existing) {
+      throw new BadRequestException(
+        'No opening record for today. Confirm starting cash first.',
+      );
+    }
+
+    if (existing.status === 'completed') {
+      return { success: true, alreadyCompleted: true as const };
+    }
+
+    const { error: updErr } = await client
+      .from('daily_opening')
+      .update({ status: 'completed', updated_at: nowIso })
+      .eq('id', existing.id);
+
+    if (updErr) {
+      throw new InternalServerErrorException(updErr.message);
+    }
+
+    return { success: true };
+  }
+
+  private async upsertDailyOpeningPendingForEmployee(params: {
+    client: ReturnType<SupabaseService['getClient']>;
+    employeeId: string;
+    branchId: string;
+    openingDate: string;
+    startingCash: number;
+  }) {
+    const nowIso = new Date().toISOString();
+    const { error } = await params.client.from('daily_opening').upsert(
+      {
+        employee_id: params.employeeId,
+        branch_id: params.branchId,
+        opening_date: params.openingDate,
+        starting_cash: params.startingCash,
+        status: 'pending',
+        updated_at: nowIso,
+      },
+      { onConflict: 'employee_id,branch_id,opening_date' },
+    );
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+  }
 
   private toMoney(value: number | string | null | undefined): number {
     const parsed = Number(value ?? 0);
@@ -224,7 +398,7 @@ export class BranchFinanceService {
     branchQuery?: string,
   ): Promise<BranchFinanceSummary[]> {
     const client = this.supabaseService.getClient();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getPhCalendarDateString();
 
     const branchId =
       user.role === Role.SUPER_ADMIN
@@ -464,7 +638,7 @@ export class BranchFinanceService {
   }
 
   async confirmDailyBalance(
-    user: UserWithBranch,
+    user: AuthenticatedUserProfile,
     type: 'starting' | 'ending',
     amount: number,
   ) {
@@ -477,7 +651,7 @@ export class BranchFinanceService {
 
     const branchId = requireUserBranchId(user);
     const client = this.supabaseService.getClient();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getPhCalendarDateString();
     const confirmedAmount = Number(amount.toFixed(2));
 
     // Always compute net of today's operational transactions (exclude start/end markers).
@@ -509,14 +683,21 @@ export class BranchFinanceService {
     }
 
     if (existing) {
-      // For starting: update start + recompute end.
-      // For ending: recompute end dynamically (start + net) — do NOT use employee raw input as override.
       const startBal = type === 'starting'
         ? confirmedAmount
         : Number(existing.starting_balance ?? 0);
+
+      // When type='starting': the employee's declaration IS the current cash truth.
+      // Transactions that already happened today are already reflected in the declared amount.
+      // So ending = confirmedAmount. Future transactions will adjust via adjustDailyBalance.
+      // When type='ending': recompute from start + todayNet for reconciliation.
+      const endingBal = type === 'starting'
+        ? confirmedAmount
+        : Number((startBal + todayNet).toFixed(2));
+
       const update = {
         ...(type === 'starting' ? { starting_balance: confirmedAmount } : {}),
-        ending_balance: Number((startBal + todayNet).toFixed(2)),
+        ending_balance: endingBal,
       };
       const { error: updateError } = await client
         .from('daily_balances')
@@ -542,11 +723,17 @@ export class BranchFinanceService {
           .maybeSingle();
         startBal = priorRow ? Number(Number(priorRow.ending_balance ?? 0).toFixed(2)) : 0;
       }
+
+      // Same logic: starting declaration sets ending = declared amount.
+      const endingBal = type === 'starting'
+        ? startBal
+        : Number((startBal + todayNet).toFixed(2));
+
       const row: Record<string, unknown> = {
         branch_id: branchId,
         record_date: today,
         starting_balance: startBal,
-        ending_balance: Number((startBal + todayNet).toFixed(2)),
+        ending_balance: endingBal,
       };
       const { error: insertError } = await client
         .from('daily_balances')
@@ -582,10 +769,9 @@ export class BranchFinanceService {
       purpose,
       transaction_date: today,
       transaction_time: new Date().toTimeString().slice(0, 8),
-      // START: record cash_in so Opening Balance shows in the ledger.
-      // END: cash_in/cash_out = 0 — it's a reconciliation marker, not a cash movement.
-      // netCashFromTransactions() skips both start/end rows so no double-counting.
-      cash_in: type === 'starting' ? confirmedAmount : 0,
+      // Both Start and End are journal markers, NOT real cash movement.
+      // The actual starting/ending values live in daily_balances.
+      cash_in: 0,
       cash_out: 0,
       details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
     };
@@ -597,6 +783,41 @@ export class BranchFinanceService {
         .eq('id', existingTx.id);
     } else {
       await client.from('transactions').insert([txPayload]);
+    }
+
+    if (
+      type === 'starting' &&
+      user.role === Role.EMPLOYEE &&
+      user.id
+    ) {
+      await this.upsertDailyOpeningPendingForEmployee({
+        client,
+        employeeId: user.id,
+        branchId,
+        openingDate: today,
+        startingCash: confirmedAmount,
+      });
+    }
+
+    // After closing (end) balance, require this employee to go through opening again
+    // (starting cash + inventory) for the same PH calendar day.
+    if (
+      type === 'ending' &&
+      user.role === Role.EMPLOYEE &&
+      user.id
+    ) {
+      const { error: openingResetError } = await client
+        .from('daily_opening')
+        .delete()
+        .eq('employee_id', user.id)
+        .eq('branch_id', branchId)
+        .eq('opening_date', today);
+      if (openingResetError) {
+        console.warn(
+          '[BranchFinance] daily_opening reset after end balance:',
+          openingResetError.message,
+        );
+      }
     }
 
     return { success: true, type, amount: confirmedAmount, date: today };
@@ -613,10 +834,10 @@ export class BranchFinanceService {
     }
 
     const client = this.supabaseService.getClient();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getPhCalendarDateString();
 
-    // 1. Get starting balance
     let startingBalance = 0;
+    let endingBalance = 0;
     let recordDate: string | null = null;
 
     const { data: todayRow } = await client
@@ -628,6 +849,7 @@ export class BranchFinanceService {
 
     if (todayRow) {
       startingBalance = this.toMoney(todayRow.starting_balance);
+      endingBalance = this.toMoney(todayRow.ending_balance);
       recordDate = todayRow.record_date;
     } else {
       // Carry forward previous day's ending balance
@@ -642,30 +864,14 @@ export class BranchFinanceService {
 
       if (priorRow) {
         startingBalance = this.toMoney(priorRow.ending_balance);
+        endingBalance = startingBalance;
         recordDate = priorRow.record_date;
       }
     }
 
-    // 2. Dynamically compute ending balance from today's transactions
-    const { data: todayTxs } = await client
-      .from('transactions')
-      .select('purpose, cash_in, cash_out')
-      .eq('branch_id', branchId)
-      .eq('transaction_date', today);
-
-    const todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
-      const p = String(tx.purpose ?? '').toLowerCase().trim();
-      if (p === 'start' || p === 'end') return sum;
-      return (
-        sum +
-        (parseFloat(String(tx.cash_in ?? 0)) || 0) -
-        (parseFloat(String(tx.cash_out ?? 0)) || 0)
-      );
-    }, 0);
-
     return {
       startingBalance,
-      endingBalance: Number((startingBalance + todayNet).toFixed(2)),
+      endingBalance,
       date: recordDate,
     };
   }
