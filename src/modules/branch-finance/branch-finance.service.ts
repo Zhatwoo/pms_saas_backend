@@ -12,7 +12,6 @@ import {
 } from '../../infrastructure/supabase/supabase.service';
 import {
   computeBranchDaySnapshot,
-  netCashFromTransactions,
 } from '../../common/utils/daily-balance-aggregate.util';
 
 interface TransactionRow {
@@ -532,11 +531,7 @@ export class BranchFinanceService {
 
         breakdown.startBalance = snap.startingBalance;
 
-        // Always compute ending balance dynamically:
-        // End Day = Start Day + Σ(cash_in) - Σ(cash_out)
-        const endingBalance = Number(
-          (snap.startingBalance + netCashFromTransactions(operationalTx)).toFixed(2),
-        );
+        const endingBalance = snap.endingBalance;
 
         const fundReqSummary = { pending: 0, approved: 0, transferred: 0 };
         for (const fr of branchFundReqs) {
@@ -600,10 +595,9 @@ export class BranchFinanceService {
     let dbQuery = client
       .from('transactions')
       .select('*', { count: 'exact' })
-      // Show newest entries first so limited pages include latest opening/closing rows.
-      .order('transaction_date', { ascending: false })
-      .order('transaction_time', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('transaction_date', { ascending: true })
+      .order('transaction_time', { ascending: true })
+      .order('created_at', { ascending: true });
 
     if (branchId) {
       dbQuery = dbQuery.eq('branch_id', branchId);
