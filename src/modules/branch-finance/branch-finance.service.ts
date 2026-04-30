@@ -683,14 +683,21 @@ export class BranchFinanceService {
     }
 
     if (existing) {
-      // For starting: update start + recompute end.
-      // For ending: recompute end dynamically (start + net) — do NOT use employee raw input as override.
       const startBal = type === 'starting'
         ? confirmedAmount
         : Number(existing.starting_balance ?? 0);
+
+      // When type='starting': the employee's declaration IS the current cash truth.
+      // Transactions that already happened today are already reflected in the declared amount.
+      // So ending = confirmedAmount. Future transactions will adjust via adjustDailyBalance.
+      // When type='ending': recompute from start + todayNet for reconciliation.
+      const endingBal = type === 'starting'
+        ? confirmedAmount
+        : Number((startBal + todayNet).toFixed(2));
+
       const update = {
         ...(type === 'starting' ? { starting_balance: confirmedAmount } : {}),
-        ending_balance: Number((startBal + todayNet).toFixed(2)),
+        ending_balance: endingBal,
       };
       const { error: updateError } = await client
         .from('daily_balances')
@@ -716,11 +723,17 @@ export class BranchFinanceService {
           .maybeSingle();
         startBal = priorRow ? Number(Number(priorRow.ending_balance ?? 0).toFixed(2)) : 0;
       }
+
+      // Same logic: starting declaration sets ending = declared amount.
+      const endingBal = type === 'starting'
+        ? startBal
+        : Number((startBal + todayNet).toFixed(2));
+
       const row: Record<string, unknown> = {
         branch_id: branchId,
         record_date: today,
         starting_balance: startBal,
-        ending_balance: Number((startBal + todayNet).toFixed(2)),
+        ending_balance: endingBal,
       };
       const { error: insertError } = await client
         .from('daily_balances')
@@ -756,10 +769,9 @@ export class BranchFinanceService {
       purpose,
       transaction_date: today,
       transaction_time: new Date().toTimeString().slice(0, 8),
-      // START: record cash_in so Opening Balance shows in the ledger.
-      // END: cash_in/cash_out = 0 — it's a reconciliation marker, not a cash movement.
-      // netCashFromTransactions() skips both start/end rows so no double-counting.
-      cash_in: type === 'starting' ? confirmedAmount : 0,
+      // Both Start and End are journal markers, NOT real cash movement.
+      // The actual starting/ending values live in daily_balances.
+      cash_in: 0,
       cash_out: 0,
       details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
     };
@@ -824,8 +836,8 @@ export class BranchFinanceService {
     const client = this.supabaseService.getClient();
     const today = getPhCalendarDateString();
 
-    // 1. Get starting balance
     let startingBalance = 0;
+    let endingBalance = 0;
     let recordDate: string | null = null;
 
     const { data: todayRow } = await client
@@ -837,6 +849,7 @@ export class BranchFinanceService {
 
     if (todayRow) {
       startingBalance = this.toMoney(todayRow.starting_balance);
+      endingBalance = this.toMoney(todayRow.ending_balance);
       recordDate = todayRow.record_date;
     } else {
       // Carry forward previous day's ending balance
@@ -851,30 +864,14 @@ export class BranchFinanceService {
 
       if (priorRow) {
         startingBalance = this.toMoney(priorRow.ending_balance);
+        endingBalance = startingBalance;
         recordDate = priorRow.record_date;
       }
     }
 
-    // 2. Dynamically compute ending balance from today's transactions
-    const { data: todayTxs } = await client
-      .from('transactions')
-      .select('purpose, cash_in, cash_out')
-      .eq('branch_id', branchId)
-      .eq('transaction_date', today);
-
-    const todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
-      const p = String(tx.purpose ?? '').toLowerCase().trim();
-      if (p === 'start' || p === 'end') return sum;
-      return (
-        sum +
-        (parseFloat(String(tx.cash_in ?? 0)) || 0) -
-        (parseFloat(String(tx.cash_out ?? 0)) || 0)
-      );
-    }, 0);
-
     return {
       startingBalance,
-      endingBalance: Number((startingBalance + todayNet).toFixed(2)),
+      endingBalance,
       date: recordDate,
     };
   }
