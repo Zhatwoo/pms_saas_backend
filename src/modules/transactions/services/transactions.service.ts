@@ -335,7 +335,8 @@ export class TransactionsService {
             region,
             contact_number
           )
-        )
+        ),
+        sale_item:sale_items (*)
       `,
       )
       .order('transaction_date', { ascending: false })
