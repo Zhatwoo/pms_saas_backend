@@ -55,4 +55,16 @@ export class BranchFinanceController {
   ) {
     return this.branchFinanceService.getLatestBalance(req.user, branch);
   }
+
+  @Roles(Role.EMPLOYEE)
+  @Get('daily-opening/status')
+  getDailyOpeningStatus(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.branchFinanceService.getEmployeeDailyOpeningStatus(req.user);
+  }
+
+  @Roles(Role.EMPLOYEE)
+  @Post('daily-opening/complete')
+  completeDailyOpening(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.branchFinanceService.completeEmployeeDailyOpening(req.user);
+  }
 }

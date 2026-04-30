@@ -1095,6 +1095,7 @@ export class InventoryService {
     itemId: string,
     soldPrice: number,
     branchIdParam: string | number,
+    customerId?: string,
   ) {
     const item = await this.findOneForSale(user, itemId);
 
@@ -1111,7 +1112,11 @@ export class InventoryService {
 
     const { error: updateErr } = await client
       .from('sale_items')
-      .update({ status: 'Sold', price: soldPrice })
+      .update({ 
+        status: 'Sold', 
+        price: soldPrice,
+        customer_id: customerId || null
+      })
       .eq('id', itemId);
     if (updateErr) {
       throw new InternalServerErrorException(updateErr.message);
@@ -1132,6 +1137,7 @@ export class InventoryService {
       unit_code: item.item_id ?? null,
       details: `Item sold: ${item.item_name ?? 'Unknown'} for ₱${soldPrice.toLocaleString()}`,
       related_sale_item_id: itemId,
+      customer_id: customerId || null,
     }]);
     if (txErr) {
       console.error('[InventoryService] Failed to create sale transaction', txErr);
