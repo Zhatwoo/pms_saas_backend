@@ -787,6 +787,27 @@ export class BranchFinanceService {
       });
     }
 
+    // After closing (end) balance, require this employee to go through opening again
+    // (starting cash + inventory) for the same PH calendar day.
+    if (
+      type === 'ending' &&
+      user.role === Role.EMPLOYEE &&
+      user.id
+    ) {
+      const { error: openingResetError } = await client
+        .from('daily_opening')
+        .delete()
+        .eq('employee_id', user.id)
+        .eq('branch_id', branchId)
+        .eq('opening_date', today);
+      if (openingResetError) {
+        console.warn(
+          '[BranchFinance] daily_opening reset after end balance:',
+          openingResetError.message,
+        );
+      }
+    }
+
     return { success: true, type, amount: confirmedAmount, date: today };
   }
 
