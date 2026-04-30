@@ -115,7 +115,8 @@ export class TransactionsService {
   async create(user: UserWithBranch, dto: any) {
     // Drop client-only fields that are not real DB columns.
     // This prevents 500s when UI sends extra metadata.
-    const { layaway: _layaway, ...dtoClean } = dto ?? {};
+    const { layaway: layawayInput, ...dtoClean } = dto ?? {};
+    const isLayaway = !!layawayInput;
 
     // 1. Resolve Branch Info
     const branchId =
