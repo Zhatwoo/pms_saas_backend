@@ -3,15 +3,17 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import {
   requireUserBranchId,
   effectiveBranchIdForQuery,
 } from '../../../common/utils/branch-scope.util';
+import { assertBranchAccess } from '../../../common/utils/authorization.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
-import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
 import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
@@ -20,6 +22,7 @@ import { NotificationsService } from '../../notifications/services/notifications
 export class PawnTicketsService {
   constructor(
     private readonly supabase: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -88,6 +91,63 @@ export class PawnTicketsService {
     return getPhCalendarDateString();
   }
 
+  private toDbDate(value?: string | null): Date {
+    return new Date(`${value || getPhCalendarDateString()}T00:00:00.000Z`);
+  }
+
+  private toDbTime(value?: string | null): Date {
+    const time = value || new Date().toTimeString().slice(0, 8);
+    return new Date(`1970-01-01T${time}.000Z`);
+  }
+
+  private formatDate(value?: Date | null): string | null {
+    return value ? value.toISOString().slice(0, 10) : null;
+  }
+
+  private toNumber(value: Prisma.Decimal | number | string | null | undefined) {
+    if (value == null) return 0;
+    return Number(value);
+  }
+
+  private async adjustDailyBalance(branchId: string, netChange: number) {
+    const recordDate = this.toDbDate(getPhCalendarDateString());
+    const current = await this.prisma.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: { branch_id: branchId, record_date: recordDate },
+      },
+      select: { ending_balance: true },
+    });
+
+    if (current) {
+      await this.prisma.daily_balances.update({
+        where: {
+          branch_id_record_date: { branch_id: branchId, record_date: recordDate },
+        },
+        data: {
+          ending_balance: this.toNumber(current.ending_balance) + netChange,
+          updated_at: new Date(),
+        },
+      });
+      return;
+    }
+
+    const prior = await this.prisma.daily_balances.findFirst({
+      where: { branch_id: branchId, record_date: { lt: recordDate } },
+      orderBy: { record_date: 'desc' },
+      select: { ending_balance: true },
+    });
+    const carried = this.toNumber(prior?.ending_balance);
+
+    await this.prisma.daily_balances.create({
+      data: {
+        branch_id: branchId,
+        record_date: recordDate,
+        starting_balance: carried,
+        ending_balance: carried + netChange,
+      },
+    });
+  }
+
   private formatSupabaseError(error: unknown): string {
     if (error == null) {
       return 'Unknown database error';
@@ -117,22 +177,12 @@ export class PawnTicketsService {
   }
 
   private async generateNextSerialNumberForBranch(branchId: string) {
-    const client = this.supabase.getClient();
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { branch_code: true },
+    });
 
-    const { data: branch, error: branchError } = await client
-      .from('branches')
-      .select('branch_code')
-      .eq('id', branchId)
-      .single();
-
-    if (branchError || !branch) {
-      throw new InternalServerErrorException(
-        branchError?.message || 'Branch code not found',
-      );
-    }
-
-    const serialDate = this.getTodayDateKey();
-    const branchCode = (branch as { branch_code?: string | null }).branch_code;
+    const branchCode = branch?.branch_code;
 
     if (!branchCode) {
       throw new InternalServerErrorException('Branch code not found');
@@ -140,22 +190,18 @@ export class PawnTicketsService {
 
     const serialPrefix = this.buildSerialPrefix(branchCode);
 
-    const { data: items, error: itemsError } = await client
-      .from('pawned_items')
-      .select('serial_number')
-      .eq('branch_id', branchId)
-      .ilike('serial_number', `${serialPrefix}%`)
-      .order('serial_number', { ascending: false })
-      .limit(100);
-
-    if (itemsError) {
-      throw new InternalServerErrorException(itemsError.message);
-    }
+    const items = await this.prisma.pawned_items.findMany({
+      where: {
+        branch_id: branchId,
+        serial_number: { startsWith: serialPrefix, mode: 'insensitive' },
+      },
+      select: { serial_number: true },
+      orderBy: { serial_number: 'desc' },
+      take: 100,
+    });
 
     let maxNumber = 0;
-    const typedItems = (items ?? []) as Array<{ serial_number: string | null }>;
-
-    for (const item of typedItems) {
+    for (const item of items) {
       const serialNumber = item.serial_number?.trim();
       if (!serialNumber || !serialNumber.startsWith(serialPrefix)) {
         continue;
@@ -177,92 +223,41 @@ export class PawnTicketsService {
     user: AuthenticatedUserProfile,
     query: { branch?: string; status?: string; search?: string },
   ) {
-    const client = this.supabase.getClient();
     const branchId = effectiveBranchIdForQuery(user, query.branch);
+    const where: Prisma.pawned_itemsWhereInput = {};
+    if (branchId) where.branch_id = branchId;
+    if (query.status) where.status = query.status;
 
-    let dbQuery = client
-      .from('pawned_items')
-      .select(
-        'id, item_name, item_id, serial_number, amount, pawn_date, status, branch_id, customer_id',
-      )
-      .order('pawn_date', { ascending: false })
-      .limit(500);
-
-    if (branchId) {
-      dbQuery = dbQuery.eq('branch_id', branchId);
-    }
-    if (query.status) {
-      dbQuery = dbQuery.eq('status', query.status);
-    }
-
-    const { data, error } = await dbQuery;
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    let items = (data ?? []) as Array<{
-      id: string;
-      item_name: string | null;
-      item_id: string | null;
-      serial_number: string | null;
-      amount: number | string | null;
-      pawn_date: string | null;
-      status: string | null;
-      branch_id: string | null;
-      customer_id: string | null;
-    }>;
-
-    const customerIds = Array.from(
-      new Set(items.map((i) => i.customer_id).filter((id): id is string => Boolean(id))),
-    );
-    const branchIds = Array.from(
-      new Set(items.map((i) => i.branch_id).filter((id): id is string => Boolean(id))),
-    );
-
-    let customerMap = new Map<
-      string,
-      { id: string; full_name: string | null; contact_number: string | null }
-    >();
-    let branchMap = new Map<string, { name: string | null }>();
-
-    if (customerIds.length > 0) {
-      const { data: customerRows, error: customerError } = await client
-        .from('customers')
-        .select('id, full_name, contact_number')
-        .in('id', customerIds);
-      if (customerError) {
-        throw new InternalServerErrorException(customerError.message);
-      }
-      customerMap = new Map(
-        (customerRows ?? []).map((row: any) => [
-          row.id,
-          {
-            id: row.id,
-            full_name: row.full_name ?? null,
-            contact_number: row.contact_number ?? null,
-          },
-        ]),
-      );
-    }
-
-    if (branchIds.length > 0) {
-      const { data: branchRows, error: branchError } = await client
-        .from('branches')
-        .select('id, name')
-        .in('id', branchIds);
-      if (branchError) {
-        throw new InternalServerErrorException(branchError.message);
-      }
-      branchMap = new Map(
-        (branchRows ?? []).map((row: any) => [row.id, { name: row.name ?? null }]),
-      );
-    }
+    const items = await this.prisma.pawned_items.findMany({
+      where,
+      select: {
+        id: true,
+        item_name: true,
+        item_id: true,
+        serial_number: true,
+        amount: true,
+        pawn_date: true,
+        status: true,
+        branch_id: true,
+        customer_id: true,
+        customers: {
+          select: { id: true, full_name: true, contact_number: true },
+        },
+        branches: { select: { name: true } },
+      },
+      orderBy: { pawn_date: 'desc' },
+      take: 500,
+    });
 
     let normalized = items.map((item) => ({
       ...item,
+      amount: this.toNumber(item.amount),
+      pawn_date: this.formatDate(item.pawn_date),
       unit_code: item.item_id ?? null,
-      customer: item.customer_id ? customerMap.get(item.customer_id) ?? null : null,
-      branch: item.branch_id ? branchMap.get(item.branch_id) ?? null : null,
+      customer: item.customers ?? null,
+      branch: item.branches ?? null,
+      customers: undefined,
+      branches: undefined,
     }));
 
     if (query.search) {
@@ -279,11 +274,11 @@ export class PawnTicketsService {
   }
 
   async create(user: AuthenticatedUserProfile, dto: CreatePawnTicketDto) {
-    const client = this.supabase.getClient();
     const branchId =
       user.role === Role.SUPER_ADMIN
         ? (dto.branchId ?? requireUserBranchId(user))
         : requireUserBranchId(user);
+    assertBranchAccess(user, branchId);
     const branchName = dto.branchName ?? user.branchName ?? 'Unknown Branch';
     const providedSerialNumber = dto.item.serialNumber?.trim();
     const serialNumber =
@@ -364,18 +359,14 @@ export class PawnTicketsService {
       ),
     );
 
-    let customer: { id: string } | null = null;
+    let customer: { id: string; [key: string]: unknown } | null = null;
 
     if (dto.customerId) {
-      const { data: existingCustomer, error: customerLookupError } =
-        await client
-          .from('customers')
-          .select('*')
-          .eq('id', dto.customerId)
-          .eq('branch_id', branchId)
-          .single();
+      const existingCustomer = await this.prisma.customers.findFirst({
+        where: { id: dto.customerId, branch_id: branchId, deleted_at: null },
+      });
 
-      if (customerLookupError || !existingCustomer) {
+      if (!existingCustomer) {
         throw new BadRequestException(
           'Selected customer was not found for the active branch.',
         );
@@ -395,22 +386,10 @@ export class PawnTicketsService {
         branch_id: branchId,
       };
 
-      const { data: createdCustomer, error: customerError } = await client
-        .from('customers')
-        .insert([customerPayload])
-        .select()
-        .single();
-
-      if (customerError) {
-        if (this.isPawnTicketMigrationMissing(customerError)) {
-          this.throwMissingMigrationError();
-        }
-        throw new InternalServerErrorException(
-          this.formatSupabaseError(customerError),
-        );
-      }
-
-      customer = createdCustomer;
+      customer = await this.prisma.customers.create({
+        data: customerPayload,
+        select: { id: true },
+      });
     }
 
     const itemPayload = {
@@ -436,42 +415,21 @@ export class PawnTicketsService {
       amount: dto.transaction.pawnAmount ?? 0,
     };
 
-    const insertPawnedItem = async (payload: Record<string, unknown>) => {
-      const { data, error } = await client
-        .from('pawned_items')
-        .insert([payload])
-        .select()
-        .single();
-
-      return { data, error };
-    };
-
-    let { data: pawnedItem, error: pawnedError } = await insertPawnedItem(itemPayload);
-
-    if (pawnedError && this.isItemPhotosSchemaCacheError(pawnedError)) {
-      ({ data: pawnedItem, error: pawnedError } = await insertPawnedItem({
+    const pawnedItem = await this.prisma.pawned_items.create({
+      data: {
         ...itemPayload,
-        item_photos: undefined,
-      }));
-    }
-
-    if (pawnedError) {
-      if (this.isPawnTicketMigrationMissing(pawnedError)) {
-        this.throwMissingMigrationError();
-      }
-      throw new InternalServerErrorException(
-        this.formatSupabaseError(pawnedError),
-      );
-    }
+        pawn_date: this.toDbDate(itemPayload.pawn_date),
+        amount: itemPayload.amount,
+      },
+    });
 
     const transactionPayload = {
       transaction_no: this.generateTransactionNo(),
       branch_id: branchId,
       branch: branchName,
       purpose: 'Pawn',
-      transaction_date:
-        dto.transaction.transactionDate || getPhCalendarDateString(),
-      transaction_time: dto.transaction.transactionTime || new Date().toTimeString().slice(0, 8),
+      transaction_date: this.toDbDate(dto.transaction.transactionDate),
+      transaction_time: this.toDbTime(dto.transaction.transactionTime),
       // Pawn disbursement is a cash outflow from branch to customer.
       cash_in: 0,
       cash_out: dto.transaction.pawnAmount ?? 0,
@@ -488,17 +446,9 @@ export class PawnTicketsService {
       id_back_photo: idBackPhotoUrl,
     };
 
-    const { data: transaction, error: transactionError } = await client
-      .from('transactions')
-      .insert([transactionPayload])
-      .select()
-      .single();
-
-    if (transactionError) {
-      throw new InternalServerErrorException(
-        this.formatSupabaseError(transactionError),
-      );
-    }
+    const transaction = await this.prisma.transactions.create({
+      data: transactionPayload,
+    });
 
     // 3b. Adjust daily balance for this pawn cash outflow
     const pawnCashIn = Number(transactionPayload.cash_in ?? 0);
@@ -506,7 +456,7 @@ export class PawnTicketsService {
     const netChange = pawnCashIn - pawnCashOut;
     if (netChange !== 0) {
       try {
-        await adjustDailyBalance(client, branchId, netChange);
+        await this.adjustDailyBalance(branchId, netChange);
       } catch (e) {
         console.error(
           '[PawnTicketsService] adjustDailyBalance failed after pawn create',
@@ -541,43 +491,33 @@ export class PawnTicketsService {
   }
 
   async generateNextUnitCode(user: AuthenticatedUserProfile) {
-    const client = this.supabase.getClient();
     const branchId = requireUserBranchId(user);
 
-    // 1. Get branch code
-    const { data: branch, error: branchError } = await client
-      .from('branches')
-      .select('branch_code')
-      .eq('id', branchId)
-      .single();
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { branch_code: true },
+    });
 
-    if (branchError || !branch) {
-      throw new InternalServerErrorException(
-        branchError?.message || 'Branch code not found',
-      );
-    }
+    if (!branch) throw new InternalServerErrorException('Branch code not found');
 
     // 2. Get the highest numeric sequence for this branch's pattern
     // Pattern: [branchCode]-jclb-%
     const branchCode = (branch as { branch_code: string }).branch_code;
-    const pattern = `${branchCode}-jclb-%`;
-
-    const { data: items, error: itemsError } = await client
-      .from('pawned_items')
-      .select('item_id')
-      .eq('branch_id', branchId)
-      .ilike('item_id', pattern)
-      .order('item_id', { ascending: false })
-      .limit(100);
-
-    if (itemsError) {
-      throw new InternalServerErrorException(itemsError.message);
-    }
+    const items = await this.prisma.pawned_items.findMany({
+      where: {
+        branch_id: branchId,
+        item_id: { startsWith: `${branchCode}-jclb-`, mode: 'insensitive' },
+      },
+      select: { item_id: true },
+      orderBy: { item_id: 'desc' },
+      take: 100,
+    });
 
     let maxNumber = 0;
 
     if (items && items.length > 0) {
       items.forEach((item) => {
+        if (!item.item_id) return;
         const parts = item.item_id.split('-');
         if (parts.length === 3) {
           const numPart = parseInt(parts[2], 10);
@@ -648,29 +588,33 @@ export class PawnTicketsService {
   }
 
   async findByUnitCode(unitCode: string) {
-    const client = this.supabase.getClient();
     const cleanCode = unitCode.trim().toUpperCase();
 
-    const { data: item, error: itemError } = await client
-      .from('pawned_items')
-      .select('*, customer:customers(*), branch_info:branches(*)')
-      .eq('item_id', cleanCode)
-      .maybeSingle();
+    const item = await this.prisma.pawned_items.findFirst({
+      where: { item_id: { equals: cleanCode, mode: 'insensitive' } },
+      include: { customers: true, branches: true },
+    });
 
-    if (itemError || !item) {
+    if (!item) {
       throw new BadRequestException('Item not found or unit code is invalid.');
     }
 
     // Resolve storage URLs for photos
     const [profilePhoto, itemPhotos, idPhoto, idBackPhoto] = await Promise.all([
       this.resolveStorageUrl(item.profile_photo),
-      this.resolveStorageUrls(item.item_photos ?? []),
+      this.resolveStorageUrls(item.item_photos as Array<string | null> | string | null),
       this.resolveStorageUrl(item.id_photo),
       this.resolveStorageUrl(item.id_back_photo),
     ]);
 
     return {
       ...item,
+      customer: item.customers,
+      branch_info: item.branches,
+      customers: undefined,
+      branches: undefined,
+      amount: this.toNumber(item.amount),
+      pawn_date: this.formatDate(item.pawn_date),
       profile_photo: profilePhoto,
       item_photos: itemPhotos,
       id_photo: idPhoto,
