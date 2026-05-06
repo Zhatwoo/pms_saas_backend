@@ -1,10 +1,24 @@
-import { Controller, Post, Body, Req, Get, Query, Param, Put, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Req,
+  Get,
+  Query,
+  Param,
+  Put,
+  Delete,
+} from '@nestjs/common';
 import { CustomersService } from '../services/customers.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { CreateCustomerDto } from '../dto/create-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
+import { ListCustomersDto } from '../dto/list-customers.dto';
+import { CustomerNoteDto } from '../dto/customer-note.dto';
+import { RequestCustomerEditDto } from '../dto/request-customer-edit.dto';
+import { MergeDuplicateCustomersDto } from '../dto/merge-duplicate-customers.dto';
 
 @Controller('customers')
 export class CustomersController {
@@ -23,18 +37,21 @@ export class CustomersController {
   @Get()
   findAll(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Query('branchId') branchId?: string,
+    @Query() query: ListCustomersDto,
   ) {
-    return this.customersService.findAll(req.user, branchId);
+    return this.customersService.findAll(req.user, query);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post('merge-duplicates')
   mergeDuplicateCustomers(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() dto: { branchId?: string },
+    @Body() dto: MergeDuplicateCustomersDto,
   ) {
-    return this.customersService.mergeDuplicateCustomers(req.user, dto?.branchId);
+    return this.customersService.mergeDuplicateCustomers(
+      req.user,
+      dto?.branchId,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -51,7 +68,7 @@ export class CustomersController {
   update(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() updateDto: any,
+    @Body() updateDto: UpdateCustomerDto,
   ) {
     return this.customersService.update(req.user, id, updateDto);
   }
@@ -70,7 +87,7 @@ export class CustomersController {
   addCustomerNote(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() dto: { title?: string; note?: string },
+    @Body() dto: CustomerNoteDto,
   ) {
     return this.customersService.addCustomerNote(
       req.user,
@@ -85,9 +102,15 @@ export class CustomersController {
   requestEdit(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() dto: { notes: string; field?: string; mode?: string },
+    @Body() dto: RequestCustomerEditDto,
   ) {
-    return this.customersService.requestEdit(req.user, id, dto.notes, dto.field, dto.mode);
+    return this.customersService.requestEdit(
+      req.user,
+      id,
+      dto.notes,
+      dto.field,
+      dto.mode,
+    );
   }
 
   @Roles(Role.EMPLOYEE)
@@ -100,4 +123,3 @@ export class CustomersController {
     return this.customersService.cancelRequestEdit(req.user, id, logId);
   }
 }
-

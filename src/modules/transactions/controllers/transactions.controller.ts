@@ -3,6 +3,7 @@ import { TransactionsService } from '../services/transactions.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { CreateTransactionDto } from '../dto/create-transaction.dto';
 
 @Controller('transactions')
 export class TransactionsController {
@@ -12,7 +13,7 @@ export class TransactionsController {
   @Post()
   create(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() createTransactionDto: any,
+    @Body() createTransactionDto: CreateTransactionDto,
   ) {
     return this.transactionsService.create(req.user, createTransactionDto);
   }
