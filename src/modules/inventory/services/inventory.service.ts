@@ -45,9 +45,16 @@ export class InventoryService {
 
     try {
       const parsedUrl = new URL(storedUrl);
-      const storagePrefix = '/storage/v1/object/public/';
+      const publicPrefix = '/storage/v1/object/public/';
+      const signedPrefix = '/storage/v1/object/sign/';
 
-      if (!parsedUrl.pathname.includes(storagePrefix)) {
+      const storagePrefix = parsedUrl.pathname.includes(publicPrefix)
+        ? publicPrefix
+        : parsedUrl.pathname.includes(signedPrefix)
+          ? signedPrefix
+          : null;
+
+      if (!storagePrefix) {
         return storedUrl;
       }
 
@@ -1040,6 +1047,76 @@ export class InventoryService {
       }
     }
     return { totalAvailable, totalSold, unpricedCount, soldThisMonth, revenueThisMonth };
+  }
+
+  async findPublicForSale(): Promise<{
+    items: Array<{
+      id: string;
+      itemId: string;
+      itemName: string;
+      category: string;
+      branch: string;
+      branchLocation: string;
+      availableDate: string;
+      price: number;
+      status: string;
+      imageUrl: string;
+    }>;
+    total: number;
+  }> {
+    const client = this.supabase.getClient();
+
+    const [saleResult, branchResult] = await Promise.all([
+      client
+        .from('sale_items')
+        .select('id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url, created_at')
+        .eq('status', 'Available')
+        .order('created_at', { ascending: false }),
+      client
+        .from('branches')
+        .select('id, name, location'),
+    ]);
+
+    if (saleResult.error) {
+      throw new InternalServerErrorException(saleResult.error.message);
+    }
+
+    if (branchResult.error) {
+      throw new InternalServerErrorException(branchResult.error.message);
+    }
+
+    const branchLookup = new Map<string, { name: string; location: string }>();
+    for (const branch of branchResult.data || []) {
+      branchLookup.set(String(branch.id), {
+        name: branch.name || 'Branch',
+        location: branch.location || '',
+      });
+    }
+
+    const items = await Promise.all(
+      (saleResult.data || []).map(async (item: any) => {
+        const branchInfo = branchLookup.get(String(item.branch_id));
+        const imageUrl = await this.resolveStorageUrl(item.image_url);
+
+        return {
+          id: item.id,
+          itemId: item.item_id,
+          itemName: item.item_name,
+          category: item.category,
+          branch: branchInfo?.name || item.branch || 'Branch',
+          branchLocation: branchInfo?.location || '',
+          availableDate: item.available_date,
+          price: Number(item.price || 0),
+          status: item.status || 'Available',
+          imageUrl,
+        };
+      }),
+    );
+
+    return {
+      items,
+      total: items.length,
+    };
   }
 
   async findForSaleCategories(user: UserWithBranch, branch?: string): Promise<{ category: string; count: number }[]> {
