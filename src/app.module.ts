@@ -27,6 +27,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PasswordChangeRequestsModule } from './modules/password-change-requests/password-change-requests.module';
 import { IncidentTicketsModule } from './modules/incident-tickets/incident-tickets.module';
 import { RewardsModule } from './modules/rewards/rewards.module';
+import { QRReplacementRequestsModule } from './modules/qr-replacement-requests/qr-replacement-requests.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
@@ -65,6 +66,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     PasswordChangeRequestsModule,
     IncidentTicketsModule,
     RewardsModule,
+    QRReplacementRequestsModule,
   ],
   providers: [
     {

@@ -3,7 +3,6 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { Role } from '../../../common/enums';
@@ -18,7 +17,7 @@ import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-d
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 
-type PawnTicketDbClient = Prisma.TransactionClient | PrismaService;
+type PawnTicketDbClient = any;
 
 @Injectable()
 export class PawnTicketsService {
@@ -192,7 +191,7 @@ export class PawnTicketsService {
     return value ? value.toISOString().slice(0, 10) : null;
   }
 
-  private toNumber(value: Prisma.Decimal | number | string | null | undefined) {
+  private toNumber(value: any | number | string | null | undefined) {
     if (value == null) return 0;
     return Number(value);
   }
@@ -334,7 +333,7 @@ export class PawnTicketsService {
     query: { branch?: string; status?: string; search?: string },
   ) {
     const branchId = effectiveBranchIdForQuery(user, query.branch);
-    const where: Prisma.pawned_itemsWhereInput = {};
+    const where: any = {};
     if (branchId) where.branch_id = branchId;
     if (query.status) where.status = query.status;
 
@@ -507,17 +506,14 @@ export class PawnTicketsService {
       condition: true,
       memory_storage: true,
       id_back_photo: true,
-      item_photo: true,
       item_photos: true,
-    } satisfies Prisma.pawned_itemsSelect;
+    } as any;
 
     let itemId = await this.resolveItemId(branchId, dto.item.unitCode);
     let result: {
       customer: { id: string; [key: string]: unknown };
-      pawnedItem: Prisma.pawned_itemsGetPayload<{
-        select: typeof pawnedItemSelect;
-      }>;
-      transaction: Prisma.transactionsGetPayload<Record<string, never>>;
+      pawnedItem: any;
+      transaction: any;
       transactionNo: string;
     } | null = null;
 
@@ -560,7 +556,6 @@ export class PawnTicketsService {
             remarks: dto.item.remarks?.trim() ?? '',
             qr_code: dto.item.qrCode ?? null,
             profile_photo: profilePhotoUrl,
-            item_photo: itemPhotoUrls[0] ?? null,
             item_photos: itemPhotoUrls,
             id_photo: idPhotoUrl,
             id_back_photo: idBackPhotoUrl,
@@ -598,7 +593,7 @@ export class PawnTicketsService {
             pawn_amount: dto.transaction.pawnAmount ?? 0,
             storage_fee: dto.transaction.storageFee ?? 0,
             details: dto.transaction.details?.trim() ?? null,
-            related_pawned_item_id: pawnedItem.id,
+            related_pawned_item_id: (pawnedItem as any)?.id ?? null,
             created_by_user_id: user.id,
             profile_photo: profilePhotoUrl,
             id_photo: idPhotoUrl,

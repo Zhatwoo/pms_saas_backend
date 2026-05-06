@@ -4,7 +4,6 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/prisma';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
@@ -59,7 +58,16 @@ const TX_SELECT = {
   pawned_items: {
     select: {
       id: true,
+      item_id: true,
       customer_id: true,
+      qr_code: true,
+      serial_number: true,
+      items_included: true,
+      condition: true,
+      memory_storage: true,
+      remarks: true,
+      category: true,
+      item_photos: true,
       customers: {
         select: {
           id: true,
@@ -73,7 +81,18 @@ const TX_SELECT = {
       },
     },
   },
-} satisfies Prisma.transactionsSelect;
+  customers: {
+    select: {
+      id: true,
+      full_name: true,
+      address: true,
+      barangay: true,
+      city: true,
+      region: true,
+      contact_number: true,
+    },
+  },
+} as any;
 
 type LayawayInput = {
   customer?: {
@@ -116,12 +135,12 @@ export class TransactionsService {
     return value ? value.toISOString().slice(11, 19) : null;
   }
 
-  private toNumber(value: Prisma.Decimal | number | string | null | undefined) {
+  private toNumber(value: any | number | string | null | undefined) {
     if (value == null) return 0;
     return Number(value);
   }
 
-  private mapTransaction(row: Prisma.transactionsGetPayload<{ select: typeof TX_SELECT }>) {
+  private mapTransaction(row: any) {
     return {
       ...row,
       transaction_date: this.formatDate(row.transaction_date),
@@ -137,7 +156,9 @@ export class TransactionsService {
             customer: row.pawned_items.customers,
           }
         : null,
+      customer: row.customers ?? null,
       pawned_items: undefined,
+      customers: undefined,
       sale_item: null,
     };
   }
@@ -261,7 +282,7 @@ export class TransactionsService {
       dtoClean.transaction_no ||
       `${dtoClean.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
 
-    const payload: Prisma.transactionsUncheckedCreateInput = {
+    const payload: any = {
       transaction_no: transactionNo,
       branch_id: branchId,
       branch: branchName,
@@ -335,7 +356,7 @@ export class TransactionsService {
     customerId?: string,
   ) {
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
-    const where: Prisma.transactionsWhereInput = {};
+    const where: any = {};
 
     if (scoped) where.branch_id = scoped;
     if (!isSuperAdmin(user)) Object.assign(where, buildBranchFilter(user));
@@ -389,7 +410,7 @@ export class TransactionsService {
       select: TX_SELECT,
     });
     if (!data) throw new NotFoundException('Transaction not found');
-    assertBranchAccess(user, data.branch_id);
+    assertBranchAccess(user, (data as any).branch_id);
     return this.mapTransaction(data);
   }
 
