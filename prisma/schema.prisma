@@ -1,0 +1,201 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["public", "auth"]
+}
+
+model branches {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_code    String           @unique
+  name           String
+  location       String
+  status         String           @default("Active")
+  contact_number String?
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime         @default(now()) @db.Timestamptz(6)
+
+  users          users[]
+  customers      customers[]
+  pawned_items   pawned_items[]
+  daily_balances daily_balances[]
+  activity_logs  activity_logs[]
+  notifications  notifications[]
+
+  @@schema("public")
+}
+
+model users {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auth_id        String           @unique @db.Uuid
+  email          String
+  full_name      String?
+  role           String?
+  branch_id      String?          @db.Uuid
+  avatar_url     String?
+  account_status String           @default("active")
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime         @default(now()) @db.Timestamptz(6)
+
+  branches       branches?        @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+  activity_logs  activity_logs[]
+  notifications  notifications[]
+
+  @@index([auth_id])
+  @@schema("public")
+}
+
+model customers {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  full_name      String
+  address        String
+  barangay       String?
+  city           String?
+  region         String?
+  contact_number String?
+  email          String?
+  id_presented   String?
+  branch_id      String           @db.Uuid
+  deleted_at     DateTime?        @db.Timestamptz(6)
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime         @default(now()) @db.Timestamptz(6)
+
+  branches       branches         @relation(fields: [branch_id], references: [id])
+  pawned_items   pawned_items[]
+  transactions   transactions[]
+  notifications  notifications[]
+
+  @@schema("public")
+}
+
+model pawned_items {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  item_id          String?
+  item_name        String?
+  category         String?
+  branch_id        String?        @db.Uuid
+  branch           String?
+  pawn_date        DateTime?      @db.Date
+  status           String?
+  remarks          String?
+  qr_code          String?
+  profile_photo    String?
+  item_photo       String?
+  item_photos      String[]
+  id_photo         String?
+  id_back_photo    String?
+  condition        String?
+  serial_number    String?
+  items_included   String?
+  memory_storage   String?
+  condition_report String?
+  customer_id      String?        @db.Uuid
+  amount           Decimal?       @default(0) @db.Decimal(15, 2)
+  created_at       DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime       @default(now()) @db.Timestamptz(6)
+
+  branches         branches?      @relation(fields: [branch_id], references: [id])
+  customers        customers?     @relation(fields: [customer_id], references: [id])
+  transactions     transactions[]
+
+  @@index([branch_id])
+  @@index([customer_id])
+  @@schema("public")
+}
+
+model transactions {
+  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transaction_no         String?       @unique
+  branch_id              String?       @db.Uuid
+  branch                 String?
+  customer_id            String?       @db.Uuid
+  related_pawned_item_id String?       @db.Uuid
+  purpose                String?
+  transaction_date       DateTime?     @db.Date
+  transaction_time       DateTime?     @db.Time(6)
+  cash_in                Decimal?      @default(0) @db.Decimal(15, 2)
+  cash_out               Decimal?      @default(0) @db.Decimal(15, 2)
+  return_amount          Decimal?      @default(0) @db.Decimal(15, 2)
+  storage_fee            Decimal?      @default(0) @db.Decimal(15, 2)
+  pawn_amount            Decimal?      @default(0) @db.Decimal(15, 2)
+  unit                   String?
+  unit_code              String?
+  details                String?
+  profile_photo          String?
+  id_photo               String?
+  id_back_photo          String?
+  created_by_user_id     String?       @db.Uuid
+  created_at             DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime      @default(now()) @db.Timestamptz(6)
+
+  customers              customers?    @relation(fields: [customer_id], references: [id])
+  pawned_items           pawned_items? @relation(fields: [related_pawned_item_id], references: [id])
+
+  @@index([branch_id])
+  @@index([customer_id])
+  @@index([related_pawned_item_id])
+  @@index([transaction_date])
+  @@schema("public")
+}
+
+model daily_balances {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_id        String    @db.Uuid
+  record_date      DateTime  @db.Date
+  starting_balance Decimal   @default(0) @db.Decimal(14, 2)
+  ending_balance   Decimal   @default(0) @db.Decimal(14, 2)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @db.Timestamptz(6)
+
+  branches         branches  @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+
+  @@unique([branch_id, record_date])
+  @@schema("public")
+}
+
+model activity_logs {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String?   @db.Uuid
+  branch_id  String?   @db.Uuid
+  action     String
+  details    String?
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  users      users?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  branches   branches? @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+
+  @@index([created_at])
+  @@schema("public")
+}
+
+model notifications {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String?    @db.Uuid
+  branch_id   String?    @db.Uuid
+  customer_id String?    @db.Uuid
+  log_id      String?    @db.Uuid
+  title       String
+  subtitle    String?
+  category    String?
+  is_read     Boolean    @default(false)
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+
+  users       users?     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  branches    branches?  @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  customers   customers? @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([branch_id])
+  @@index([customer_id])
+  @@index([log_id])
+  @@index([is_read])
+  @@index([created_at])
+  @@schema("public")
+}
