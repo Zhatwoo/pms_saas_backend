@@ -26,6 +26,7 @@ import { ShopSettingsModule } from './modules/shop-settings/shop-settings.module
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PasswordChangeRequestsModule } from './modules/password-change-requests/password-change-requests.module';
 import { IncidentTicketsModule } from './modules/incident-tickets/incident-tickets.module';
+import { RewardsModule } from './modules/rewards/rewards.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
@@ -62,6 +63,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     NotificationsModule,
     PasswordChangeRequestsModule,
     IncidentTicketsModule,
+    RewardsModule,
   ],
   providers: [
     {

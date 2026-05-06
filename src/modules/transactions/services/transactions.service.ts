@@ -17,6 +17,7 @@ import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.ut
 import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import { RewardsService } from '../../rewards/services/rewards.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
 
@@ -79,6 +80,7 @@ export class TransactionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly rewardsService: RewardsService,
   ) {}
 
   private toDbDate(value?: string | null): Date {
@@ -245,7 +247,7 @@ export class TransactionsService {
       branch: branchName,
       customer_id: dtoClean.customer_id ?? null,
       related_pawned_item_id: dtoClean.related_pawned_item_id ?? null,
-      purpose: dtoClean.purpose ?? null,
+      purpose: dtoClean.purpose ?? '',
       transaction_date: this.toDbDate(dtoClean.transaction_date),
       transaction_time: this.toDbTime(dtoClean.transaction_time),
       created_by_user_id: user.id ?? null,
@@ -287,6 +289,19 @@ export class TransactionsService {
       });
     } catch (e) {
       console.warn('[TransactionsService] Failed to create notification', e);
+    }
+
+    // Post-transaction hook: evaluate customer reward eligibility (fire-and-forget)
+    if (branchId && dtoClean.customer_id) {
+      this.rewardsService
+        .evaluateRewardsAfterTransaction(
+          dtoClean.customer_id,
+          branchId,
+          dtoClean.purpose,
+        )
+        .catch((err) =>
+          console.warn('[TransactionsService] Reward evaluation failed', err),
+        );
     }
 
     return this.mapTransaction(data);
