@@ -31,6 +31,7 @@ import { RewardsModule } from './modules/rewards/rewards.module';
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
 @Module({
+  // Triggering reload for new QR replacement routes
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,

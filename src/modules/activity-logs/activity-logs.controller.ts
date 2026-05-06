@@ -12,17 +12,38 @@ export class ActivityLogsController {
 
   @Get()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
-  async getLogs(@Request() req: any, @Query('branchId') qBranchId?: string) {
+  async getLogs(
+    @Request() req: any,
+    @Query('branchId') qBranchId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('action') action?: string,
+    @Query('pawnedItemId') pawnedItemId?: string,
+  ) {
     const user = req.user; // contains id, role, branchId
 
     // Normalize role string format to match DB if needed
     const roleNorm = user.role.toLowerCase();
 
     if (roleNorm === 'admin' || roleNorm === 'employee') {
-      return this.activityLogsService.getLogs(user.branchId, roleNorm);
+      return this.activityLogsService.getLogs(
+        user.branchId,
+        roleNorm,
+        startDate,
+        endDate,
+        action,
+        pawnedItemId,
+      );
     }
 
     // For superadmin, they can filter by branchId or get all
-    return this.activityLogsService.getLogs(qBranchId, 'super_admin');
+    return this.activityLogsService.getLogs(
+      qBranchId,
+      'super_admin',
+      startDate,
+      endDate,
+      action,
+      pawnedItemId,
+    );
   }
 }
