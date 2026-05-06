@@ -1,9 +1,9 @@
 import { Controller, Get, Post, Body, Param, Query, Req } from '@nestjs/common';
 import { TransactionsService } from '../services/transactions.service';
+import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
-import { CreateTransactionDto } from '../dto/create-transaction.dto';
 
 @Controller('transactions')
 export class TransactionsController {
@@ -15,7 +15,7 @@ export class TransactionsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Body() createTransactionDto: CreateTransactionDto,
   ) {
-    return this.transactionsService.create(req.user, createTransactionDto);
+    return this.transactionsService.create(req.user, createTransactionDto as any);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

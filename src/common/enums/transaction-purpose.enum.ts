@@ -11,6 +11,7 @@ export enum TransactionPurpose {
   REAPPRAISE = 'Reappraise',
   BUY_BACK = 'Buy Back',
   SOLD_ITEM = 'Sold Item',
+  RESERVE_LAYAWAY = 'Reserve / Layaway',
   FUND_TRANSFER = 'Fund Transfer',
   CASH_TRANSFER = 'Cash Transfer',
   START = 'Start',
@@ -24,6 +25,7 @@ export const REVENUE_PURPOSES: ReadonlySet<string> = new Set([
   TransactionPurpose.REAPPRAISE,
   TransactionPurpose.BUY_BACK,
   TransactionPurpose.SOLD_ITEM,
+  TransactionPurpose.RESERVE_LAYAWAY,
 ]);
 
 /** Purposes that are journal entries, not real cash movement. */

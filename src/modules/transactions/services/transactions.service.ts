@@ -75,6 +75,21 @@ const TX_SELECT = {
   },
 } satisfies Prisma.transactionsSelect;
 
+type LayawayInput = {
+  customer?: {
+    firstName?: string;
+    middleName?: string;
+    lastName?: string;
+    contactNo?: string;
+    address?: string;
+  };
+  terms?: string;
+  itemPrice?: number;
+  downpayment?: number;
+  remainingBalance?: number;
+  processedByName?: string;
+};
+
 @Injectable()
 export class TransactionsService {
   constructor(
@@ -211,8 +226,13 @@ export class TransactionsService {
     };
   }
 
-  async create(user: UserWithBranch, dto: CreateTransactionDto) {
-    const dtoClean = dto ?? {};
+  async create(user: UserWithBranch, dto: any) {
+    // Drop client-only fields that are not real DB columns.
+    // This prevents 500s when UI sends extra metadata.
+    const { layaway: layawayInput, ...dtoClean } = dto ?? {};
+    const isLayaway = !!layawayInput;
+
+    // 1. Resolve Branch Info
     const branchId =
       isSuperAdmin(user) ? (dtoClean.branch_id ?? null) : requireBranchId(user);
     const isSystemExpense =
