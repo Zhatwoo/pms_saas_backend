@@ -2,11 +2,13 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
 
 import { JwtAuthGuard, RolesGuard } from './common/guards';
 
 import { SupabaseModule } from './infrastructure/supabase/supabase.module';
+import { PrismaModule } from './infrastructure/prisma';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { BranchesModule } from './modules/branches/branches.module';
@@ -35,6 +37,13 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
       envFilePath: '.env',
     }),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: 120,
+      },
+    ]),
+    PrismaModule,
     SupabaseModule,
     AuthModule,
     UsersModule,
@@ -55,6 +64,10 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     IncidentTicketsModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

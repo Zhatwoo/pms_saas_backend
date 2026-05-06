@@ -54,7 +54,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
           extraData = body.details;
         }
       }
-    } else if (exception instanceof Error) {
+    } else if (
+      exception instanceof Error &&
+      process.env.NODE_ENV !== 'production'
+    ) {
       message = exception.message?.trim() || 'Internal server error';
     }
 
