@@ -11,7 +11,7 @@ import {
   Patch,
 } from '@nestjs/common';
 import { InventoryService } from '../services/inventory.service';
-import { Roles } from '../../../common/decorators';
+import { Public, Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 
@@ -263,6 +263,12 @@ export class InventoryController {
     @Query('branch') branch?: string,
   ) {
     return this.inventoryService.findForSaleStats(req.user, branch);
+  }
+
+  @Public()
+  @Get('public/for-sale')
+  findPublicForSale() {
+    return this.inventoryService.findPublicForSale();
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

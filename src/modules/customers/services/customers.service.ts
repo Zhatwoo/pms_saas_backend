@@ -43,6 +43,8 @@ const CUSTOMER_SAFE_SELECT = {
   id: true,
   full_name: true,
   contact_number: true,
+  email: true,
+  id_presented: true,
   barangay: true,
   city: true,
   region: true,
