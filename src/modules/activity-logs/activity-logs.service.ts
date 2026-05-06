@@ -43,6 +43,8 @@ export class ActivityLogsService {
     role?: string,
     startDate?: string,
     endDate?: string,
+    action?: string,
+    pawnedItemId?: string,
   ) {
     const client = this.supabaseService.getClient();
     let query = client
@@ -80,6 +82,18 @@ export class ActivityLogsService {
 
     if (endDate) {
       query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
+    }
+
+    if (action) {
+      if (action.includes(',')) {
+        query = query.in('action', action.split(','));
+      } else {
+        query = query.eq('action', action);
+      }
+    }
+
+    if (pawnedItemId) {
+      query = query.ilike('details', `%${pawnedItemId}%`);
     }
 
     const { data, error } = await query;

@@ -1179,6 +1179,105 @@ export class InventoryService {
     return data;
   }
 
+  async requestQrReplacement(
+    user: UserWithBranch & { id: string },
+    itemId: string,
+    reason: 'Damaged' | 'Lost' | 'Torn',
+    message?: string,
+    proofPhoto?: string,
+  ) {
+    const client = this.supabase.getClient();
+    const { data: pawnedItem, error: fetchErr } = await client
+      .from('pawned_items')
+      .select('id, item_id, item_name, branch, branch_id')
+      .eq('id', itemId)
+      .single();
+
+    if (fetchErr || !pawnedItem) {
+      throw new NotFoundException('Pawned item not found');
+    }
+
+    assertResourceBranch(user, pawnedItem.branch_id);
+
+    const { error: logError } = await client.from('activity_logs').insert({
+      user_id: user.id,
+      branch_id: pawnedItem.branch_id,
+      action: 'QR_REPLACEMENT_REQUEST',
+      details: JSON.stringify({
+        itemId: pawnedItem.item_id,
+        itemName: pawnedItem.item_name,
+        pawnedItemId: pawnedItem.id,
+        branch: pawnedItem.branch,
+        requestedByRole: user.role,
+        reason,
+        proofPhoto: proofPhoto || null,
+        message: message || `Replacement requested due to sticker being ${reason.toLowerCase()}.`,
+        requestStatus: 'pending',
+        requestedAt: new Date().toISOString(),
+      }),
+    });
+
+    if (logError) {
+      throw new InternalServerErrorException(logError.message);
+    }
+
+    return {
+      message: 'QR replacement request sent to super admin for approval',
+    };
+  }
+
+  async reviewQrReplacement(
+    user: UserWithBranch & { id: string },
+    requestId: string,
+    decision: 'approve' | 'reject',
+    note?: string,
+  ) {
+    const client = this.supabase.getClient();
+    
+    const { data: requestLog, error: requestLogError } = await client
+      .from('activity_logs')
+      .select('*')
+      .eq('id', requestId)
+      .single();
+
+    if (requestLogError || !requestLog) {
+      throw new NotFoundException('Replacement request not found');
+    }
+
+    let parsedDetails = JSON.parse(requestLog.details || '{}');
+    if (parsedDetails.requestStatus !== 'pending') {
+      throw new ConflictException('Request already processed');
+    }
+
+    const reviewedAction = decision === 'approve' 
+      ? 'QR_REPLACEMENT_APPROVED' 
+      : 'QR_REPLACEMENT_REJECTED';
+
+    const updatedDetails = {
+      ...parsedDetails,
+      requestStatus: decision === 'approve' ? 'approved' : 'rejected',
+      reviewedAt: new Date().toISOString(),
+      reviewedByUserId: user.id,
+      reviewNote: note || '',
+    };
+
+    const { error: updateErr } = await client
+      .from('activity_logs')
+      .update({
+        action: reviewedAction,
+        details: JSON.stringify(updatedDetails),
+      })
+      .eq('id', requestId);
+
+    if (updateErr) {
+      throw new InternalServerErrorException(updateErr.message);
+    }
+
+    return {
+      message: `QR replacement request ${decision}ed successfully`,
+    };
+  }
+
   async deleteForSale(user: UserWithBranch, id: string) {
     await this.findOneForSale(user, id);
     const client = this.supabase.getClient();

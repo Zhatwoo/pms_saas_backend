@@ -175,37 +175,49 @@ export class InventoryController {
     );
   }
 
-  @Roles(Role.SUPER_ADMIN)
-  @Post('pawned/:id/expire-request/:requestId/review')
-  reviewExpireApprovalPost(
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('pawned/:id/qr-replacement-request')
+  requestQrReplacement(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Param('requestId') requestId: string,
-    @Body() dto: { decision?: 'approve' | 'reject'; note?: string },
+    @Body() dto: { reason: 'Damaged' | 'Lost' | 'Torn'; message?: string; proofPhoto?: string },
   ) {
-    return this.inventoryService.reviewExpireApproval(
+    return this.inventoryService.requestQrReplacement(
       req.user,
       id,
-      requestId,
-      dto?.decision,
-      dto?.note,
+      dto.reason,
+      dto.message,
+      dto.proofPhoto,
     );
   }
 
   @Roles(Role.SUPER_ADMIN)
-  @Patch('pawned/:id/expire-request/:requestId/review')
-  reviewExpireApprovalPatch(
+  @Post('qr-replacement/:requestId/review')
+  reviewQrReplacement(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Param('id') id: string,
     @Param('requestId') requestId: string,
-    @Body() dto: { decision?: 'approve' | 'reject'; note?: string },
+    @Body() dto: { decision: 'approve' | 'reject'; note?: string },
   ) {
-    return this.inventoryService.reviewExpireApproval(
+    return this.inventoryService.reviewQrReplacement(
       req.user,
-      id,
       requestId,
-      dto?.decision,
-      dto?.note,
+      dto.decision,
+      dto.note,
+    );
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Patch('qr-replacement/:requestId/review')
+  reviewQrReplacementPatch(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('requestId') requestId: string,
+    @Body() dto: { decision: 'approve' | 'reject'; note?: string },
+  ) {
+    return this.inventoryService.reviewQrReplacement(
+      req.user,
+      requestId,
+      dto.decision,
+      dto.note,
     );
   }
 

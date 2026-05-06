@@ -30,6 +30,7 @@ import { IncidentTicketsModule } from './modules/incident-tickets/incident-ticke
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
 @Module({
+  // Triggering reload for new QR replacement routes
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,

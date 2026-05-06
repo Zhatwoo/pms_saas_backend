@@ -17,6 +17,8 @@ export class ActivityLogsController {
     @Query('branchId') qBranchId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('action') action?: string,
+    @Query('pawnedItemId') pawnedItemId?: string,
   ) {
     const user = req.user; // contains id, role, branchId
 
@@ -29,6 +31,8 @@ export class ActivityLogsController {
         roleNorm,
         startDate,
         endDate,
+        action,
+        pawnedItemId,
       );
     }
 
@@ -38,6 +42,8 @@ export class ActivityLogsController {
       'super_admin',
       startDate,
       endDate,
+      action,
+      pawnedItemId,
     );
   }
 }
