@@ -21,7 +21,6 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { PawnTicketsModule } from './modules/pawn-tickets/pawn-tickets.module';
 import { ActivityLogsModule } from './modules/activity-logs/activity-logs.module';
 import { FundRequestsModule } from './modules/fund-requests/fund-requests.module';
-import { QRReplacementRequestsModule } from './modules/qr-replacement-requests/qr-replacement-requests.module';
 import { BranchFinanceModule } from './modules/branch-finance/branch-finance.module';
 import { ShopSettingsModule } from './modules/shop-settings/shop-settings.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -58,7 +57,6 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     PawnTicketsModule,
     ActivityLogsModule,
     FundRequestsModule,
-    QRReplacementRequestsModule,
     BranchFinanceModule,
     ShopSettingsModule,
     NotificationsModule,

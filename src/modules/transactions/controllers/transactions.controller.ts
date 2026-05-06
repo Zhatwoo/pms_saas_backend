@@ -4,7 +4,6 @@ import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
-import { CreateTransactionDto } from '../dto/create-transaction.dto';
 
 @Controller('transactions')
 export class TransactionsController {

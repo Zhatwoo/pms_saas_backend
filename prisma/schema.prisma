@@ -119,6 +119,7 @@ model pawned_items {
   condition        String?
   memory_storage   String?
   id_back_photo    String?
+  item_photo       String?
   item_photos      Json            @default("[]")
   item_renewals    item_renewals[]
   branches         branches        @relation(fields: [branch_id], references: [id], onUpdate: NoAction)

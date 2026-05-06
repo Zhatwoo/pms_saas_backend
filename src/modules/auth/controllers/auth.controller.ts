@@ -4,7 +4,6 @@ import {
   Get,
   Patch,
   Body,
-  Patch,
   Param,
   Query,
   Req,
