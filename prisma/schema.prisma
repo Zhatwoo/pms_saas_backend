@@ -31,6 +31,7 @@ model branches {
   sale_items                                             sale_items[]
   transactions                                           transactions[]
   users                                                  users[]
+  customer_rewards                                       customer_rewards[]
 
   @@schema("public")
 }
@@ -64,6 +65,7 @@ model users {
   layaway_reservations                                                 layaway_reservations[]
   notifications                                                        notifications[]
   transactions                                                         transactions[]
+  customer_rewards                                                     customer_rewards[]
   users                                                                auth_users               @relation(fields: [auth_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   branches                                                             branches?                @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -91,6 +93,7 @@ model customers {
   pawned_items         pawned_items[]
   sale_items           sale_items[]
   transactions         transactions[]
+  customer_rewards     customer_rewards[]
 
   @@index([branch_id, deleted_at, created_at(sort: Desc)], map: "idx_customers_branch_deleted_created")
   @@schema("public")
@@ -119,7 +122,6 @@ model pawned_items {
   condition        String?
   memory_storage   String?
   id_back_photo    String?
-  item_photo       String?
   item_photos      Json            @default("[]")
   item_renewals    item_renewals[]
   branches         branches        @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
@@ -951,6 +953,49 @@ model sale_items {
   @@index([branch_id, status], map: "idx_sale_items_branch_status")
   @@index([customer_id], map: "idx_sale_items_customer_id")
   @@index([item_name(ops: raw("gin_trgm_ops"))], map: "idx_sale_items_item_name_trgm", type: Gin)
+  @@schema("public")
+}
+
+model rewards {
+  id                         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                       String
+  description                String             @default("")
+  reward_type                String             @default("discount")
+  reward_value               Decimal            @default(0) @db.Decimal(12, 2)
+  required_transaction_count Int                @default(1)
+  required_total_amount      Decimal            @default(0) @db.Decimal(15, 2)
+  transaction_type           String?
+  is_active                  Boolean            @default(true)
+  created_at                 DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime           @default(now()) @db.Timestamptz(6)
+  customer_rewards           customer_rewards[]
+
+  @@index([is_active], map: "idx_rewards_is_active")
+  @@schema("public")
+}
+
+model customer_rewards {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customer_id        String    @db.Uuid
+  reward_id          String    @db.Uuid
+  branch_id          String    @db.Uuid
+  status             String    @default("earned")
+  earned_at          DateTime  @default(now()) @db.Timestamptz(6)
+  claimed_at         DateTime? @db.Timestamptz(6)
+  claimed_by_user_id String?   @db.Uuid
+  notes              String    @default("")
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  customers          customers @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  rewards            rewards   @relation(fields: [reward_id], references: [id], onDelete: Cascade)
+  branches           branches  @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
+  users              users?    @relation(fields: [claimed_by_user_id], references: [id], onUpdate: NoAction)
+
+  @@unique([customer_id, reward_id, branch_id], map: "uq_customer_reward_branch")
+  @@index([customer_id], map: "idx_customer_rewards_customer_id")
+  @@index([branch_id], map: "idx_customer_rewards_branch_id")
+  @@index([status], map: "idx_customer_rewards_status")
+  @@index([reward_id], map: "idx_customer_rewards_reward_id")
   @@schema("public")
 }
 
