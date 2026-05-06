@@ -1,7 +1,12 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Role } from '../../common/enums';
+import { PrismaService } from '../prisma';
 
 export type AccountStatus = 'pending' | 'active' | 'rejected';
 
@@ -28,16 +33,16 @@ export interface AuthenticatedUserProfile {
   avatarUrl: string | null;
 }
 
-const USER_SELECT_COLUMNS =
-  'id, auth_id, email, full_name, role, branch_id, avatar_url, account_status, branches(name)';
-
 @Injectable()
 export class SupabaseService {
   private client: SupabaseClient;
   private readonly url: string;
   private readonly anonKey: string;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     const url = this.configService.get<string>('supabase.url');
     const anonKey = this.configService.get<string>('supabase.anonKey');
     const serviceRoleKey = this.configService.get<string>(
@@ -132,19 +137,20 @@ export class SupabaseService {
         return null;
       }
 
-      const { data, error } = await this.client
-        .from('users')
-        .select(USER_SELECT_COLUMNS)
-        .eq(column, value)
-        .maybeSingle<UserRecord>();
-
-      if (error) {
-        console.error(
-          `[SupabaseService] fetchUserRow DB error (${column}=${value}):`,
-          error,
-        );
-        return null;
-      }
+      const data = await this.prisma.users.findFirst({
+        where: { [column]: value },
+        select: {
+          id: true,
+          auth_id: true,
+          email: true,
+          full_name: true,
+          role: true,
+          branch_id: true,
+          avatar_url: true,
+          account_status: true,
+          branches: { select: { name: true } },
+        },
+      });
 
       if (!data) {
         console.warn(
@@ -152,13 +158,15 @@ export class SupabaseService {
         );
       }
 
-      return data;
+      return data as UserRecord | null;
     } catch (err) {
       console.error(
         `[SupabaseService] fetchUserRow critical crash (${column}=${value}):`,
         err,
       );
-      return null;
+      throw new InternalServerErrorException(
+        'Database connection failed while loading user account',
+      );
     }
   }
 

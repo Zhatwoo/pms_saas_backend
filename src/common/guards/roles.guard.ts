@@ -3,13 +3,24 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Role } from '../enums/role.enum';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import type { Request } from 'express';
+
+type RoleRequest = Request & {
+  user?: {
+    id?: string | null;
+    role?: Role | null;
+  };
+};
 
 @Injectable()
 export class RolesGuard implements CanActivate {
+  private readonly logger = new Logger(RolesGuard.name);
+
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -22,10 +33,10 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const { user } = context.switchToHttp().getRequest();
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<RoleRequest>();
+    const { user } = request;
 
-    console.log('[RolesGuard] Check:', {
+    this.logger.debug({
       path: request.path,
       method: request.method,
       userRole: user?.role,
@@ -36,6 +47,9 @@ export class RolesGuard implements CanActivate {
     const hasAccess = requiredRoles.some((role) => user?.role === role);
 
     if (!hasAccess) {
+      this.logger.warn(
+        `Unauthorized role access: ${request.method} ${request.path} user=${user?.id ?? 'unknown'} role=${user?.role ?? 'none'} required=${requiredRoles.join(',')}`,
+      );
       throw new ForbiddenException(
         `Access denied. Required roles: ${requiredRoles.join(', ')}`,
       );

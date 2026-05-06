@@ -8,6 +8,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 
@@ -15,7 +16,10 @@ import { RegisterDto } from '../dto/register.dto';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  constructor(private supabaseService: SupabaseService) {}
+  constructor(
+    private supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   private isActiveBranchStatus(status: string | null | undefined): boolean {
     return status?.trim().toLowerCase() === 'active';
@@ -45,16 +49,12 @@ export class AuthService {
     const fullName = registerDto.fullName.trim();
     const normalizedRole = registerDto.role === 'admin' ? 'admin' : 'employee';
 
-    const { data: branches, error: branchError } = await client
-      .from('branches')
-      .select('id, status')
-      .eq('id', registerDto.branchId);
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: registerDto.branchId },
+      select: { id: true, status: true },
+    });
 
-    const branch = branches?.[0] as
-      | { id: string; status: string | null }
-      | undefined;
-
-    if (branchError || !branch || !this.isActiveBranchStatus(branch.status)) {
+    if (!branch || !this.isActiveBranchStatus(branch.status)) {
       throw new BadRequestException('Invalid or inactive branch');
     }
 
@@ -90,24 +90,15 @@ export class AuthService {
     };
 
     // Upsert: DB triggers (or prior inserts) may already create a users row for new auth users.
-    const { error: upsertError } = await client.from('users').upsert(row, {
-      onConflict: 'auth_id',
-    });
-
-    if (upsertError) {
+    try {
+      await this.prisma.users.upsert({
+        where: { auth_id: authId },
+        create: row,
+        update: row,
+      });
+    } catch (error) {
       await client.auth.admin.deleteUser(authId);
-      const detail = [
-        upsertError.message,
-        upsertError.code ? `code=${upsertError.code}` : '',
-        (upsertError as { details?: string }).details
-          ? String((upsertError as { details?: string }).details)
-          : '',
-        (upsertError as { hint?: string }).hint
-          ? `hint=${(upsertError as { hint?: string }).hint}`
-          : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
+      const detail = error instanceof Error ? error.message : '';
       throw new InternalServerErrorException(
         detail || 'Failed to save user profile',
       );

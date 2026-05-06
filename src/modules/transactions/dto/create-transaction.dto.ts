@@ -1,12 +1,16 @@
-import { IsOptional, IsString, IsNumber, IsObject } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  Allow,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 
 export class CreateTransactionDto {
   @IsOptional()
-  @IsString()
-  transaction_no?: string;
-
-  @IsOptional()
-  @IsString()
+  @IsUUID()
   branch_id?: string;
 
   @IsOptional()
@@ -14,12 +18,20 @@ export class CreateTransactionDto {
   branch?: string;
 
   @IsOptional()
+  @IsUUID()
+  customer_id?: string;
+
+  @IsOptional()
+  @IsUUID()
+  related_pawned_item_id?: string;
+
+  @IsOptional()
   @IsString()
   purpose?: string;
 
   @IsOptional()
   @IsString()
-  related_sale_item_id?: string;
+  transaction_no?: string;
 
   @IsOptional()
   @IsString()
@@ -30,12 +42,34 @@ export class CreateTransactionDto {
   transaction_time?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
+  @Min(0)
   cash_in?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
+  @Min(0)
   cash_out?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  return_amount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  storage_fee?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  pawn_amount?: number;
 
   @IsOptional()
   @IsString()
@@ -46,12 +80,22 @@ export class CreateTransactionDto {
   unit_code?: string;
 
   @IsOptional()
-  @IsObject()
-  details?: any;
+  @IsString()
+  details?: string;
 
   @IsOptional()
-  @IsObject()
-  layaway?: any;
+  @IsString()
+  profile_photo?: string;
 
-  // Allow other arbitrary fields — they will be accepted by service
+  @IsOptional()
+  @IsString()
+  id_photo?: string;
+
+  @IsOptional()
+  @IsString()
+  id_back_photo?: string;
+
+  @IsOptional()
+  @Allow()
+  layaway?: unknown;
 }
