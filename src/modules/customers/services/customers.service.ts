@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
@@ -76,6 +77,7 @@ export class CustomersService {
     private readonly prisma: PrismaService,
     private readonly supabase: SupabaseService,
     private readonly notificationsService: NotificationsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private customerScopeWhere(
@@ -280,14 +282,18 @@ export class CustomersService {
       id_presented: dto.id_presented?.trim() || null,
       branch_id: branchId,
     };
+    this.encryption.applyCustomerFieldsForWrite(payload as Record<string, unknown>);
 
-    return this.prisma.customers.create({
+    const created = await this.prisma.customers.create({
       data: payload,
       select:
         user.role === Role.EMPLOYEE
           ? CUSTOMER_SAFE_SELECT
           : CUSTOMER_FULL_SELECT,
     });
+    return this.encryption.decryptCustomerRow(
+      created as Record<string, unknown>,
+    ) as typeof created;
   }
 
   async findAll(
@@ -321,13 +327,16 @@ export class CustomersService {
 
     const uniqueCustomers = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
-      const branch = (row as { branches?: { name?: string | null } | null })
+      const dec = this.encryption.decryptCustomerRow(
+        row as Record<string, unknown>,
+      ) as (typeof rows)[number];
+      const branch = (dec as { branches?: { name?: string | null } | null })
         .branches;
-      const normalizedName = normalizeCustomerFullName(row.full_name);
+      const normalizedName = normalizeCustomerFullName(dec.full_name);
       const existing = uniqueCustomers.get(normalizedName);
       if (!existing) {
         uniqueCustomers.set(normalizedName, {
-          ...row,
+          ...dec,
           branch_name: branch?.name ?? null,
           branches: undefined,
           matching_customer_count: 1,
@@ -352,13 +361,17 @@ export class CustomersService {
 
     if (!customer) return null;
 
-    const group = await this.resolveCustomerNameGroup(user, customer);
+    const decrypted = this.encryption.decryptCustomerRow(
+      customer as Record<string, unknown>,
+    ) as NonNullable<typeof customer>;
+
+    const group = await this.resolveCustomerNameGroup(user, decrypted);
     const visuals = await this.resolveCustomerVisuals(group.matchingIds);
 
     return {
-      ...customer,
+      ...decrypted,
       branches: undefined,
-      branch_name: customer.branches?.name ?? null,
+      branch_name: decrypted.branches?.name ?? null,
       profile_photo_url: visuals.profilePhotoUrl,
       id_front_photo_url: visuals.idFrontPhotoUrl,
       id_back_photo_url: visuals.idBackPhotoUrl,
@@ -408,7 +421,12 @@ export class CustomersService {
           action: log.action,
           details: parsedDetails,
           createdAt: log.created_at,
-          actorName: log.users?.full_name || log.users?.email || 'System',
+          actorName:
+            (log.users
+              ? this.encryption.decryptUsersJoin(log.users)?.full_name
+              : undefined) ||
+            log.users?.email ||
+            'System',
           userId: log.user_id || null,
         };
       })
@@ -471,9 +489,12 @@ export class CustomersService {
       }).filter(([, value]) => value !== undefined),
     ) as Prisma.customersUncheckedUpdateInput;
 
+    const forWrite = { ...allowedPayload } as Record<string, unknown>;
+    this.encryption.applyCustomerFieldsForWrite(forWrite);
+
     await this.prisma.customers.update({
       where: { id },
-      data: allowedPayload,
+      data: forWrite as Prisma.customersUncheckedUpdateInput,
     });
 
     const trackedFields = [

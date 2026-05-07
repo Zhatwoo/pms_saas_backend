@@ -11,6 +11,7 @@ import { SupabaseService } from '../../infrastructure/supabase/supabase.service'
 import { PrismaService } from '../../infrastructure/prisma';
 import { Role } from '../enums';
 import { parseCookieHeader } from '../utils/cookie.util';
+import { EncryptionService } from '../encryption/encryption.service';
 import type { Request } from 'express';
 
 type UserRow = {
@@ -46,6 +47,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly supabase: SupabaseService,
     private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -152,7 +154,7 @@ export class JwtAuthGuard implements CanActivate {
     return {
       id: user.id,
       authId: user.auth_id,
-      fullName: user.full_name,
+      fullName: this.encryption.decryptUserFullName(user.full_name),
       email: user.email,
       role,
       branchId: user.branch_id,

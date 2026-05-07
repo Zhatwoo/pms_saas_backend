@@ -12,6 +12,7 @@ import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 
@@ -22,6 +23,7 @@ export class AuthService {
   constructor(
     private supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private isActiveBranchStatus(status: string | null | undefined): boolean {
@@ -86,7 +88,7 @@ export class AuthService {
     const row = {
       auth_id: authId,
       email,
-      full_name: fullName,
+      full_name: this.encryption.encryptUserFullName(fullName),
       role: normalizedRole,
       branch_id: registerDto.branchId,
       account_status: 'pending' as const,
@@ -397,7 +399,9 @@ export class AuthService {
 
         userMap.set(requester.id, {
           full_name:
-            requester.full_name == null ? null : String(requester.full_name),
+            requester.full_name == null
+              ? null
+              : this.encryption.decryptUserFullName(String(requester.full_name)),
           role: requester.role == null ? null : String(requester.role),
         });
       }

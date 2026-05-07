@@ -16,6 +16,7 @@ import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
 import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 
 type PawnTicketDbClient = any;
 
@@ -25,6 +26,7 @@ export class PawnTicketsService {
     private readonly supabase: SupabaseService,
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private getVerificationMode(idPresented?: string | null) {
@@ -358,16 +360,23 @@ export class PawnTicketsService {
       take: 500,
     });
 
-    let normalized = items.map((item) => ({
-      ...item,
-      amount: this.toNumber(item.amount),
-      pawn_date: this.formatDate(item.pawn_date),
-      unit_code: item.item_id ?? null,
-      customer: item.customers ?? null,
-      branch: item.branches ?? null,
-      customers: undefined,
-      branches: undefined,
-    }));
+    let normalized = items.map((item) => {
+      const cust = item.customers
+        ? (this.encryption.decryptCustomerEmbed(
+            item.customers as Record<string, unknown>,
+          ) as typeof item.customers)
+        : null;
+      return {
+        ...item,
+        amount: this.toNumber(item.amount),
+        pawn_date: this.formatDate(item.pawn_date),
+        unit_code: item.item_id ?? null,
+        customer: cust ?? null,
+        branch: item.branches ?? null,
+        customers: undefined,
+        branches: undefined,
+      };
+    });
 
     if (query.search) {
       const q = query.search.toLowerCase();
@@ -562,8 +571,10 @@ export class PawnTicketsService {
 
             customer = existingCustomer;
           } else {
+            const customerWrite = { ...customerPayload } as Record<string, unknown>;
+            this.encryption.applyCustomerFieldsForWrite(customerWrite);
             customer = await tx.customers.create({
-              data: customerPayload,
+              data: customerWrite as typeof customerPayload,
               select: { id: true },
             });
           }
@@ -615,7 +626,9 @@ export class PawnTicketsService {
             unit_code: itemId,
             pawn_amount: pawnAmount,
             storage_fee: storageFee,
-            details: dto.transaction.details?.trim() ?? null,
+            details: this.encryption.encryptTransactionDetails(
+              dto.transaction.details?.trim() ?? null,
+            ),
             related_pawned_item_id: (pawnedItem as any)?.id ?? null,
             created_by_user_id: user.id,
             profile_photo: profilePhotoUrl,
@@ -688,7 +701,12 @@ export class PawnTicketsService {
     return {
       customer: result.customer,
       pawnedItem: result.pawnedItem,
-      transaction: result.transaction,
+      transaction: {
+        ...result.transaction,
+        details: this.encryption.decryptTransactionDetails(
+          result.transaction.details as string | null,
+        ),
+      },
     };
   }
 
@@ -775,7 +793,11 @@ export class PawnTicketsService {
 
     return {
       ...item,
-      customer: item.customers,
+      customer: item.customers
+        ? (this.encryption.decryptCustomerEmbed(
+            item.customers as Record<string, unknown>,
+          ) as (typeof item)['customers'])
+        : null,
       branch_info: item.branches,
       customers: undefined,
       branches: undefined,
