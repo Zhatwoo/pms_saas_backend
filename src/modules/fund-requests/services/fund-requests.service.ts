@@ -312,17 +312,34 @@ export class FundRequestsService {
       ? dto.fileData.split(',')[1]
       : dto.fileData;
     const fileBuffer = Buffer.from(base64Data, 'base64');
+    
+    const extension = this.getUploadExtension(dto.fileData, dto.fileName);
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+    if (!allowedExtensions.includes(extension)) {
+      throw new BadRequestException('Invalid file extension. Only JPG, PNG, and WEBP are allowed.');
+    }
+    
+    const contentType = this.getUploadContentType(dto.fileData, dto.fileName);
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedMimeTypes.includes(contentType)) {
+      throw new BadRequestException('Invalid file type. Only JPEG, PNG, and WEBP are allowed.');
+    }
+
+    const MAX_SIZE = 5 * 1024 * 1024;
+    if (fileBuffer.length > MAX_SIZE) {
+      throw new BadRequestException('File is too large. Maximum size is 5MB.');
+    }
+
     const requestPart = this.sanitizePathPart(dto.requestNo || 'fund-request');
     const stagePart = this.sanitizePathPart(dto.stage);
     const branchPart = this.sanitizePathPart(branchId);
-    const extension = this.getUploadExtension(dto.fileData, dto.fileName);
     const filePath = `${branchPart}/${requestPart}/${stagePart}-${Date.now()}.${extension}`;
 
     const { error } = await client.storage
       .from('fund-transfer-proofs')
       .upload(filePath, fileBuffer, {
         upsert: true,
-        contentType: this.getUploadContentType(dto.fileData, dto.fileName),
+        contentType: contentType,
       });
 
     if (error) {

@@ -40,6 +40,15 @@ export class AuthController {
   }
 
   @Public()
+  @Get('config/public')
+  getPublicConfig() {
+    return {
+      supabaseUrl: process.env.SUPABASE_URL,
+      supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+    };
+  }
+
+  @Public()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')
   register(@Body() registerDto: RegisterDto) {
