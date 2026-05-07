@@ -389,7 +389,30 @@ export class PawnTicketsService {
         ? (dto.branchId ?? requireUserBranchId(user))
         : requireUserBranchId(user);
     assertBranchAccess(user, branchId);
-    const branchName = dto.branchName ?? user.branchName ?? 'Unknown Branch';
+
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { name: true, status: true },
+    });
+    if (!branch || branch.status?.trim().toLowerCase() !== 'active') {
+      throw new BadRequestException('Invalid or inactive branch');
+    }
+
+    const pawnAmount = Number(Number(dto.transaction.pawnAmount).toFixed(2));
+    const storageFee = Number(Number(dto.transaction.storageFee ?? 0).toFixed(2));
+    const returnAmount = Number(Number(dto.transaction.returnAmount ?? 0).toFixed(2));
+    if (
+      !Number.isFinite(pawnAmount) ||
+      !Number.isFinite(storageFee) ||
+      !Number.isFinite(returnAmount) ||
+      pawnAmount <= 0 ||
+      storageFee < 0 ||
+      returnAmount < 0
+    ) {
+      throw new BadRequestException('Invalid pawn transaction amounts');
+    }
+
+    const branchName = branch.name;
     const providedSerialNumber = dto.item.serialNumber?.trim();
     const serialNumber =
       providedSerialNumber && !providedSerialNumber.startsWith('PENDING')
@@ -565,7 +588,7 @@ export class PawnTicketsService {
             memory_storage: dto.item.memoryStorage?.trim() ?? '',
             condition_report: dto.item.condition?.trim() ?? '',
             customer_id: customer.id,
-            amount: dto.transaction.pawnAmount ?? 0,
+            amount: pawnAmount,
           };
 
           const pawnedItem = await tx.pawned_items.create({
@@ -582,16 +605,16 @@ export class PawnTicketsService {
             branch_id: branchId,
             branch: branchName,
             purpose: 'Pawn',
-            transaction_date: this.toDbDate(dto.transaction.transactionDate),
-            transaction_time: this.toDbTime(dto.transaction.transactionTime),
+            transaction_date: this.toDbDate(getPhCalendarDateString()),
+            transaction_time: this.toDbTime(new Date().toTimeString().slice(0, 8)),
             // Pawn disbursement is a cash outflow from branch to customer.
             cash_in: 0,
-            cash_out: dto.transaction.pawnAmount ?? 0,
-            return_amount: dto.transaction.returnAmount ?? 0,
+            cash_out: pawnAmount,
+            return_amount: returnAmount,
             unit: dto.item.unitName.trim(),
             unit_code: itemId,
-            pawn_amount: dto.transaction.pawnAmount ?? 0,
-            storage_fee: dto.transaction.storageFee ?? 0,
+            pawn_amount: pawnAmount,
+            storage_fee: storageFee,
             details: dto.transaction.details?.trim() ?? null,
             related_pawned_item_id: (pawnedItem as any)?.id ?? null,
             created_by_user_id: user.id,
@@ -610,6 +633,23 @@ export class PawnTicketsService {
           if (netChange !== 0) {
             await this.adjustDailyBalance(branchId, netChange, tx);
           }
+
+          await tx.activity_logs.create({
+            data: {
+              user_id: user.id,
+              branch_id: branchId,
+              action: 'PAWN_TICKET_CREATED',
+              details: JSON.stringify({
+                pawnedItemId: (pawnedItem as any)?.id ?? null,
+                transactionId: transaction.id,
+                transactionNo: transactionPayload.transaction_no,
+                pawnAmount,
+                storageFee,
+                returnAmount,
+                netChange,
+              }),
+            },
+          });
 
           return {
             customer,

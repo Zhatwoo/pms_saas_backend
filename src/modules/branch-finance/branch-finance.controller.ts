@@ -3,6 +3,7 @@ import { Roles } from '../../common/decorators';
 import { Role } from '../../common/enums';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
 import { BranchFinanceService } from './branch-finance.service';
+import { ConfirmDailyBalanceDto } from './dto/confirm-daily-balance.dto';
 
 @Controller('branch-finance')
 export class BranchFinanceController {
@@ -42,7 +43,7 @@ export class BranchFinanceController {
   @Post('daily-balance')
   confirmDailyBalance(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() body: { type: 'starting' | 'ending'; amount: number },
+    @Body() body: ConfirmDailyBalanceDto,
   ) {
     return this.branchFinanceService.confirmDailyBalance(req.user, body.type, body.amount);
   }

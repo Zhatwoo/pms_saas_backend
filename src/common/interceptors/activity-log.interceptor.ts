@@ -63,8 +63,17 @@ export class ActivityLogInterceptor implements NestInterceptor {
   private sanitize(body: any) {
     if (!body) return body;
     const sanitized = { ...body };
-    if (sanitized.password) sanitized.password = '***';
-    if (sanitized.token) sanitized.token = '***';
+    for (const key of [
+      'password',
+      'currentPassword',
+      'newPassword',
+      'token',
+      'access_token',
+      'refresh_token',
+      'serviceRoleKey',
+    ]) {
+      if (sanitized[key]) sanitized[key] = '***';
+    }
     return sanitized;
   }
 }
