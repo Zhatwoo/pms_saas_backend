@@ -4,6 +4,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { passportJwtSecret } from 'jwks-rsa';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { parseCookieHeader } from '../../../common/utils/cookie.util';
 
 interface JwtPayload {
   sub: string;
@@ -28,7 +29,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
 
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (req) => {
+          const cookies = parseCookieHeader(req?.headers?.cookie);
+          return cookies.pms_access_token || null;
+        },
+        (req) =>
+          process.env.ALLOW_BEARER_AUTH === 'true'
+            ? ExtractJwt.fromAuthHeaderAsBearerToken()(req)
+            : null,
+      ]),
       ignoreExpiration: false,
       // audience: 'authenticated',
       // issuer: `${supabaseUrl}/auth/v1`,

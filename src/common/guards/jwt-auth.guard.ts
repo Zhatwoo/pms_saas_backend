@@ -10,6 +10,7 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../infrastructure/prisma';
 import { Role } from '../enums';
+import { parseCookieHeader } from '../utils/cookie.util';
 import type { Request } from 'express';
 
 type UserRow = {
@@ -59,12 +60,12 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
-    const token = this.extractBearerToken(request.headers?.authorization);
+    const token = this.extractSessionToken(request);
     if (!token) {
       this.logger.warn(
-        `Missing bearer token for ${request.method} ${request.path}`,
+        `Missing session cookie for ${request.method} ${request.path}`,
       );
-      throw new UnauthorizedException('Missing bearer token');
+      throw new UnauthorizedException('Missing session');
     }
 
     const authClient = this.supabase.getAuthClient();
@@ -102,6 +103,21 @@ export class JwtAuthGuard implements CanActivate {
 
     request.user = this.toRequestUser(user as UserRow);
     return true;
+  }
+
+  private extractSessionToken(request: Request): string | null {
+    const cookies = parseCookieHeader(request.headers.cookie);
+    const cookieToken = cookies.pms_access_token;
+
+    if (cookieToken) {
+      return cookieToken;
+    }
+
+    if (process.env.ALLOW_BEARER_AUTH === 'true') {
+      return this.extractBearerToken(request.headers?.authorization);
+    }
+
+    return null;
   }
 
   private extractBearerToken(header?: string): string | null {

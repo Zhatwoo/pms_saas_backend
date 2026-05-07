@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
+import { CsrfOriginMiddleware } from './common/middleware/csrf-origin.middleware';
 
 import { JwtAuthGuard, RolesGuard } from './common/guards';
 
@@ -87,4 +88,8 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CsrfOriginMiddleware).forRoutes('*');
+  }
+}
