@@ -1,12 +1,15 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
+import { CsrfOriginMiddleware } from './common/middleware/csrf-origin.middleware';
 
 import { JwtAuthGuard, RolesGuard } from './common/guards';
 
 import { SupabaseModule } from './infrastructure/supabase/supabase.module';
+import { PrismaModule } from './infrastructure/prisma';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { BranchesModule } from './modules/branches/branches.module';
@@ -24,10 +27,13 @@ import { ShopSettingsModule } from './modules/shop-settings/shop-settings.module
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PasswordChangeRequestsModule } from './modules/password-change-requests/password-change-requests.module';
 import { IncidentTicketsModule } from './modules/incident-tickets/incident-tickets.module';
+import { RewardsModule } from './modules/rewards/rewards.module';
+import { QRReplacementRequestsModule } from './modules/qr-replacement-requests/qr-replacement-requests.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 
 @Module({
+  // Triggering reload for new QR replacement routes
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
@@ -35,6 +41,13 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
       envFilePath: '.env',
     }),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: 120,
+      },
+    ]),
+    PrismaModule,
     SupabaseModule,
     AuthModule,
     UsersModule,
@@ -53,8 +66,14 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     NotificationsModule,
     PasswordChangeRequestsModule,
     IncidentTicketsModule,
+    RewardsModule,
+    QRReplacementRequestsModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
@@ -69,4 +88,8 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CsrfOriginMiddleware).forRoutes('*');
+  }
+}

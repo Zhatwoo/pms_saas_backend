@@ -1,4 +1,10 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateCustomerDto {
   @IsString()
@@ -34,6 +40,7 @@ export class CreateCustomerDto {
   id_presented?: string;
 
   @IsString()
+  @IsUUID()
   @IsOptional()
   branch_id?: string;
 }

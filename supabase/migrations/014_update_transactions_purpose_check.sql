@@ -11,6 +11,7 @@ alter table public.transactions
       'Sold Item',
       'Pawn',
       'Cash Transfer',
-      'Fund Transfer'
+      'Fund Transfer',
+      'Reserve / Layaway'
     )
   );

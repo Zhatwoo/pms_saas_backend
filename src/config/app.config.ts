@@ -10,4 +10,7 @@ export default () => ({
     secret: process.env.SUPABASE_JWT_SECRET || '',
     expiresIn: process.env.JWT_EXPIRES_IN || '1d',
   },
+  passwordChange: {
+    secret: process.env.PASSWORD_CHANGE_SECRET || '',
+  },
 });

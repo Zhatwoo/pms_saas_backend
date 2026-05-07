@@ -1,174 +1,178 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
-  InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { Role } from '../../../common/enums';
 import { CreateCustomerDto } from '../dto/create-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
+import { ListCustomersDto } from '../dto/list-customers.dto';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 
 type CustomerRow = {
   id: string;
   full_name: string;
   branch_id: string | null;
-};
-
-type CustomerVisualRow = {
-  profile_photo: string | null;
-  id_photo: string | null;
-  id_back_photo: string | null;
-  created_at: string;
-};
-
-type TransactionVisualRow = {
-  profile_photo: string | null;
-  id_photo: string | null;
-  id_back_photo: string | null;
-  related_pawned_item_id: string | null;
-  transaction_date: string | null;
-  transaction_time: string | null;
+  created_at?: Date | string;
 };
 
 type CustomerMergeCandidate = {
   id: string;
   full_name: string;
   branch_id: string | null;
-  created_at: string;
+  created_at: Date;
 };
+
+type ProcessedCustomerLogTarget = {
+  id: string;
+  full_name: string;
+  branch_id: string | null;
+  branch_name?: string | null;
+};
+
+const CUSTOMER_SAFE_SELECT = {
+  id: true,
+  full_name: true,
+  contact_number: true,
+  email: true,
+  id_presented: true,
+  barangay: true,
+  city: true,
+  region: true,
+  branch_id: true,
+  created_at: true,
+} satisfies Prisma.customersSelect;
+
+const CUSTOMER_FULL_SELECT = {
+  id: true,
+  full_name: true,
+  address: true,
+  barangay: true,
+  city: true,
+  region: true,
+  contact_number: true,
+  email: true,
+  id_presented: true,
+  branch_id: true,
+  created_at: true,
+  updated_at: true,
+  branches: { select: { name: true } },
+} satisfies Prisma.customersSelect;
 
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
+    private readonly prisma: PrismaService,
     private readonly supabase: SupabaseService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private customerScopeWhere(
+    user: UserWithBranch,
+    branchId?: string,
+  ): Prisma.customersWhereInput {
+    const where: Prisma.customersWhereInput = { deleted_at: null };
+
+    if (user.role === Role.SUPER_ADMIN) {
+      if (branchId) {
+        where.branch_id = branchId;
+      }
+      return where;
+    }
+
+    where.branch_id = requireUserBranchId(user);
+    return where;
+  }
+
   private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
-    if (!storedUrl) {
-      return '';
-    }
+    if (!storedUrl) return '';
 
-    const publicPrefix = '/storage/v1/object/public/';
-    const signedPrefix = '/storage/v1/object/sign/';
-    const altPublicPrefix = 'storage/v1/object/public/';
-    const altSignedPrefix = 'storage/v1/object/sign/';
+    const prefixes = [
+      '/storage/v1/object/public/',
+      '/storage/v1/object/sign/',
+      'storage/v1/object/public/',
+      'storage/v1/object/sign/',
+    ];
 
-    if (!storedUrl.startsWith('http')) {
-
-      let storagePath = storedUrl;
-      if (storagePath.startsWith(publicPrefix)) {
-        storagePath = storagePath.slice(publicPrefix.length);
-      } else if (storagePath.startsWith(signedPrefix)) {
-        storagePath = storagePath.slice(signedPrefix.length);
-      } else if (storagePath.startsWith(altPublicPrefix)) {
-        storagePath = storagePath.slice(altPublicPrefix.length);
-      } else if (storagePath.startsWith(altSignedPrefix)) {
-        storagePath = storagePath.slice(altSignedPrefix.length);
-      } else {
-        storagePath = storagePath.replace(/^\/+/, '');
+    const toStoragePath = (value: string) => {
+      if (!value.startsWith('http')) {
+        const matched = prefixes.find((prefix) => value.startsWith(prefix));
+        return matched
+          ? value.slice(matched.length)
+          : value.replace(/^\/+/, '');
       }
 
-      const [bucketName, ...objectPathParts] = storagePath.split('/');
-      const objectPath = objectPathParts.join('/');
-
-      if (!bucketName || !objectPath) {
-        return storedUrl;
+      try {
+        const parsed = new URL(value);
+        const matched = prefixes
+          .filter((prefix) => prefix.startsWith('/'))
+          .find((prefix) => parsed.pathname.includes(prefix));
+        return matched ? parsed.pathname.split(matched)[1] : '';
+      } catch {
+        return '';
       }
+    };
 
-      const { data, error } = await this.supabase
-        .getClient()
-        .storage.from(bucketName)
-        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+    const storagePath = toStoragePath(storedUrl);
+    if (!storagePath) return storedUrl;
 
-      if (error || !data?.signedUrl) {
-        return storedUrl;
-      }
+    const [bucketName, ...objectPathParts] = storagePath.split('/');
+    const objectPath = objectPathParts.join('/');
+    if (!bucketName || !objectPath) return storedUrl;
 
-      return data.signedUrl;
-    }
+    const { data, error } = await this.supabase
+      .getClient()
+      .storage.from(bucketName)
+      .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
 
-    try {
-      const parsedUrl = new URL(storedUrl);
-      const storagePrefixes = ['/storage/v1/object/public/', '/storage/v1/object/sign/'];
-
-      const matchedPrefix = storagePrefixes.find((prefix) => parsedUrl.pathname.includes(prefix));
-      if (!matchedPrefix) {
-        return storedUrl;
-      }
-
-      const storagePath = parsedUrl.pathname.split(matchedPrefix)[1];
-      if (!storagePath) {
-        return storedUrl;
-      }
-
-      const [bucketName, ...objectPathParts] = storagePath.split('/');
-      const objectPath = objectPathParts.join('/');
-
-      if (!bucketName || !objectPath) {
-        return storedUrl;
-      }
-
-      const { data, error } = await this.supabase
-        .getClient()
-        .storage.from(bucketName)
-        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
-
-      if (error || !data?.signedUrl) {
-        return storedUrl;
-      }
-
-      return data.signedUrl;
-    } catch {
-      return storedUrl;
-    }
+    return error || !data?.signedUrl ? storedUrl : data.signedUrl;
   }
 
   private resolveMergeBranchId(user: UserWithBranch, branchId?: string) {
     if (user.role === Role.SUPER_ADMIN) {
       const normalizedBranchId = branchId?.trim() || '';
       if (!normalizedBranchId) {
-        throw new BadRequestException('branchId is required for customer merging');
+        throw new BadRequestException(
+          'branchId is required for customer merging',
+        );
       }
-
       return normalizedBranchId;
     }
 
     return requireUserBranchId(user);
   }
 
-  private async resolveCustomerNameGroup(user: UserWithBranch, customer: CustomerRow) {
-    const client = this.supabase.getClient();
-    let query = client.from('customers').select('id, full_name, branch_id');
-
-    if (user.role !== Role.SUPER_ADMIN) {
-      query = query.eq('branch_id', requireUserBranchId(user));
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+  private async resolveCustomerNameGroup(
+    user: UserWithBranch,
+    customer: CustomerRow,
+  ) {
+    const candidates = await this.prisma.customers.findMany({
+      where: this.customerScopeWhere(user),
+      select: { id: true, full_name: true, branch_id: true },
+    });
 
     const targetName = normalizeCustomerFullName(customer.full_name);
-    const matches = (data || []).filter((candidate: CustomerRow) =>
-      normalizeCustomerFullName(candidate.full_name) === targetName,
+    const matches = candidates.filter(
+      (candidate) =>
+        normalizeCustomerFullName(candidate.full_name) === targetName,
     );
 
-    const matchingIds = matches.map((candidate: CustomerRow) => candidate.id);
-    if (!matchingIds.includes(customer.id)) {
-      matchingIds.unshift(customer.id);
-    }
+    const matchingIds = matches.map((candidate) => candidate.id);
+    if (!matchingIds.includes(customer.id)) matchingIds.unshift(customer.id);
 
     const matchingBranches = new Set(
-      matches.map((candidate: CustomerRow) => candidate.branch_id).filter(Boolean),
+      matches.map((candidate) => candidate.branch_id).filter(Boolean),
     );
 
     return {
@@ -179,71 +183,74 @@ export class CustomersService {
   }
 
   private async resolveCustomerVisuals(customerIds: string[]) {
-    const client = this.supabase.getClient();
+    const pawnedItems = await this.prisma.pawned_items.findMany({
+      where: { customer_id: { in: customerIds } },
+      select: {
+        id: true,
+        profile_photo: true,
+        id_photo: true,
+        id_back_photo: true,
+        created_at: true,
+      },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+    });
 
-    const { data: pawnedItems, error: pawnedItemsError } = await client
-      .from('pawned_items')
-      .select('id, profile_photo, id_photo, id_back_photo, customer_id, created_at')
-      .in('customer_id', customerIds)
-      .order('created_at', { ascending: false })
-      .limit(50);
+    const pawnedItemIds = pawnedItems.map((row) => row.id);
+    const transactions =
+      pawnedItemIds.length > 0
+        ? await this.prisma.transactions.findMany({
+            where: { related_pawned_item_id: { in: pawnedItemIds } },
+            select: {
+              profile_photo: true,
+              id_photo: true,
+              id_back_photo: true,
+              related_pawned_item_id: true,
+              transaction_date: true,
+              transaction_time: true,
+            },
+            orderBy: [
+              { transaction_date: 'desc' },
+              { transaction_time: 'desc' },
+            ],
+            take: 50,
+          })
+        : [];
 
-    if (pawnedItemsError) {
-      throw new InternalServerErrorException(pawnedItemsError.message);
-    }
-
-    const matchingPawnedItemIds = (pawnedItems || [])
-      .map((row: { id?: string }) => row.id)
-      .filter((id): id is string => Boolean(id));
-
-    const transactions = matchingPawnedItemIds.length > 0
-      ? await (async () => {
-          const { data, error } = await client
-            .from('transactions')
-            .select('profile_photo, id_photo, id_back_photo, related_pawned_item_id, transaction_date, transaction_time')
-            .in('related_pawned_item_id', matchingPawnedItemIds)
-            .order('transaction_date', { ascending: false })
-            .order('transaction_time', { ascending: false })
-            .limit(50);
-
-          if (error) {
-            throw new InternalServerErrorException(error.message);
-          }
-
-          return data || [];
-        })()
-      : [];
-
-    const latestVisual = (pawnedItems || []).find((row: CustomerVisualRow) =>
+    const latestPawnedVisual = pawnedItems.find((row) =>
       Boolean(row.profile_photo || row.id_photo || row.id_back_photo),
-    ) as CustomerVisualRow | undefined;
-
-    const latestTransactionVisual = (transactions || []).find((row: TransactionVisualRow) =>
+    );
+    const latestTransactionVisual = transactions.find((row) =>
       Boolean(row.profile_photo || row.id_photo || row.id_back_photo),
-    ) as TransactionVisualRow | undefined;
+    );
+    const latestProfilePhoto =
+      transactions.find((row) => Boolean(row.profile_photo)) ??
+      pawnedItems.find((row) => Boolean(row.profile_photo));
+    const latestFrontPhoto =
+      transactions.find((row) => Boolean(row.id_photo)) ??
+      pawnedItems.find((row) => Boolean(row.id_photo));
+    const latestBackPhoto =
+      transactions.find((row) => Boolean(row.id_back_photo)) ??
+      pawnedItems.find((row) => Boolean(row.id_back_photo));
 
-    const latestPawnedVisual = (pawnedItems || []).find((row: CustomerVisualRow) =>
-      Boolean(row.profile_photo || row.id_photo || row.id_back_photo),
-    ) as CustomerVisualRow | undefined;
-
-    const latestProfilePhoto = latestTransactionVisual?.profile_photo
-      ? latestTransactionVisual
-      : (transactions || []).find((row: TransactionVisualRow) => Boolean(row.profile_photo))
-        ?? (pawnedItems || []).find((row: CustomerVisualRow) => Boolean(row.profile_photo));
-    const latestFrontPhoto = latestTransactionVisual?.id_photo
-      ? latestTransactionVisual
-      : (transactions || []).find((row: TransactionVisualRow) => Boolean(row.id_photo))
-        ?? (pawnedItems || []).find((row: CustomerVisualRow) => Boolean(row.id_photo));
-    const latestBackPhoto = latestTransactionVisual?.id_back_photo
-      ? latestTransactionVisual
-      : (transactions || []).find((row: TransactionVisualRow) => Boolean(row.id_back_photo))
-        ?? (pawnedItems || []).find((row: CustomerVisualRow) => Boolean(row.id_back_photo));
-
-    const [profilePhotoUrl, idFrontPhotoUrl, idBackPhotoUrl] = await Promise.all([
-      this.resolveStorageUrl(latestProfilePhoto?.profile_photo ?? latestTransactionVisual?.profile_photo ?? latestPawnedVisual?.profile_photo),
-      this.resolveStorageUrl(latestFrontPhoto?.id_photo ?? latestTransactionVisual?.id_photo ?? latestPawnedVisual?.id_photo),
-      this.resolveStorageUrl(latestBackPhoto?.id_back_photo ?? latestTransactionVisual?.id_back_photo ?? latestPawnedVisual?.id_back_photo),
-    ]);
+    const [profilePhotoUrl, idFrontPhotoUrl, idBackPhotoUrl] =
+      await Promise.all([
+        this.resolveStorageUrl(
+          latestProfilePhoto?.profile_photo ??
+            latestTransactionVisual?.profile_photo ??
+            latestPawnedVisual?.profile_photo,
+        ),
+        this.resolveStorageUrl(
+          latestFrontPhoto?.id_photo ??
+            latestTransactionVisual?.id_photo ??
+            latestPawnedVisual?.id_photo,
+        ),
+        this.resolveStorageUrl(
+          latestBackPhoto?.id_back_photo ??
+            latestTransactionVisual?.id_back_photo ??
+            latestPawnedVisual?.id_back_photo,
+        ),
+      ]);
 
     return {
       profilePhotoUrl: profilePhotoUrl || null,
@@ -253,108 +260,105 @@ export class CustomersService {
   }
 
   async create(user: UserWithBranch, dto: CreateCustomerDto) {
-    const client = this.supabase.getClient();
-    const payload =
+    const branchId =
       user.role === Role.SUPER_ADMIN
-        ? { ...dto }
-        : {
-            ...dto,
-            branch_id: requireUserBranchId(user),
-          };
+        ? dto.branch_id
+        : requireUserBranchId(user);
 
-    const { data, error } = await client
-      .from('customers')
-      .insert([payload])
-      .select()
-      .single();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    if (!branchId) {
+      throw new BadRequestException('branch_id is required');
     }
-    return data;
+
+    const payload: Prisma.customersUncheckedCreateInput = {
+      full_name: dto.full_name.trim(),
+      address: dto.address.trim(),
+      barangay: dto.barangay?.trim() || null,
+      city: dto.city?.trim() || null,
+      region: dto.region?.trim() || null,
+      contact_number: dto.contact_number?.trim() || null,
+      email: dto.email?.trim().toLowerCase() || null,
+      id_presented: dto.id_presented?.trim() || null,
+      branch_id: branchId,
+    };
+
+    return this.prisma.customers.create({
+      data: payload,
+      select:
+        user.role === Role.EMPLOYEE
+          ? CUSTOMER_SAFE_SELECT
+          : CUSTOMER_FULL_SELECT,
+    });
   }
 
-  async findAll(user: UserWithBranch, branchId?: string) {
-    const client = this.supabase.getClient();
-    let query = client
-      .from('customers')
-      .select('*')
-      .order('created_at', { ascending: false });
+  async findAll(
+    user: UserWithBranch,
+    query: ListCustomersDto = new ListCustomersDto(),
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const where: Prisma.customersWhereInput = this.customerScopeWhere(
+      user,
+      query.branchId,
+    );
 
-    if (user.role !== Role.SUPER_ADMIN) {
-      query = query.eq('branch_id', requireUserBranchId(user));
-    } else if (branchId) {
-      query = query.eq('branch_id', branchId);
+    if (query.search?.trim()) {
+      where.full_name = { contains: query.search.trim(), mode: 'insensitive' };
     }
 
-    const { data, error } = await query;
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.customers.findMany({
+        where,
+        select:
+          user.role === Role.EMPLOYEE
+            ? CUSTOMER_SAFE_SELECT
+            : CUSTOMER_FULL_SELECT,
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.customers.count({ where }),
+    ]);
 
-    const rows = (data || []) as CustomerRow[];
-    const uniqueCustomers = new Map<string, CustomerRow & { matching_customer_count: number }>();
-
+    const uniqueCustomers = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
+      const branch = (row as { branches?: { name?: string | null } | null })
+        .branches;
       const normalizedName = normalizeCustomerFullName(row.full_name);
       const existing = uniqueCustomers.get(normalizedName);
-
       if (!existing) {
         uniqueCustomers.set(normalizedName, {
-          ...(row as CustomerRow),
+          ...row,
+          branch_name: branch?.name ?? null,
+          branches: undefined,
           matching_customer_count: 1,
         });
         continue;
       }
-
-      existing.matching_customer_count += 1;
-    }
-
-    return Array.from(uniqueCustomers.values());
-  }
-
-  async findOne(user: UserWithBranch, id: string) {
-    const client = this.supabase.getClient();
-    let query = client.from('customers').select('*').eq('id', id);
-
-    if (user.role !== Role.SUPER_ADMIN) {
-      query = query.eq('branch_id', requireUserBranchId(user));
-    }
-
-    const { data, error } = await query.single();
-    if (error) {
-      if (
-        error.code === 'PGRST116' ||
-        error.code === '22P02' ||
-        error.message?.toLowerCase().includes('invalid input syntax')
-      ) {
-        return null;
-      }
-
-      throw new InternalServerErrorException(error.message);
-    }
-
-    const group = await this.resolveCustomerNameGroup(user, data as CustomerRow);
-    const visuals = await this.resolveCustomerVisuals(group.matchingIds);
-    let branchName: string | null = null;
-
-    if (data.branch_id) {
-      const { data: branch, error: branchError } = await client
-        .from('branches')
-        .select('name')
-        .eq('id', data.branch_id)
-        .maybeSingle<{ name: string }>();
-
-      if (branchError) {
-        throw new InternalServerErrorException(branchError.message);
-      }
-
-      branchName = branch?.name ?? null;
+      existing.matching_customer_count =
+        Number(existing.matching_customer_count) + 1;
     }
 
     return {
-      ...data,
-      branch_name: branchName,
+      data: Array.from(uniqueCustomers.values()),
+      meta: { page, limit, total },
+    };
+  }
+
+  async findOne(user: UserWithBranch, id: string) {
+    const customer = await this.prisma.customers.findFirst({
+      where: { id, ...this.customerScopeWhere(user) },
+      select: CUSTOMER_FULL_SELECT,
+    });
+
+    if (!customer) return null;
+
+    const group = await this.resolveCustomerNameGroup(user, customer);
+    const visuals = await this.resolveCustomerVisuals(group.matchingIds);
+
+    return {
+      ...customer,
+      branches: undefined,
+      branch_name: customer.branches?.name ?? null,
       profile_photo_url: visuals.profilePhotoUrl,
       id_front_photo_url: visuals.idFrontPhotoUrl,
       id_back_photo_url: visuals.idBackPhotoUrl,
@@ -365,48 +369,29 @@ export class CustomersService {
   }
 
   async findCustomerActivityLogs(user: UserWithBranch, customerId: string) {
-    const client = this.supabase.getClient();
     const customer = await this.findOne(user, customerId);
+    if (!customer) throw new NotFoundException('Customer not found');
 
-    if (!customer) {
-      throw new NotFoundException('Customer not found');
-    }
+    const customerGroup = await this.resolveCustomerNameGroup(user, customer);
+    const logs = await this.prisma.activity_logs.findMany({
+      where:
+        user.role === Role.SUPER_ADMIN
+          ? {}
+          : { branch_id: requireUserBranchId(user) },
+      select: {
+        id: true,
+        action: true,
+        details: true,
+        created_at: true,
+        user_id: true,
+        users: { select: { full_name: true, email: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
 
-    const customerGroup = await this.resolveCustomerNameGroup(user, customer as CustomerRow);
-
-    let query = client
-      .from('activity_logs')
-      .select('id, action, details, created_at, user_id, users(full_name, email)')
-      .order('created_at', { ascending: false });
-
-    if (user.role !== Role.SUPER_ADMIN) {
-      query = query.eq('branch_id', requireUserBranchId(user));
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    const customerLogs = (data || [])
-      .map((log: any) => {
-        const rawDetails = typeof log.details === 'string' ? log.details : (log.details ? JSON.stringify(log.details) : '');
-
-        let parsedDetails: Record<string, unknown> = {};
-        if (rawDetails) {
-          try {
-            parsedDetails = JSON.parse(rawDetails) as Record<string, unknown>;
-          } catch {
-            // If details is already an object (jsonb), use it directly
-            if (log.details && typeof log.details === 'object') {
-              parsedDetails = log.details as Record<string, unknown>;
-            }
-          }
-        } else if (log.details && typeof log.details === 'object') {
-          parsedDetails = log.details as Record<string, unknown>;
-        }
-
+    return logs
+      .map((log) => {
+        const parsedDetails = this.parseLogDetails(log.details);
         const detailsCustomerId =
           typeof parsedDetails.customerId === 'string'
             ? parsedDetails.customerId
@@ -428,8 +413,6 @@ export class CustomersService {
         };
       })
       .filter(Boolean);
-
-    return customerLogs;
   }
 
   async addCustomerNote(
@@ -438,385 +421,194 @@ export class CustomersService {
     title?: string,
     note?: string,
   ) {
-    const client = this.supabase.getClient();
     const customer = await this.findOne(user, customerId);
-
-    if (!customer) {
-      throw new NotFoundException('Customer not found');
-    }
+    if (!customer) throw new NotFoundException('Customer not found');
 
     const trimmedNote = note?.trim() ?? '';
-    if (!trimmedNote) {
-      throw new BadRequestException('Note is required');
-    }
+    if (!trimmedNote) throw new BadRequestException('Note is required');
 
-    const trimmedTitle = title?.trim() || 'Manual Note';
-
-    const { error } = await client.from('activity_logs').insert({
-      user_id: user.id,
-      branch_id: customer.branch_id || null,
-      action: 'CUSTOMER_NOTE_ADDED',
-      details: JSON.stringify({
-        customerId,
-        title: trimmedTitle,
-        note: trimmedNote,
-      }),
+    await this.prisma.activity_logs.create({
+      data: {
+        user_id: user.id,
+        branch_id: customer.branch_id || null,
+        action: 'CUSTOMER_NOTE_ADDED',
+        details: JSON.stringify({
+          customerId,
+          title: title?.trim() || 'Manual Note',
+          note: trimmedNote,
+        }),
+      },
     });
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
 
     return { message: 'Note saved successfully' };
   }
 
-  // Update customer information (admin / super admin only)
-  async update(user: AuthenticatedUserProfile, id: string, updateDto: UpdateCustomerDto) {
-    const client = this.supabase.getClient();
-    // Ensure the customer exists and is within the allowed branch scope
+  async update(
+    user: AuthenticatedUserProfile,
+    id: string,
+    updateDto: UpdateCustomerDto,
+  ) {
     const existing = await this.findOne(user, id);
-    if (!existing) {
-      throw new NotFoundException('Customer not found');
+    if (!existing) throw new NotFoundException('Customer not found');
+
+    if (user.role === Role.EMPLOYEE) {
+      throw new ForbiddenException('Employees must request customer edits');
     }
 
-    // Capture old field values for diff
-    const trackedFields = ['full_name', 'contact_number', 'email', 'address', 'barangay', 'city', 'region'] as const;
-    const oldValues: Record<string, string | null> = {};
-    for (const field of trackedFields) {
-      oldValues[field] = (existing as Record<string, unknown>)[field] as string | null ?? null;
-    }
-
-    // Whitelist only actual customers table columns so DTO-only fields never reach Supabase.
-    const requestingEmployeeId = updateDto.requestingEmployeeId?.trim() || undefined;
+    const requestingEmployeeId =
+      updateDto.requestingEmployeeId?.trim() || undefined;
     const logId = updateDto.logId?.trim() || undefined;
-    const supabasePayload = Object.fromEntries(
+    const allowedPayload = Object.fromEntries(
       Object.entries({
-        full_name: updateDto.full_name,
-        contact_number: updateDto.contact_number,
-        email: updateDto.email,
-        address: updateDto.address,
-        barangay: updateDto.barangay,
-        city: updateDto.city,
-        region: updateDto.region,
-        id_presented: updateDto.id_presented,
+        full_name: updateDto.full_name?.trim(),
+        contact_number: updateDto.contact_number?.trim(),
+        email: updateDto.email?.trim().toLowerCase(),
+        address: updateDto.address?.trim(),
+        barangay: updateDto.barangay?.trim(),
+        city: updateDto.city?.trim(),
+        region: updateDto.region?.trim(),
+        id_presented: updateDto.id_presented?.trim(),
       }).filter(([, value]) => value !== undefined),
-    ) as Record<string, string>;
+    ) as Prisma.customersUncheckedUpdateInput;
 
-    const { error } = await client
-      .from('customers')
-      .update(supabasePayload)
-      .eq('id', id);
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    await this.prisma.customers.update({
+      where: { id },
+      data: allowedPayload,
+    });
 
-    // Compute changedFields diff
-    const changedFields: Record<string, { from: string | null; to: string | null }> = {};
+    const trackedFields = [
+      'full_name',
+      'contact_number',
+      'email',
+      'address',
+      'barangay',
+      'city',
+      'region',
+      'id_presented',
+    ] as const;
+    const changedFields: Record<
+      string,
+      { from: string | null; to: string | null }
+    > = {};
+
     for (const field of trackedFields) {
-      const newVal = supabasePayload[field];
-      if (newVal === undefined || newVal === null) continue;
-      const oldVal = oldValues[field];
+      const newVal = allowedPayload[field] as string | undefined;
+      if (newVal === undefined) continue;
+      const oldVal = (existing as Record<string, unknown>)[field] as
+        | string
+        | null;
       if (String(newVal) !== String(oldVal ?? '')) {
-        changedFields[field] = { from: oldVal, to: newVal as string };
+        changedFields[field] = { from: oldVal ?? null, to: newVal };
       }
     }
 
-    // Resolve branchName for the admin
-    let branchName: string = user.branchName ?? 'Unknown Branch';
-    if (user.branchId) {
-      const { data: branch } = await client
-        .from('branches')
-        .select('name')
-        .eq('id', user.branchId)
-        .maybeSingle<{ name: string }>();
-      if (branch?.name) {
-        branchName = branch.name;
-      }
-    }
+    await this.writeCustomerEditProcessedLog(
+      user,
+      existing,
+      changedFields,
+      logId,
+    );
 
-    const actorLabel = `${user.fullName ?? user.email} (Admin)`;
-
-    // Determine the reviewed field and old/new values from changedFields
-    const reviewedField = Object.keys(changedFields)[0] ?? null;
-    const oldValue = reviewedField ? (changedFields[reviewedField]?.from ?? null) : null;
-    const newValue = reviewedField ? (changedFields[reviewedField]?.to ?? null) : null;
-
-    if (logId) {
-      // Try to update the existing CUSTOMER_EDIT_REQUESTED row in-place
-      try {
-        const { data: existingLog } = await client
-          .from('activity_logs')
-          .select('id, action, details')
-          .eq('id', logId)
-          .maybeSingle();
-
-        if (existingLog && existingLog.action === 'CUSTOMER_EDIT_REQUESTED') {
-          // Parse original details
-          let originalDetails: Record<string, unknown> = {};
-          try {
-            const raw = typeof existingLog.details === 'string'
-              ? existingLog.details
-              : JSON.stringify(existingLog.details ?? {});
-            originalDetails = JSON.parse(raw) as Record<string, unknown>;
-          } catch { /* keep empty */ }
-
-          const mergedDetails = {
-            ...originalDetails,
-            processedAt: new Date().toISOString(),
-            adminName: user.fullName ?? user.email,
-            adminId: user.id,
-            reviewedField,
-            oldValue,
-            newValue,
-            actorLabel,
-            branchName,
-          };
-
-          const { error: updateLogError } = await client
-            .from('activity_logs')
-            .update({
-              action: 'CUSTOMER_EDIT_PROCESSED',
-              details: JSON.stringify(mergedDetails),
-            })
-            .eq('id', logId);
-
-          if (updateLogError) {
-            console.error('[CustomersService] Failed to update activity log in-place, falling back to insert:', updateLogError);
-            // Fall through to insert below
-            await client.from('activity_logs').insert({
-              user_id: user.id,
-              branch_id: user.branchId || (existing as Record<string, unknown>).branch_id || null,
-              action: 'CUSTOMER_EDIT_PROCESSED',
-              details: JSON.stringify({
-                customerId: id,
-                customerName: existing.full_name,
-                changedFields,
-                actorName: user.fullName ?? user.email,
-                actorRole: 'Admin',
-                actorLabel,
-                branchName,
-                reviewedField,
-                oldValue,
-                newValue,
-              }),
-            });
-          }
-        } else {
-          // Row not found or unexpected action — fall back to insert
-          console.warn('[CustomersService] logId row not found or unexpected action, falling back to insert');
-          await client.from('activity_logs').insert({
-            user_id: user.id,
-            branch_id: user.branchId || (existing as Record<string, unknown>).branch_id || null,
-            action: 'CUSTOMER_EDIT_PROCESSED',
-            details: JSON.stringify({
-              customerId: id,
-              customerName: existing.full_name,
-              changedFields,
-              actorName: user.fullName ?? user.email,
-              actorRole: 'Admin',
-              actorLabel,
-              branchName,
-              reviewedField,
-              oldValue,
-              newValue,
-            }),
-          });
-        }
-      } catch (logErr) {
-        console.error('[CustomersService] Failed to write CUSTOMER_EDIT_PROCESSED log:', logErr);
-      }
-    } else {
-      // No logId — existing behavior: insert new row
-      try {
-        await client.from('activity_logs').insert({
-          user_id: user.id,
-          branch_id: user.branchId || (existing as Record<string, unknown>).branch_id || null,
-          action: 'CUSTOMER_EDIT_PROCESSED',
-          details: JSON.stringify({
-            customerId: id,
-            customerName: existing.full_name,
-            changedFields,
-            actorName: user.fullName ?? user.email,
-            actorRole: 'Admin',
-            actorLabel,
-            branchName,
-          }),
-        });
-      } catch (logErr) {
-        console.error('[CustomersService] Failed to write CUSTOMER_EDIT_PROCESSED log:', logErr);
-      }
-    }
-
-    // Notify the originating employee if present (silent on failure)
     if (requestingEmployeeId) {
-      try {
-        const fieldLabelMap: Record<string, string> = {
-          full_name: 'Full Name',
-          contact_number: 'Contact Number',
-          address: 'Address',
-          email: 'Email Address',
-          barangay: 'Barangay',
-          city: 'City',
-          region: 'Region',
-          id_presented: 'ID Presented',
-        };
-        const fieldLabel = reviewedField ? (fieldLabelMap[reviewedField] ?? reviewedField) : 'profile';
-        const notifTitle = logId ? 'Edit Approved' : 'Edit Request Processed';
-        const notifSubtitle = logId && oldValue && newValue
-          ? `${actorLabel} updated ${fieldLabel}: ${oldValue} → ${newValue}`
-          : `${actorLabel} updated ${existing.full_name}'s profile`;
-
-        await this.notificationsService.create({
-          title: notifTitle,
-          subtitle: notifSubtitle,
-          category: 'Requests',
-          user_id: requestingEmployeeId,
-          customer_id: id,
-          ...(logId ? { log_id: logId } : {}),
-        });
-      } catch (notifErr) {
-        console.error('[CustomersService] Failed to create employee notification:', notifErr);
-      }
+      await this.notifyEmployeeOfProcessedEdit(
+        requestingEmployeeId,
+        id,
+        existing.full_name,
+        changedFields,
+        Boolean(logId),
+      );
     }
 
     return { message: 'Customer updated successfully' };
   }
 
-  // Employee request to edit customer details (adds a note for review)
-  async requestEdit(user: AuthenticatedUserProfile, id: string, notes: string, field?: string, mode?: string) {
-    const client = this.supabase.getClient();
+  async requestEdit(
+    user: AuthenticatedUserProfile,
+    id: string,
+    notes: string,
+    field?: string,
+    mode?: string,
+  ) {
     const customer = await this.findOne(user, id);
-    if (!customer) {
-      throw new NotFoundException('Customer not found');
-    }
+    if (!customer) throw new NotFoundException('Customer not found');
+
     const trimmed = notes?.trim();
-    if (!trimmed) {
+    if (!trimmed)
       throw new BadRequestException('Edit request notes are required');
-    }
 
-    // Resolve branch name
-    let branchName: string = user.branchName ?? 'Unknown Branch';
-    if (user.branchId) {
-      const { data: branch } = await client
-        .from('branches')
-        .select('name')
-        .eq('id', user.branchId)
-        .maybeSingle<{ name: string }>();
-      if (branch?.name) {
-        branchName = branch.name;
-      }
-    }
-
+    const branchName = user.branchName ?? 'Unknown Branch';
     const actorLabel = `${user.fullName ?? user.email} (Employee)`;
 
-    const { data: requestLog, error } = await client.from('activity_logs').insert({
-      user_id: user.id,
-      branch_id: customer.branch_id || null,
-      action: 'CUSTOMER_EDIT_REQUESTED',
-      details: JSON.stringify({
-        customerId: id,
-        customerName: customer.full_name,
-        notes: trimmed,
-        field: field?.trim() || null,
-        mode: mode?.trim() || 'freeform',
-        branchName,
-        actorLabel,
-      }),
-    }).select('id').single<{ id: string }>();
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    const requestLog = await this.prisma.activity_logs.create({
+      data: {
+        user_id: user.id,
+        branch_id: customer.branch_id || null,
+        action: 'CUSTOMER_EDIT_REQUESTED',
+        details: JSON.stringify({
+          customerId: id,
+          customerName: customer.full_name,
+          notes: trimmed,
+          field: field?.trim() || null,
+          mode: mode?.trim() || 'freeform',
+          branchName,
+          actorLabel,
+        }),
+      },
+      select: { id: true },
+    });
 
-    // Find admin users in this branch and notify each one directly.
-    // Do not fall back to a branch broadcast so employees never receive these alerts.
-    try {
-      const branchId = user.branchId || customer.branch_id;
-      if (branchId) {
-        const { data: admins } = await client
-          .from('users')
-          .select('id')
-          .eq('branch_id', branchId)
-          .eq('role', 'admin');
+    const branchId = user.branchId || customer.branch_id;
+    if (branchId) {
+      const admins = await this.prisma.users.findMany({
+        where: { branch_id: branchId, role: 'admin', account_status: 'active' },
+        select: { id: true },
+      });
 
-        const adminUsers = (admins || []) as Array<{ id: string }>;
-
-        if (adminUsers.length > 0) {
-          await Promise.all(
-            adminUsers.map((admin) =>
-              this.notificationsService.create({
-                title: 'Customer Edit Request',
-                subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
-                category: 'Requests',
-                user_id: admin.id,
-                customer_id: id,
-                ...(requestLog?.id ? { log_id: requestLog.id } : {}),
-              }),
-            ),
-          );
-        }
-      }
-    } catch (notifErr) {
-      console.error('[CustomersService] Failed to create edit request notification:', notifErr);
+      await Promise.all(
+        admins.map((admin) =>
+          this.notificationsService.create({
+            title: 'Customer Edit Request',
+            subtitle: `${actorLabel} requested an edit for ${customer.full_name}`,
+            category: 'Requests',
+            user_id: admin.id,
+            customer_id: id,
+            log_id: requestLog.id,
+          }),
+        ),
+      );
     }
 
     return { message: 'Edit request submitted successfully' };
   }
 
-  async cancelRequestEdit(user: AuthenticatedUserProfile, id: string, logId: string) {
-    const client = this.supabase.getClient();
+  async cancelRequestEdit(
+    user: AuthenticatedUserProfile,
+    id: string,
+    logId: string,
+  ) {
     const customer = await this.findOne(user, id);
-    if (!customer) {
-      throw new NotFoundException('Customer not found');
-    }
+    if (!customer) throw new NotFoundException('Customer not found');
 
-    const { data: log, error: logError } = await client
-      .from('activity_logs')
-      .select('id, user_id, action, details, branch_id')
-      .eq('id', logId)
-      .maybeSingle();
+    const log = await this.prisma.activity_logs.findFirst({
+      where: {
+        id: logId,
+        user_id: user.id,
+        action: 'CUSTOMER_EDIT_REQUESTED',
+        ...(user.role === Role.SUPER_ADMIN
+          ? {}
+          : { branch_id: requireUserBranchId(user) }),
+      },
+      select: { id: true },
+    });
 
-    if (logError) {
-      throw new InternalServerErrorException(logError.message);
-    }
+    if (!log) throw new NotFoundException('Edit request not found');
 
-    if (!log || log.action !== 'CUSTOMER_EDIT_REQUESTED' || log.user_id !== user.id) {
-      throw new NotFoundException('Edit request not found');
-    }
-
-    let parsedDetails: Record<string, unknown> = {};
-    try {
-      const rawDetails = typeof log.details === 'string'
-        ? log.details
-        : JSON.stringify(log.details ?? {});
-      parsedDetails = JSON.parse(rawDetails) as Record<string, unknown>;
-    } catch {
-      parsedDetails = {};
-    }
-
-    const requestCustomerName = typeof parsedDetails.customerName === 'string'
-      ? parsedDetails.customerName
-      : customer.full_name;
-    const actorLabel = typeof parsedDetails.actorLabel === 'string'
-      ? parsedDetails.actorLabel
-      : `${user.fullName ?? user.email} (Employee)`;
-    const { error: notificationError } = await client
-      .from('notifications')
-      .delete()
-      .eq('category', 'Requests')
-      .eq('log_id', logId);
-
-    if (notificationError) {
-      throw new InternalServerErrorException(notificationError.message);
-    }
-
-    const { error: deleteError } = await client
-      .from('activity_logs')
-      .delete()
-      .eq('id', logId);
-
-    if (deleteError) {
-      throw new InternalServerErrorException(deleteError.message);
-    }
+    await this.prisma.$transaction([
+      this.prisma.notifications.deleteMany({
+        where: { category: 'Requests', log_id: logId },
+      }),
+      this.prisma.activity_logs.delete({ where: { id: logId } }),
+    ]);
 
     return { message: 'Edit request canceled successfully' };
   }
@@ -825,27 +617,26 @@ export class CustomersService {
     user: UserWithBranch & { id: string },
     branchId?: string,
   ) {
-    const client = this.supabase.getClient();
     const targetBranchId = this.resolveMergeBranchId(user, branchId);
-
-    const { data: customers, error: customersError } = await client
-      .from('customers')
-      .select('id, full_name, branch_id, created_at')
-      .eq('branch_id', targetBranchId)
-      .order('created_at', { ascending: true });
-
-    if (customersError) {
-      throw new InternalServerErrorException(customersError.message);
-    }
+    const customers = await this.prisma.customers.findMany({
+      where: { branch_id: targetBranchId, deleted_at: null },
+      select: { id: true, full_name: true, branch_id: true, created_at: true },
+      orderBy: { created_at: 'asc' },
+    });
 
     const groupedCustomers = new Map<string, CustomerMergeCandidate[]>();
-
-    for (const customer of (customers || []) as CustomerMergeCandidate[]) {
+    for (const customer of customers) {
       const normalizedName = normalizeCustomerFullName(customer.full_name);
       const group = groupedCustomers.get(normalizedName) || [];
       group.push(customer);
       groupedCustomers.set(normalizedName, group);
     }
+
+    const activityLogs = await this.prisma.activity_logs.findMany({
+      where: { branch_id: targetBranchId },
+      select: { id: true, details: true },
+      orderBy: { created_at: 'asc' },
+    });
 
     const mergeSummaries: Array<{
       canonicalCustomerId: string;
@@ -856,55 +647,21 @@ export class CustomersService {
       activityLogsUpdated: number;
     }> = [];
 
-    const { data: activityLogs, error: activityLogsError } = await client
-      .from('activity_logs')
-      .select('id, details')
-      .eq('branch_id', targetBranchId)
-      .order('created_at', { ascending: true });
-
-    if (activityLogsError) {
-      throw new InternalServerErrorException(activityLogsError.message);
-    }
-
     for (const [normalizedName, group] of groupedCustomers.entries()) {
-      if (group.length <= 1) {
-        continue;
-      }
+      if (group.length <= 1) continue;
 
       const canonicalCustomer = group[0];
-      const duplicateCustomers = group.slice(1);
-      const duplicateIds = duplicateCustomers.map((customer) => customer.id);
+      const duplicateIds = group.slice(1).map((customer) => customer.id);
       const duplicateIdSet = new Set(duplicateIds);
 
-      const { data: pawnedRows, error: pawnedError } = await client
-        .from('pawned_items')
-        .update({ customer_id: canonicalCustomer.id })
-        .in('customer_id', duplicateIds)
-        .select('id');
-
-      if (pawnedError) {
-        throw new InternalServerErrorException(pawnedError.message);
-      }
+      const pawnedUpdate = await this.prisma.pawned_items.updateMany({
+        where: { customer_id: { in: duplicateIds } },
+        data: { customer_id: canonicalCustomer.id },
+      });
 
       let activityLogsUpdated = 0;
-
-      for (const log of (activityLogs || []) as Array<{ id: string; details: string | null }>) {
-        const rawDetails = typeof log.details === 'string' ? log.details : '';
-        if (!rawDetails) {
-          continue;
-        }
-
-        let parsedDetails: Record<string, unknown> | null = null;
-        try {
-          parsedDetails = JSON.parse(rawDetails) as Record<string, unknown>;
-        } catch {
-          parsedDetails = null;
-        }
-
-        if (!parsedDetails) {
-          continue;
-        }
-
+      for (const log of activityLogs) {
+        const parsedDetails = this.parseLogDetails(log.details);
         const detailsCustomerId =
           typeof parsedDetails.customerId === 'string'
             ? parsedDetails.customerId
@@ -912,57 +669,49 @@ export class CustomersService {
               ? parsedDetails.customer_id
               : null;
 
-        if (!detailsCustomerId || !duplicateIdSet.has(detailsCustomerId)) {
+        if (!detailsCustomerId || !duplicateIdSet.has(detailsCustomerId))
           continue;
-        }
 
-        const nextDetails = {
-          ...parsedDetails,
-          customerId: canonicalCustomer.id,
-          customer_id: canonicalCustomer.id,
-        };
-
-        const { error: updateError } = await client
-          .from('activity_logs')
-          .update({ details: JSON.stringify(nextDetails) })
-          .eq('id', log.id);
-
-        if (updateError) {
-          throw new InternalServerErrorException(updateError.message);
-        }
-
+        await this.prisma.activity_logs.update({
+          where: { id: log.id },
+          data: {
+            details: JSON.stringify({
+              ...parsedDetails,
+              customerId: canonicalCustomer.id,
+              customer_id: canonicalCustomer.id,
+            }),
+          },
+        });
         activityLogsUpdated += 1;
       }
 
-      const { error: deleteError } = await client
-        .from('customers')
-        .delete()
-        .in('id', duplicateIds);
-
-      if (deleteError) {
-        throw new InternalServerErrorException(deleteError.message);
-      }
+      await this.prisma.customers.updateMany({
+        where: { id: { in: duplicateIds }, branch_id: targetBranchId },
+        data: { deleted_at: new Date() },
+      });
 
       mergeSummaries.push({
         canonicalCustomerId: canonicalCustomer.id,
         canonicalCustomerName: canonicalCustomer.full_name,
         mergedCustomerIds: duplicateIds,
         mergedCount: duplicateIds.length,
-        pawnedItemsReassigned: (pawnedRows || []).length,
+        pawnedItemsReassigned: pawnedUpdate.count,
         activityLogsUpdated,
       });
 
-      await client.from('activity_logs').insert({
-        user_id: user.id,
-        branch_id: targetBranchId,
-        action: 'CUSTOMER_DUPLICATES_MERGED',
-        details: JSON.stringify({
-          normalizedName,
-          canonicalCustomerId: canonicalCustomer.id,
-          canonicalCustomerName: canonicalCustomer.full_name,
-          mergedCustomerIds: duplicateIds,
-          mergedCount: duplicateIds.length,
-        }),
+      await this.prisma.activity_logs.create({
+        data: {
+          user_id: user.id,
+          branch_id: targetBranchId,
+          action: 'CUSTOMER_DUPLICATES_MERGED',
+          details: JSON.stringify({
+            normalizedName,
+            canonicalCustomerId: canonicalCustomer.id,
+            canonicalCustomerName: canonicalCustomer.full_name,
+            mergedCustomerIds: duplicateIds,
+            mergedCount: duplicateIds.length,
+          }),
+        },
       });
     }
 
@@ -971,5 +720,105 @@ export class CustomersService {
       mergedGroups: mergeSummaries.length,
       mergeSummaries,
     };
+  }
+
+  private parseLogDetails(details: string | null): Record<string, unknown> {
+    if (!details) return {};
+    try {
+      return JSON.parse(details) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  private async writeCustomerEditProcessedLog(
+    user: AuthenticatedUserProfile,
+    customer: ProcessedCustomerLogTarget,
+    changedFields: Record<string, { from: string | null; to: string | null }>,
+    logId?: string,
+  ) {
+    const actorLabel = `${user.fullName ?? user.email} (Admin)`;
+    const reviewedField = Object.keys(changedFields)[0] ?? null;
+    const details = {
+      customerId: customer.id,
+      customerName: customer.full_name,
+      changedFields,
+      actorName: user.fullName ?? user.email,
+      actorRole: 'Admin',
+      actorLabel,
+      branchName: user.branchName ?? customer.branch_name ?? 'Unknown Branch',
+      reviewedField,
+      oldValue: reviewedField
+        ? (changedFields[reviewedField]?.from ?? null)
+        : null,
+      newValue: reviewedField
+        ? (changedFields[reviewedField]?.to ?? null)
+        : null,
+      processedAt: new Date().toISOString(),
+      adminId: user.id,
+    };
+
+    try {
+      if (logId) {
+        const updated = await this.prisma.activity_logs.updateMany({
+          where: { id: logId, action: 'CUSTOMER_EDIT_REQUESTED' },
+          data: {
+            action: 'CUSTOMER_EDIT_PROCESSED',
+            details: JSON.stringify(details),
+          },
+        });
+        if (updated.count > 0) return;
+      }
+
+      await this.prisma.activity_logs.create({
+        data: {
+          user_id: user.id,
+          branch_id: user.branchId || customer.branch_id || null,
+          action: 'CUSTOMER_EDIT_PROCESSED',
+          details: JSON.stringify(details),
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        'Failed to write CUSTOMER_EDIT_PROCESSED log',
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  private async notifyEmployeeOfProcessedEdit(
+    employeeId: string,
+    customerId: string,
+    customerName: string,
+    changedFields: Record<string, { from: string | null; to: string | null }>,
+    hasLogId: boolean,
+  ) {
+    try {
+      const reviewedField = Object.keys(changedFields)[0] ?? 'profile';
+      const fieldLabelMap: Record<string, string> = {
+        full_name: 'Full Name',
+        contact_number: 'Contact Number',
+        address: 'Address',
+        email: 'Email Address',
+        barangay: 'Barangay',
+        city: 'City',
+        region: 'Region',
+        id_presented: 'ID Presented',
+      };
+
+      await this.notificationsService.create({
+        title: hasLogId ? 'Edit Approved' : 'Edit Request Processed',
+        subtitle: `Customer ${fieldLabelMap[reviewedField] ?? reviewedField} was updated for ${customerName}`,
+        category: 'Requests',
+        user_id: employeeId,
+        customer_id: customerId,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to create employee notification: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }

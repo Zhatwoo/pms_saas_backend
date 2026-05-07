@@ -38,7 +38,14 @@ export class ActivityLogsService {
     }
   }
 
-  async getLogs(branchId?: string, role?: string) {
+  async getLogs(
+    branchId?: string,
+    role?: string,
+    startDate?: string,
+    endDate?: string,
+    action?: string,
+    pawnedItemId?: string,
+  ) {
     const client = this.supabaseService.getClient();
     let query = client
       .from('activity_logs')
@@ -66,6 +73,27 @@ export class ActivityLogsService {
     } else if (branchId) {
       // Super admin filtering by branch
       query = query.eq('branch_id', branchId);
+    }
+
+    if (startDate) {
+      // Use ISO format to ensure correct comparison
+      query = query.gte('created_at', `${startDate}T00:00:00.000Z`);
+    }
+
+    if (endDate) {
+      query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
+    }
+
+    if (action) {
+      if (action.includes(',')) {
+        query = query.in('action', action.split(','));
+      } else {
+        query = query.eq('action', action);
+      }
+    }
+
+    if (pawnedItemId) {
+      query = query.ilike('details', `%${pawnedItemId}%`);
     }
 
     const { data, error } = await query;
