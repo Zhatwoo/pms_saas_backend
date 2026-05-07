@@ -68,15 +68,6 @@ export class AuthController {
   }
 
   @Public()
-  @Get('config/public')
-  getPublicConfig() {
-    return {
-      supabaseUrl: process.env.SUPABASE_URL,
-      supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
-    };
-  }
-
-  @Public()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')
   register(@Body() registerDto: RegisterDto) {
@@ -105,8 +96,17 @@ export class AuthController {
   @Public()
   @Post('logout')
   logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie(ACCESS_TOKEN_COOKIE, { path: '/' });
-    res.clearCookie(WAS_LOGGED_IN_COOKIE, { path: '/' });
+    res.clearCookie(ACCESS_TOKEN_COOKIE, {
+      path: '/',
+      httpOnly: true,
+      secure: isProduction(),
+      sameSite: 'lax',
+    });
+    res.clearCookie(WAS_LOGGED_IN_COOKIE, {
+      path: '/',
+      secure: isProduction(),
+      sameSite: 'lax',
+    });
     return { success: true };
   }
 
