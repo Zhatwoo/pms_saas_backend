@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { Role } from '../../../common/enums';
@@ -39,6 +40,7 @@ export class UsersService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private isUuidParam(value: string): boolean {
@@ -85,7 +87,7 @@ export class UsersService {
       id: row.id,
       authId: row.auth_id,
       email: row.email,
-      fullName: row.full_name,
+      fullName: this.encryption.decryptUserFullName(row.full_name),
       role: this.normalizeStoredRole(row.role ?? ''),
       branchId: row.branch_id,
       branchName: row.branches?.name ?? null,
@@ -184,14 +186,14 @@ export class UsersService {
         create: {
           auth_id: authId,
           email,
-          full_name: fullName,
+          full_name: this.encryption.encryptUserFullName(fullName),
           role: normalizedRole,
           branch_id: effectiveBranchId,
           account_status: 'active',
         },
         update: {
           email,
-          full_name: fullName,
+          full_name: this.encryption.encryptUserFullName(fullName),
           role: normalizedRole,
           branch_id: effectiveBranchId,
           account_status: 'active',
@@ -282,7 +284,7 @@ export class UsersService {
     if (dto.fullName !== undefined) {
       const trimmed = dto.fullName.trim();
       if (trimmed) {
-        payload.full_name = trimmed;
+        payload.full_name = this.encryption.encryptUserFullName(trimmed);
         await this.supabaseService.getClient().auth.admin.updateUserById(
           existing.auth_id,
           { user_metadata: { full_name: trimmed } },
@@ -404,7 +406,9 @@ export class UsersService {
     return {
       deleted: true,
       targetUserId: existing.id,
-      targetUserName: existing.full_name?.trim() || existing.email,
+      targetUserName:
+        this.encryption.decryptUserFullName(existing.full_name)?.trim() ||
+        existing.email,
     };
   }
 }

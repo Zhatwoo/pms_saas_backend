@@ -15,6 +15,7 @@ import {
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
 import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 
 interface QueryFilters {
   branch?: string;
@@ -32,6 +33,7 @@ export class InventoryService {
   constructor(
     private supabase: SupabaseService,
     private notificationsService: NotificationsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
@@ -179,7 +181,11 @@ export class InventoryService {
           itemPhotos: await this.resolveStorageUrls(item.item_photos),
           conditionReport: item.condition_report || '',
           amount: item.amount || 0,
-          customers: item.customers,
+          customers: item.customers
+            ? this.encryption.decryptCustomerEmbed(
+                item.customers as Record<string, unknown>,
+              )
+            : item.customers,
           serialNumber: item.serial_number,
           itemsIncluded: item.items_included,
           condition: item.condition,
@@ -302,6 +308,11 @@ export class InventoryService {
 
     return {
       ...data,
+      customer: data.customer
+        ? this.encryption.decryptCustomerEmbed(
+            data.customer as Record<string, unknown>,
+          )
+        : data.customer,
       profile_photo: profilePhoto,
       item_photos: itemPhotos,
       id_photo: idPhoto,
@@ -344,7 +355,7 @@ export class InventoryService {
     if (pawnedData) {
       assertResourceBranch(user, pawnedData.branch_id);
 
-      let customerData: {
+      type CustomerSnapshot = {
         full_name: string;
         address: string;
         barangay?: string | null;
@@ -352,7 +363,9 @@ export class InventoryService {
         region?: string | null;
         contact_number?: string | null;
         id_presented?: string | null;
-      } | null = null;
+      };
+
+      let customerData: CustomerSnapshot | null = null;
 
       if (pawnedData.customer_id) {
         const { data: customer, error: customerError } = await client
@@ -368,8 +381,10 @@ export class InventoryService {
             `[InventoryService] Error fetching customer for pawned item ${cleanId}:`,
             customerError,
           );
-        } else {
-          customerData = customer;
+        } else if (customer) {
+          customerData = this.encryption.decryptCustomerRow(
+            customer as Record<string, unknown>,
+          ) as CustomerSnapshot;
         }
       }
 

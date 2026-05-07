@@ -9,10 +9,27 @@ import { SupabaseService } from '../../../infrastructure/supabase/supabase.servi
 import { Role } from '../../../common/enums';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 
 @Injectable()
 export class BranchesService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly encryption: EncryptionService,
+  ) {}
+
+  /** Restore plaintext contact_number after read; keeps API shape unchanged. */
+  private mapBranchFromDb(row: Record<string, unknown> | null) {
+    if (!row || typeof row !== 'object') return row;
+    const contact = row.contact_number;
+    return {
+      ...row,
+      contact_number:
+        contact != null && contact !== ''
+          ? this.encryption.decryptBranchContactNumber(String(contact))
+          : contact,
+    };
+  }
 
   private toTitleCase(value: string): string {
     return value
@@ -70,9 +87,11 @@ export class BranchesService {
       name: this.normalizeBranchName(createBranchDto.name),
       branch_code: createBranchDto.branch_code.trim(),
       location: createBranchDto.location.trim(),
-      contact_number: this.resolveContactNumber(
-        createBranchDto.contact_number,
-        createBranchDto.contactNumber,
+      contact_number: this.encryption.encryptBranchContactNumber(
+        this.resolveContactNumber(
+          createBranchDto.contact_number,
+          createBranchDto.contactNumber,
+        ),
       ),
       status: createBranchDto.status,
     };
@@ -106,7 +125,7 @@ export class BranchesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    return this.mapBranchFromDb(data as Record<string, unknown>);
   }
 
   async findAll() {
@@ -120,7 +139,9 @@ export class BranchesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    return (data ?? []).map((row: Record<string, unknown>) =>
+      this.mapBranchFromDb(row),
+    );
   }
 
   /** Admin / employee: only their assigned branch. Super admin: all. */
@@ -141,7 +162,9 @@ export class BranchesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data ?? [];
+    return (data ?? []).map((row: Record<string, unknown>) =>
+      this.mapBranchFromDb(row),
+    );
   }
 
   /** Public signup: active branches only (id + name). */
@@ -179,7 +202,7 @@ export class BranchesService {
       throw new NotFoundException('Branch not found');
     }
 
-    return data;
+    return this.mapBranchFromDb(data as Record<string, unknown>);
   }
 
   async update(id: string, updateBranchDto: UpdateBranchDto) {
@@ -192,9 +215,11 @@ export class BranchesService {
         : {}),
       ...(updateBranchDto.contact_number || updateBranchDto.contactNumber
         ? {
-            contact_number: this.resolveContactNumber(
-              updateBranchDto.contact_number,
-              updateBranchDto.contactNumber,
+            contact_number: this.encryption.encryptBranchContactNumber(
+              this.resolveContactNumber(
+                updateBranchDto.contact_number,
+                updateBranchDto.contactNumber,
+              ),
             ),
           }
         : {}),
@@ -213,7 +238,7 @@ export class BranchesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    return this.mapBranchFromDb(data as Record<string, unknown>);
   }
 
   async remove(id: string) {

@@ -31,10 +31,12 @@ import { RewardsModule } from './modules/rewards/rewards.module';
 import { QRReplacementRequestsModule } from './modules/qr-replacement-requests/qr-replacement-requests.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
+import { EncryptionModule } from './common/encryption/encryption.module';
 
 @Module({
   // Triggering reload for new QR replacement routes
   imports: [
+    EncryptionModule,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [appConfig],

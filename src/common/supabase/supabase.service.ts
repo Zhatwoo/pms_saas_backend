@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Role } from '../enums';
 import { PrismaService } from '../../infrastructure/prisma';
+import { EncryptionService } from '../encryption/encryption.service';
 
 export type AccountStatus = 'pending' | 'active' | 'rejected';
 
@@ -42,6 +43,7 @@ export class SupabaseService {
   constructor(
     private configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
   ) {
     const url = this.configService.get<string>('supabase.url');
     const anonKey = this.configService.get<string>('supabase.anonKey');
@@ -103,7 +105,7 @@ export class SupabaseService {
     return {
       id: user.id,
       authId: user.auth_id,
-      fullName: user.full_name,
+      fullName: this.encryption.decryptUserFullName(user.full_name),
       email: user.email,
       role,
       branchId: user.branch_id,
