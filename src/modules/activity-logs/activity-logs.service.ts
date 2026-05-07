@@ -4,6 +4,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { EncryptionService } from '../../common/encryption/encryption.service';
 
 export interface CreateActivityLogDto {
   userId: string;
@@ -16,7 +17,10 @@ export interface CreateActivityLogDto {
 export class ActivityLogsService {
   private readonly logger = new Logger(ActivityLogsService.name);
 
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly encryption: EncryptionService,
+  ) {}
 
   async createLog(dto: CreateActivityLogDto) {
     const client = this.supabaseService.getClient();
@@ -103,16 +107,20 @@ export class ActivityLogsService {
       throw new InternalServerErrorException('Failed to fetch activity logs');
     }
 
-    return (data || []).map((log: any) => ({
-      id: log.id,
-      userId: log.user_id,
-      branchId: log.branch_id,
-      action: log.action,
-      details: log.details,
-      createdAt: log.created_at,
-      userFullName: log.users?.full_name || log.users?.email || 'Unknown User',
-      userRole: log.users?.role || 'Unknown Role',
-      branchName: log.branches?.name || 'All Branches',
-    }));
+    return (data || []).map((log: any) => {
+      const usersJoin = this.encryption.decryptUsersJoin(log.users);
+      return {
+        id: log.id,
+        userId: log.user_id,
+        branchId: log.branch_id,
+        action: log.action,
+        details: log.details,
+        createdAt: log.created_at,
+        userFullName:
+          usersJoin?.full_name || usersJoin?.email || 'Unknown User',
+        userRole: log.users?.role || 'Unknown Role',
+        branchName: log.branches?.name || 'All Branches',
+      };
+    });
   }
 }

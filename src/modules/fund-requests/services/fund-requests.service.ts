@@ -17,6 +17,7 @@ import { adjustDailyBalance as sharedAdjustDailyBalance } from '../../../common/
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { ConfirmFundRequestDto } from '../dto/confirm-fund-request.dto';
 import { CreateDirectTransferDto } from '../dto/create-direct-transfer.dto';
 import { CreateFundRequestDto } from '../dto/create-fund-request.dto';
@@ -154,6 +155,7 @@ export class FundRequestsService {
     private readonly supabaseService: SupabaseService,
     private readonly activityLogsService: ActivityLogsService,
     private readonly notificationsService: NotificationsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private toDatePart(date: Date): string {
@@ -387,7 +389,10 @@ export class FundRequestsService {
     if (!data) {
       throw new NotFoundException('Receiver user not found');
     }
-    return data;
+    return {
+      ...data,
+      full_name: this.encryption.decryptUserFullName(data.full_name),
+    };
   }
 
   private async getLatestBranchBalance(branchId: string): Promise<number> {
@@ -495,9 +500,25 @@ export class FundRequestsService {
     const sourceConfirmedBy = Array.isArray(row.source_confirmed_by)
       ? (row.source_confirmed_by[0] ?? null)
       : (row.source_confirmed_by ?? null);
-    const confirmedBy = Array.isArray(row.confirmed_by)
+    const confirmedByRaw = Array.isArray(row.confirmed_by)
       ? (row.confirmed_by[0] ?? null)
       : (row.confirmed_by ?? null);
+
+    const sourceConfirmedByDec = sourceConfirmedBy
+      ? this.encryption.decryptUsersJoin(sourceConfirmedBy)
+      : null;
+    const confirmedByDec = confirmedByRaw
+      ? this.encryption.decryptUsersJoin(confirmedByRaw)
+      : null;
+    const requestedByDec = requestedBy
+      ? this.encryption.decryptUsersJoin(requestedBy)
+      : null;
+    const reviewedByDec = reviewedBy
+      ? this.encryption.decryptUsersJoin(reviewedBy)
+      : null;
+    const transferredByDec = transferredBy
+      ? this.encryption.decryptUsersJoin(transferredBy)
+      : null;
 
     return {
       id: row.id,
@@ -531,11 +552,11 @@ export class FundRequestsService {
             location: sourceBranch.location,
           }
         : null,
-      sourceConfirmedBy: sourceConfirmedBy
+      sourceConfirmedBy: sourceConfirmedByDec
         ? {
-            id: sourceConfirmedBy.id,
-            fullName: sourceConfirmedBy.full_name,
-            email: sourceConfirmedBy.email,
+            id: sourceConfirmedBy!.id,
+            fullName: sourceConfirmedByDec.full_name,
+            email: sourceConfirmedByDec.email,
           }
         : null,
       sourceConfirmedAt: row.source_confirmed_at,
@@ -551,11 +572,11 @@ export class FundRequestsService {
       confirmationProofUrl: row.confirmation_proof_url,
       confirmedAt: row.confirmed_at,
       confirmationNotes: row.confirmation_notes,
-      destinationConfirmedBy: confirmedBy
+      destinationConfirmedBy: confirmedByDec
         ? {
-            id: confirmedBy.id,
-            fullName: confirmedBy.full_name,
-            email: confirmedBy.email,
+            id: confirmedByRaw!.id,
+            fullName: confirmedByDec.full_name,
+            email: confirmedByDec.email,
           }
         : null,
       destinationConfirmedAt: row.destination_confirmed_at,
@@ -575,32 +596,32 @@ export class FundRequestsService {
             location: branch.location,
           }
         : null,
-      requestedBy: requestedBy
+      requestedBy: requestedByDec
         ? {
-            id: requestedBy.id,
-            fullName: requestedBy.full_name,
-            email: requestedBy.email,
+            id: requestedBy!.id,
+            fullName: requestedByDec.full_name,
+            email: requestedByDec.email,
           }
         : null,
-      reviewedBy: reviewedBy
+      reviewedBy: reviewedByDec
         ? {
-            id: reviewedBy.id,
-            fullName: reviewedBy.full_name,
-            email: reviewedBy.email,
+            id: reviewedBy!.id,
+            fullName: reviewedByDec.full_name,
+            email: reviewedByDec.email,
           }
         : null,
-      transferredBy: transferredBy
+      transferredBy: transferredByDec
         ? {
-            id: transferredBy.id,
-            fullName: transferredBy.full_name,
-            email: transferredBy.email,
+            id: transferredBy!.id,
+            fullName: transferredByDec.full_name,
+            email: transferredByDec.email,
           }
         : null,
-      confirmedBy: confirmedBy
+      confirmedBy: confirmedByDec
         ? {
-            id: confirmedBy.id,
-            fullName: confirmedBy.full_name,
-            email: confirmedBy.email,
+            id: confirmedByRaw!.id,
+            fullName: confirmedByDec.full_name,
+            email: confirmedByDec.email,
           }
         : null,
     };
@@ -673,7 +694,9 @@ export class FundRequestsService {
         unit_code: params.referenceId ?? params.request.request_no,
         pawn_amount: 0,
         storage_fee: 0,
-        details: detailsParts.join(' | '),
+        details: this.encryption.encryptTransactionDetails(
+          detailsParts.join(' | '),
+        ),
       })
       .select('id')
       .single<{ id: string }>();
@@ -728,7 +751,7 @@ export class FundRequestsService {
         unit_code: params.referenceId,
         pawn_amount: 0,
         storage_fee: 0,
-        details,
+        details: this.encryption.encryptTransactionDetails(details),
       })
       .select('id')
       .single<{ id: string }>();
@@ -777,7 +800,9 @@ export class FundRequestsService {
           unit_code: params.request.request_no,
           pawn_amount: 0,
           storage_fee: 0,
-          details: `Transfer out to ${params.destinationBranch.name} | Ref: ${params.transferReference ?? 'N/A'} | Notes: ${params.transferNotes ?? '-'}`,
+          details: this.encryption.encryptTransactionDetails(
+            `Transfer out to ${params.destinationBranch.name} | Ref: ${params.transferReference ?? 'N/A'} | Notes: ${params.transferNotes ?? '-'}`,
+          ),
         })
         .select('id')
         .single<{ id: string }>();

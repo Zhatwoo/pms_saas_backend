@@ -20,6 +20,7 @@ import { NotificationsService } from '../../notifications/services/notifications
 import { RewardsService } from '../../rewards/services/rewards.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 
 type CustomerGroupMatch = {
   id: string;
@@ -130,6 +131,7 @@ export class TransactionsService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly rewardsService: RewardsService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private toDbDate(value?: string | null): Date {
@@ -242,6 +244,23 @@ export class TransactionsService {
   }
 
   private mapTransaction(row: any) {
+    const pawnedItemsDecrypted = row.pawned_items
+      ? {
+          ...row.pawned_items,
+          customers: row.pawned_items.customers
+            ? this.encryption.decryptCustomerEmbed(
+                row.pawned_items.customers as Record<string, unknown>,
+              )
+            : row.pawned_items.customers,
+        }
+      : null;
+
+    const customersDecrypted = row.customers
+      ? this.encryption.decryptCustomerEmbed(
+          row.customers as Record<string, unknown>,
+        )
+      : null;
+
     return {
       ...row,
       transaction_date: this.formatDate(row.transaction_date),
@@ -251,13 +270,14 @@ export class TransactionsService {
       return_amount: this.toNumber(row.return_amount),
       storage_fee: this.toNumber(row.storage_fee),
       pawn_amount: this.toNumber(row.pawn_amount),
-      pawned_item: row.pawned_items
+      details: this.encryption.decryptTransactionDetails(row.details),
+      pawned_item: pawnedItemsDecrypted
         ? {
-            ...row.pawned_items,
-            customer: row.pawned_items.customers,
+            ...pawnedItemsDecrypted,
+            customer: pawnedItemsDecrypted.customers,
           }
         : null,
-      customer: row.customers ?? null,
+      customer: customersDecrypted ?? null,
       pawned_items: undefined,
       customers: undefined,
       sale_item: null,
@@ -428,7 +448,10 @@ export class TransactionsService {
       cash_out: amounts.cashOut,
       unit: dtoClean.unit ?? null,
       unit_code: dtoClean.unit_code ?? null,
-      details: dtoClean.details ?? null,
+      details:
+        dtoClean.details == null || dtoClean.details === ''
+          ? null
+          : this.encryption.encryptTransactionDetails(String(dtoClean.details)),
       profile_photo: dtoClean.profile_photo ?? null,
       id_photo: dtoClean.id_photo ?? null,
       id_back_photo: dtoClean.id_back_photo ?? null,
@@ -578,7 +601,16 @@ export class TransactionsService {
     const updated = await this.prisma.transactions.update({
       where: { id },
       data: {
-        details: dto.details,
+        ...(dto.details !== undefined
+          ? {
+              details:
+                dto.details == null || dto.details === ''
+                  ? null
+                  : this.encryption.encryptTransactionDetails(
+                      String(dto.details),
+                    ),
+            }
+          : {}),
         updated_at: new Date(),
       },
       select: TX_SELECT,

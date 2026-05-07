@@ -11,6 +11,7 @@ import {
 } from '../../../common/utils/daily-balance-aggregate.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 
 interface DashboardRelationUser {
   id: string;
@@ -83,7 +84,10 @@ interface ExpirationBuckets {
 export class DashboardService {
   private transporter: Transporter | null = null;
 
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly encryption: EncryptionService,
+  ) {}
 
   private resolveExpirationBranchScope(
     user: AuthenticatedUserProfile,
@@ -362,9 +366,14 @@ export class DashboardService {
       const daysRemaining = Math.ceil(
         (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
       );
-      const customer = Array.isArray(item.customers)
+      const customerRaw = Array.isArray(item.customers)
         ? item.customers[0]
         : item.customers;
+      const customer = customerRaw
+        ? (this.encryption.decryptCustomerEmbed(
+            customerRaw as Record<string, unknown>,
+          ) as typeof customerRaw)
+        : null;
 
       return {
         id: item.id,
@@ -524,9 +533,12 @@ export class DashboardService {
     const branch = Array.isArray(row.branches)
       ? (row.branches[0] ?? null)
       : (row.branches ?? null);
-    const requestedBy = Array.isArray(row.requested_by)
+    const requestedByRaw = Array.isArray(row.requested_by)
       ? (row.requested_by[0] ?? null)
       : (row.requested_by ?? null);
+    const requestedBy = requestedByRaw
+      ? this.encryption.decryptUsersJoin(requestedByRaw)
+      : null;
 
     return {
       id: row.id,
@@ -551,7 +563,7 @@ export class DashboardService {
         : null,
       requestedBy: requestedBy
         ? {
-            id: requestedBy.id,
+            id: requestedByRaw!.id,
             fullName: requestedBy.full_name,
             email: requestedBy.email,
           }

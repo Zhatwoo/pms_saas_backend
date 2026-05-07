@@ -18,6 +18,7 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ActivityLogsService } from '../../activity-logs/activity-logs.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { ActivatePasswordChangeRequestDto } from '../dto/activate-password-change-request.dto';
 import { CreatePasswordChangeRequestDto } from '../dto/create-password-change-request.dto';
 import {
@@ -92,6 +93,7 @@ export class PasswordChangeRequestsService {
 		private readonly activityLogsService: ActivityLogsService,
 		private readonly notificationsService: NotificationsService,
 		private readonly configService: ConfigService,
+		private readonly encryption: EncryptionService,
 	) {}
 
 	private compactText(value?: string | null): string | null {
@@ -335,7 +337,10 @@ export class PasswordChangeRequestsService {
 		}
 
 		for (const row of (data ?? []) as UserRow[]) {
-			map.set(row.id, row);
+			map.set(row.id, {
+				...row,
+				full_name: this.encryption.decryptUserFullName(row.full_name),
+			});
 		}
 
 		return map;
@@ -396,7 +401,12 @@ export class PasswordChangeRequestsService {
 			throw new InternalServerErrorException(error.message);
 		}
 
-		return (data ?? []).filter((row) => row.account_status !== 'pending');
+		return (data ?? [])
+			.filter((row) => row.account_status !== 'pending')
+			.map((row) => ({
+				...row,
+				full_name: this.encryption.decryptUserFullName(row.full_name),
+			}));
 	}
 
 	private toTargetRole(role: Role): Role.ADMIN | Role.SUPER_ADMIN {
