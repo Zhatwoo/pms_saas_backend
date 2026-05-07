@@ -3,6 +3,8 @@ import {
   IsString,
   IsOptional,
   IsNumber,
+  IsUUID,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -72,7 +74,9 @@ export class CreatePawnTicketItemDto {
   remarks?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
+  @Min(0)
   amount?: number;
 
   @IsOptional()
@@ -102,15 +106,21 @@ export class CreatePawnTicketItemDto {
 }
 
 export class CreatePawnTicketTransactionDto {
+  @Type(() => Number)
   @IsNumber()
+  @Min(1)
   pawnAmount!: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
+  @Min(0)
   storageFee?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
+  @Min(0)
   returnAmount?: number;
 
   @IsOptional()
@@ -144,7 +154,7 @@ export class CreatePawnTicketDto {
   transaction!: CreatePawnTicketTransactionDto;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   branchId?: string;
 
   @IsOptional()

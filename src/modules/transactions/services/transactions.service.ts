@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
+import { Prisma } from '@prisma/client';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   assertBranchAccess,
@@ -109,6 +110,20 @@ type LayawayInput = {
   processedByName?: string;
 };
 
+const ALLOWED_TRANSACTION_PURPOSES = new Set([
+  'Pawn',
+  'Buy Back',
+  'Renew',
+  'Redeem',
+  'Sold Item',
+  'Sale',
+  'Expense',
+  'Cash Transfer',
+  'Fund Transfer',
+]);
+
+type TransactionDbClient = PrismaService | Prisma.TransactionClient;
+
 @Injectable()
 export class TransactionsService {
   constructor(
@@ -140,6 +155,92 @@ export class TransactionsService {
     return Number(value);
   }
 
+  private normalizeMoney(value: unknown, field: string): number {
+    const parsed = Number(value ?? 0);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new BadRequestException(`${field} must be a non-negative number`);
+    }
+    return Number(parsed.toFixed(2));
+  }
+
+  private normalizePurpose(value: unknown): string {
+    const purpose = String(value ?? '').trim();
+    if (!ALLOWED_TRANSACTION_PURPOSES.has(purpose)) {
+      throw new BadRequestException('Invalid transaction purpose');
+    }
+    return purpose;
+  }
+
+  private assertMoneyShape(purpose: string, amounts: {
+    cashIn: number;
+    cashOut: number;
+    pawnAmount: number;
+    returnAmount: number;
+    storageFee: number;
+  }) {
+    const hasCashIn = amounts.cashIn > 0;
+    const hasCashOut = amounts.cashOut > 0;
+
+    if (hasCashIn && hasCashOut) {
+      throw new BadRequestException(
+        'A transaction cannot contain both cash_in and cash_out',
+      );
+    }
+
+    if (purpose === 'Pawn') {
+      if (amounts.pawnAmount <= 0 || amounts.cashOut !== amounts.pawnAmount) {
+        throw new BadRequestException(
+          'Pawn transactions must use pawn_amount as the exact cash_out',
+        );
+      }
+      if (amounts.cashIn !== 0) {
+        throw new BadRequestException('Pawn transactions cannot include cash_in');
+      }
+      return;
+    }
+
+    if (purpose === 'Buy Back' || purpose === 'Redeem') {
+      if (amounts.cashIn <= 0 || amounts.cashOut !== 0) {
+        throw new BadRequestException(
+          `${purpose} transactions must be cash-in only`,
+        );
+      }
+      return;
+    }
+
+    if (purpose === 'Renew') {
+      const expected = Number(
+        (amounts.storageFee + amounts.returnAmount).toFixed(2),
+      );
+      if (expected <= 0 || amounts.cashIn !== expected || amounts.cashOut !== 0) {
+        throw new BadRequestException(
+          'Renew transactions must set cash_in to storage_fee + return_amount',
+        );
+      }
+      return;
+    }
+
+    if (purpose === 'Sold Item' || purpose === 'Sale') {
+      if (amounts.cashIn <= 0 || amounts.cashOut !== 0) {
+        throw new BadRequestException('Sale transactions must be cash-in only');
+      }
+      return;
+    }
+
+    if (purpose === 'Expense') {
+      if (amounts.cashOut <= 0 || amounts.cashIn !== 0) {
+        throw new BadRequestException('Expense transactions must be cash-out only');
+      }
+      return;
+    }
+
+    if (purpose === 'Cash Transfer' || purpose === 'Fund Transfer') {
+      throw new BadRequestException(
+        'Fund transfers must use the fund request workflow',
+      );
+    }
+  }
+
   private mapTransaction(row: any) {
     return {
       ...row,
@@ -167,37 +268,47 @@ export class TransactionsService {
     branchId: string,
     netChange: number,
     recordDate = getPhCalendarDateString(),
+    client: TransactionDbClient = this.prisma,
   ) {
     const date = this.toDbDate(recordDate);
-    const current = await this.prisma.daily_balances.findUnique({
+    const current = await client.daily_balances.findUnique({
       where: { branch_id_record_date: { branch_id: branchId, record_date: date } },
       select: { starting_balance: true, ending_balance: true },
     });
 
     if (current) {
-      await this.prisma.daily_balances.update({
+      const nextEndingBalance = this.toNumber(current.ending_balance) + netChange;
+      if (nextEndingBalance < 0) {
+        throw new BadRequestException('Insufficient branch cash balance');
+      }
+
+      await client.daily_balances.update({
         where: { branch_id_record_date: { branch_id: branchId, record_date: date } },
         data: {
-          ending_balance: this.toNumber(current.ending_balance) + netChange,
+          ending_balance: nextEndingBalance,
           updated_at: new Date(),
         },
       });
       return;
     }
 
-    const prior = await this.prisma.daily_balances.findFirst({
+    const prior = await client.daily_balances.findFirst({
       where: { branch_id: branchId, record_date: { lt: date } },
       orderBy: { record_date: 'desc' },
       select: { ending_balance: true },
     });
     const carried = this.toNumber(prior?.ending_balance);
+    const nextEndingBalance = carried + netChange;
+    if (nextEndingBalance < 0) {
+      throw new BadRequestException('Insufficient branch cash balance');
+    }
 
-    await this.prisma.daily_balances.create({
+    await client.daily_balances.create({
       data: {
         branch_id: branchId ?? undefined,
         record_date: date,
         starting_balance: carried,
-        ending_balance: carried + netChange,
+        ending_balance: nextEndingBalance,
       },
     });
   }
@@ -252,15 +363,37 @@ export class TransactionsService {
     // This prevents 500s when UI sends extra metadata.
     const { layaway: layawayInput, ...dtoClean } = dto ?? {};
     const isLayaway = !!layawayInput;
+    const purpose = this.normalizePurpose(dtoClean.purpose);
+    const amounts = {
+      cashIn: this.normalizeMoney(dtoClean.cash_in, 'cash_in'),
+      cashOut: this.normalizeMoney(dtoClean.cash_out, 'cash_out'),
+      pawnAmount: this.normalizeMoney(dtoClean.pawn_amount, 'pawn_amount'),
+      returnAmount: this.normalizeMoney(dtoClean.return_amount, 'return_amount'),
+      storageFee: this.normalizeMoney(dtoClean.storage_fee, 'storage_fee'),
+    };
+    this.assertMoneyShape(purpose, amounts);
 
     // 1. Resolve Branch Info
     const branchId =
       isSuperAdmin(user) ? (dtoClean.branch_id ?? null) : requireBranchId(user);
     const isSystemExpense =
-      !branchId && user.role === Role.SUPER_ADMIN && dtoClean.purpose === 'Expense';
+      !branchId && user.role === Role.SUPER_ADMIN && purpose === 'Expense';
 
     if (!branchId && !isSystemExpense) {
       throw new BadRequestException('Missing branch_id for transaction.');
+    }
+
+    let branchName = 'System / Head Office';
+    if (branchId) {
+      const branch = await this.prisma.branches.findUnique({
+        where: { id: branchId },
+        select: { id: true, name: true, status: true },
+      });
+      if (!branch || branch.status?.trim().toLowerCase() !== 'active') {
+        throw new BadRequestException('Invalid or inactive branch');
+      }
+      assertBranchAccess(user, branchId);
+      branchName = branch.name;
     }
 
     if (branchId && dtoClean.customer_id) {
@@ -275,12 +408,8 @@ export class TransactionsService {
       }
     }
 
-    const branchName = isSystemExpense
-      ? 'System / Head Office'
-      : (dtoClean.branch || 'Unknown Branch');
-    const transactionNo =
-      dtoClean.transaction_no ||
-      `${dtoClean.purpose?.substring(0, 2).toUpperCase() || 'TX'}-${Date.now()}`;
+    const transactionNo = `${purpose.substring(0, 2).toUpperCase()}-${Date.now()}`;
+    const now = new Date();
 
     const payload: any = {
       transaction_no: transactionNo,
@@ -288,15 +417,15 @@ export class TransactionsService {
       branch: branchName,
       customer_id: dtoClean.customer_id ?? null,
       related_pawned_item_id: dtoClean.related_pawned_item_id ?? null,
-      purpose: dtoClean.purpose ?? '',
-      transaction_date: this.toDbDate(dtoClean.transaction_date),
-      transaction_time: this.toDbTime(dtoClean.transaction_time),
+      purpose,
+      transaction_date: this.toDbDate(getPhCalendarDateString()),
+      transaction_time: this.toDbTime(now.toTimeString().slice(0, 8)),
       created_by_user_id: user.id ?? null,
-      return_amount: dtoClean.return_amount ?? 0,
-      storage_fee: dtoClean.storage_fee ?? 0,
-      pawn_amount: dtoClean.pawn_amount ?? 0,
-      cash_in: dtoClean.cash_in ?? 0,
-      cash_out: dtoClean.cash_out ?? 0,
+      return_amount: amounts.returnAmount,
+      storage_fee: amounts.storageFee,
+      pawn_amount: amounts.pawnAmount,
+      cash_in: amounts.cashIn,
+      cash_out: amounts.cashOut,
       unit: dtoClean.unit ?? null,
       unit_code: dtoClean.unit_code ?? null,
       details: dtoClean.details ?? null,
@@ -305,26 +434,50 @@ export class TransactionsService {
       id_back_photo: dtoClean.id_back_photo ?? null,
     };
 
-    const data = await this.prisma.transactions.create({
-      data: payload,
-      select: TX_SELECT,
-    });
+    const data = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.transactions.create({
+        data: payload,
+        select: TX_SELECT,
+      });
 
-    const cashIn = Number(dtoClean.cash_in ?? 0);
-    const cashOut = Number(dtoClean.cash_out ?? 0);
-    if (branchId && (cashIn || cashOut)) {
-      await this.adjustDailyBalance(branchId, cashIn - cashOut);
-    }
+      const netChange = amounts.cashIn - amounts.cashOut;
+      if (branchId && netChange !== 0) {
+        await this.adjustDailyBalance(
+          branchId,
+          netChange,
+          getPhCalendarDateString(),
+          tx,
+        );
+      }
+
+      await tx.activity_logs.create({
+        data: {
+          user_id: user.id ?? null,
+          branch_id: branchId ?? null,
+          action: 'TRANSACTION_CREATED',
+          details: JSON.stringify({
+            transactionId: created.id,
+            transactionNo,
+            purpose,
+            cashIn: amounts.cashIn,
+            cashOut: amounts.cashOut,
+            netChange,
+          }),
+        },
+      });
+
+      return created;
+    });
 
     try {
       await this.notificationsService.create({
         title:
-          dtoClean.purpose === 'Buy Back'
+          purpose === 'Buy Back'
             ? `Successful buyback completed - ${transactionNo}`
-            : `New ${dtoClean.purpose?.toLowerCase() || 'transaction'} created - ${transactionNo}`,
+            : `New ${purpose.toLowerCase()} created - ${transactionNo}`,
         subtitle: dtoClean.unit
-          ? `Transaction Alert: ${dtoClean.purpose?.toLowerCase() || 'item'} [${dtoClean.unit}]`
-          : `Transaction Alert: ${dtoClean.purpose?.toLowerCase() || 'activity'}`,
+          ? `Transaction Alert: ${purpose.toLowerCase()} [${dtoClean.unit}]`
+          : `Transaction Alert: ${purpose.toLowerCase()}`,
         category: 'Transactions',
         branch_id: branchId ?? undefined,
       });
@@ -338,7 +491,7 @@ export class TransactionsService {
         .evaluateRewardsAfterTransaction(
           dtoClean.customer_id,
           branchId,
-          dtoClean.purpose,
+          purpose,
         )
         .catch((err) =>
           console.warn('[TransactionsService] Reward evaluation failed', err),
