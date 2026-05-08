@@ -140,7 +140,9 @@ export class UsersService {
     const fullName = dto.fullName.trim();
     const normalizedRole = this.normalizeStoredRole(dto.role);
     const isTargetSuperAdmin = normalizedRole === 'super_admin';
-    const effectiveBranchId = isTargetSuperAdmin ? null : (dto.branchId ?? null);
+    const effectiveBranchId = isTargetSuperAdmin
+      ? null
+      : (dto.branchId ?? null);
 
     let branch: { id: string; status: string; name: string } | null = null;
     if (!isTargetSuperAdmin) {
@@ -279,20 +281,24 @@ export class UsersService {
       await this.verifyActorPassword(actor, dto.currentPassword.trim());
     }
 
-    const payload: Prisma.usersUncheckedUpdateInput = { updated_at: new Date() };
+    const payload: Prisma.usersUncheckedUpdateInput = {
+      updated_at: new Date(),
+    };
 
     if (dto.fullName !== undefined) {
       const trimmed = dto.fullName.trim();
       if (trimmed) {
         payload.full_name = this.encryption.encryptUserFullName(trimmed);
-        await this.supabaseService.getClient().auth.admin.updateUserById(
-          existing.auth_id,
-          { user_metadata: { full_name: trimmed } },
-        );
+        await this.supabaseService
+          .getClient()
+          .auth.admin.updateUserById(existing.auth_id, {
+            user_metadata: { full_name: trimmed },
+          });
       }
     }
 
-    if (dto.accountStatus !== undefined) payload.account_status = dto.accountStatus;
+    if (dto.accountStatus !== undefined)
+      payload.account_status = dto.accountStatus;
     if (nextRole !== undefined) {
       payload.role = nextRole;
       if (nextRole === 'super_admin') payload.branch_id = null;

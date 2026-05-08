@@ -8,6 +8,8 @@ import {
   Delete,
   Req,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { AUTH_STRICT_THROTTLE } from '../../../config/throttle-auth.constants';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
@@ -21,6 +23,8 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Roles(Role.SUPER_ADMIN)
+  /** Super-admin user creation — high-value target for automated abuse when credentials leak. */
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post()
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);

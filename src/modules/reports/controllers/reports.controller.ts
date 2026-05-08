@@ -17,7 +17,13 @@ export class ReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.reportsService.getSystemReport(req.user, branch, period, startDate, endDate);
+    return this.reportsService.getSystemReport(
+      req.user,
+      branch,
+      period,
+      startDate,
+      endDate,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
@@ -29,7 +35,13 @@ export class ReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.reportsService.getBranchSummary(req.user, branch, period, startDate, endDate);
+    return this.reportsService.getBranchSummary(
+      req.user,
+      branch,
+      period,
+      startDate,
+      endDate,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -41,6 +53,12 @@ export class ReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.reportsService.getTransactionReport(req.user, branch, period, startDate, endDate);
+    return this.reportsService.getTransactionReport(
+      req.user,
+      branch,
+      period,
+      startDate,
+      endDate,
+    );
   }
 }

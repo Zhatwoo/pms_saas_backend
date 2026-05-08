@@ -1,9 +1,5 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-} from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 /** Delimiter is safe for AES-GCM output encoded as standard base64. */
 const TOKEN_SEP = ':';
@@ -134,9 +130,11 @@ export class EncryptionService implements OnModuleInit {
     }
   }
 
-  decryptCustomerRow<T extends Record<string, unknown>>(row: T | null): T | null {
+  decryptCustomerRow<T extends Record<string, unknown>>(
+    row: T | null,
+  ): T | null {
     if (!row) return row;
-    const out = { ...row } as T;
+    const out = { ...row };
     for (const f of EncryptionService.CUSTOMER_ENCRYPTED_FIELDS) {
       const v = out[f as keyof T];
       if (typeof v === 'string') {
@@ -155,19 +153,12 @@ export class EncryptionService implements OnModuleInit {
 
   /** Joined users row: only full_name is encrypted on public.users. */
   decryptUsersJoin(
-    u:
-      | { full_name?: string | null; email?: string | null }
-      | null
-      | undefined,
-  ):
-    | { full_name?: string | null; email?: string | null }
-    | null
-    | undefined {
+    u: { full_name?: string | null; email?: string | null } | null | undefined,
+  ): { full_name?: string | null; email?: string | null } | null | undefined {
     if (u == null) return u;
     return {
       ...u,
-      full_name:
-        u.full_name != null ? this.decrypt(u.full_name) : u.full_name,
+      full_name: u.full_name != null ? this.decrypt(u.full_name) : u.full_name,
       email: u.email,
     };
   }
@@ -188,7 +179,9 @@ export class EncryptionService implements OnModuleInit {
     return this.encrypt(contact);
   }
 
-  decryptBranchContactNumber(contact: string | null | undefined): string | null {
+  decryptBranchContactNumber(
+    contact: string | null | undefined,
+  ): string | null {
     if (contact == null) return contact ?? null;
     return this.decrypt(contact);
   }

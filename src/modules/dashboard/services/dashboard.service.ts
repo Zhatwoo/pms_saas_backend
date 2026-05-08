@@ -6,9 +6,7 @@ import {
 import nodemailer, { type Transporter } from 'nodemailer';
 import { Role, isNonRevenuePurpose } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
-import {
-  computeBranchDaySnapshot,
-} from '../../../common/utils/daily-balance-aggregate.util';
+import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
@@ -97,7 +95,9 @@ export class DashboardService {
     return !isSuperAdmin ? requireUserBranchId(user) : branchFilter || null;
   }
 
-  private bucketExpirationItems(items: ExpirationMonitoringItem[]): ExpirationBuckets {
+  private bucketExpirationItems(
+    items: ExpirationMonitoringItem[],
+  ): ExpirationBuckets {
     const overdue = items.filter((i) => i.daysRemaining <= 0);
     const threeDays = items.filter(
       (i) => i.daysRemaining > 0 && i.daysRemaining <= 3,
@@ -404,7 +404,10 @@ export class DashboardService {
     if (hrs < 24) return `${hrs}h ago`;
     const days = Math.floor(hrs / 24);
     if (days < 7) return `${days}d ago`;
-    return new Date(isoString).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return new Date(isoString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
   }
 
   private summarizeFundRequests(
@@ -704,10 +707,9 @@ export class DashboardService {
             ),
           },
           branchBalances: this.buildBranchFinanceSummaries({
-            branches: (branchesResult.data ?? []) as BranchRecord[],
-            balanceRows: (latestBalancesResult.data ?? []) as DailyBalanceRow[],
-            transferredFunds: (transferredFundsResult.data ??
-              []) as TransferredFundRow[],
+            branches: branchesResult.data ?? [],
+            balanceRows: latestBalancesResult.data ?? [],
+            transferredFunds: transferredFundsResult.data ?? [],
             asOfDate: new Date().toISOString().split('T')[0],
           }),
           recentFundRequests: (recentRequestsResult.data ?? []).map((row) =>
@@ -788,12 +790,9 @@ export class DashboardService {
           []) as DailyBalanceRow[];
         const adminFinance =
           this.buildBranchFinanceSummaries({
-            branches: branchResult.data
-              ? [branchResult.data as BranchRecord]
-              : [],
+            branches: branchResult.data ? [branchResult.data] : [],
             balanceRows: adminBalanceRows,
-            transferredFunds: (transferredFundsResult.data ??
-              []) as TransferredFundRow[],
+            transferredFunds: transferredFundsResult.data ?? [],
             asOfDate: todayStrAdmin,
           })[0] ?? null;
         const adminFinanceAligned = adminFinance
@@ -887,11 +886,10 @@ export class DashboardService {
         const empFinance =
           this.buildBranchFinanceSummaries({
             branches: employeeBranchResult.data
-              ? [employeeBranchResult.data as BranchRecord]
+              ? [employeeBranchResult.data]
               : [],
             balanceRows: empBalanceRows,
-            transferredFunds: (employeeTransferredFundsResult.data ??
-              []) as TransferredFundRow[],
+            transferredFunds: employeeTransferredFundsResult.data ?? [],
             asOfDate: todayStrEmp,
           })[0] ?? null;
         const empFinanceAligned = empFinance
@@ -920,7 +918,10 @@ export class DashboardService {
     }
   }
 
-  private resolvePeriodRange(period?: string): { fromDate: string; toDate: string } {
+  private resolvePeriodRange(period?: string): {
+    fromDate: string;
+    toDate: string;
+  } {
     const today = new Date();
     const toDate = today.toISOString().split('T')[0];
     const p = (period ?? 'monthly').toLowerCase();
@@ -953,7 +954,7 @@ export class DashboardService {
     const client = this.supabaseService.getClient();
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
-    
+
     let fromDate: string;
     let toDate: string;
 
@@ -1122,7 +1123,9 @@ export class DashboardService {
     // Compute monthly revenue (only revenue-generating purposes)
     const monthlyRevenue = (revenueResult.data || []).reduce(
       (sum: number, row: any) =>
-        isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in),
+        isNonRevenuePurpose(row.purpose)
+          ? sum
+          : sum + this.toMoney(row.cash_in),
       0,
     );
 
@@ -1331,7 +1334,11 @@ export class DashboardService {
       process.env.SMTP_FROM
     )?.trim();
 
-    if (recipientsMap.size === 0 && targetItems.length > 0 && fallbackRecipient) {
+    if (
+      recipientsMap.size === 0 &&
+      targetItems.length > 0 &&
+      fallbackRecipient
+    ) {
       recipientsMap.set(fallbackRecipient.toLowerCase(), targetItems);
     }
 

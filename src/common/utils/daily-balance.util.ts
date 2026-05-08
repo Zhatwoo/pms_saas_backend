@@ -62,9 +62,7 @@ export async function adjustDailyBalance(
     .maybeSingle();
 
   if (priorRow) {
-    startingBalance = Number(
-      Number(priorRow.ending_balance ?? 0).toFixed(2),
-    );
+    startingBalance = Number(Number(priorRow.ending_balance ?? 0).toFixed(2));
   }
 
   const { error: insertError } = await client.from('daily_balances').insert({
