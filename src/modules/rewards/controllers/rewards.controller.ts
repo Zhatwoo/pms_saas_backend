@@ -81,7 +81,7 @@ export class RewardsController {
     @Body() dto: ClaimRewardDto,
   ) {
     return this.rewardsService.claimReward(
-      req.user as AuthenticatedUserProfile & { id: string },
+      req.user,
       customerRewardId,
       dto.notes,
     );

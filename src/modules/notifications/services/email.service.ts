@@ -25,7 +25,12 @@ export class EmailService {
   async sendExpirationBlast(
     user: AuthenticatedUserProfile,
     payload: EmailBlastPayload,
-  ): Promise<{ success: boolean; sent: number; failed: number; message: string }> {
+  ): Promise<{
+    success: boolean;
+    sent: number;
+    failed: number;
+    message: string;
+  }> {
     try {
       if (!this.resendApiKey) {
         return {
@@ -75,7 +80,9 @@ export class EmailService {
 
       // Add items to each customer
       items.forEach((item) => {
-        const customer = uniqueCustomers.find((c) => c.email === item.customer_email);
+        const customer = uniqueCustomers.find(
+          (c) => c.email === item.customer_email,
+        );
         if (customer) {
           customer.items.push({
             ticketNo: item.ticket_no,
@@ -93,7 +100,10 @@ export class EmailService {
 
       for (const customer of uniqueCustomers) {
         try {
-          const emailSent = await this.sendExpirationEmail(customer, payload.category);
+          const emailSent = await this.sendExpirationEmail(
+            customer,
+            payload.category,
+          );
           if (emailSent) {
             sentCount++;
           } else {
@@ -115,7 +125,10 @@ export class EmailService {
         message: `Email blast sent to ${sentCount} customer${sentCount !== 1 ? 's' : ''}${failedCount > 0 ? `. ${failedCount} failed` : ''}`,
       };
     } catch (error) {
-      this.logger.error('Email blast error:', error instanceof Error ? error.message : 'Unknown error');
+      this.logger.error(
+        'Email blast error:',
+        error instanceof Error ? error.message : 'Unknown error',
+      );
       return {
         success: false,
         sent: 0,
@@ -210,7 +223,10 @@ export class EmailService {
 
       // In development/testing, send to verified email
       const toEmail = this.VERIFIED_EMAIL;
-      const testNotice = customer.email !== toEmail ? `\n[TEST MODE] Sending to verified email. Actual recipient: ${customer.email}` : '';
+      const testNotice =
+        customer.email !== toEmail
+          ? `\n[TEST MODE] Sending to verified email. Actual recipient: ${customer.email}`
+          : '';
 
       const response = await fetch(this.RESEND_API_URL, {
         method: 'POST',

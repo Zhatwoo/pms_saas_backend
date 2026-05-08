@@ -363,7 +363,7 @@ export class PawnTicketsService {
     let normalized = items.map((item) => {
       const cust = item.customers
         ? (this.encryption.decryptCustomerEmbed(
-            item.customers as Record<string, unknown>,
+            item.customers,
           ) as typeof item.customers)
         : null;
       return {
@@ -408,8 +408,12 @@ export class PawnTicketsService {
     }
 
     const pawnAmount = Number(Number(dto.transaction.pawnAmount).toFixed(2));
-    const storageFee = Number(Number(dto.transaction.storageFee ?? 0).toFixed(2));
-    const returnAmount = Number(Number(dto.transaction.returnAmount ?? 0).toFixed(2));
+    const storageFee = Number(
+      Number(dto.transaction.storageFee ?? 0).toFixed(2),
+    );
+    const returnAmount = Number(
+      Number(dto.transaction.returnAmount ?? 0).toFixed(2),
+    );
     if (
       !Number.isFinite(pawnAmount) ||
       !Number.isFinite(storageFee) ||
@@ -571,7 +575,10 @@ export class PawnTicketsService {
 
             customer = existingCustomer;
           } else {
-            const customerWrite = { ...customerPayload } as Record<string, unknown>;
+            const customerWrite = { ...customerPayload } as Record<
+              string,
+              unknown
+            >;
             this.encryption.applyCustomerFieldsForWrite(customerWrite);
             customer = await tx.customers.create({
               data: customerWrite as typeof customerPayload,
@@ -617,7 +624,9 @@ export class PawnTicketsService {
             branch: branchName,
             purpose: 'Pawn',
             transaction_date: this.toDbDate(getPhCalendarDateString()),
-            transaction_time: this.toDbTime(new Date().toTimeString().slice(0, 8)),
+            transaction_time: this.toDbTime(
+              new Date().toTimeString().slice(0, 8),
+            ),
             // Pawn disbursement is a cash outflow from branch to customer.
             cash_in: 0,
             cash_out: pawnAmount,
@@ -795,7 +804,7 @@ export class PawnTicketsService {
       ...item,
       customer: item.customers
         ? (this.encryption.decryptCustomerEmbed(
-            item.customers as Record<string, unknown>,
+            item.customers,
           ) as (typeof item)['customers'])
         : null,
       branch_info: item.branches,

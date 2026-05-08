@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { AUTH_STRICT_THROTTLE } from '../../../config/throttle-auth.constants';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -14,6 +16,8 @@ export class PasswordChangeRequestsController {
   ) {}
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
+  /** Creates org-level password-reset intent — constrain spam / confused loops. */
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post()
   create(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -30,11 +34,14 @@ export class PasswordChangeRequestsController {
 
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @Get('pending')
-  findPending(@Req() req: { user: AuthenticatedUserProfile }): Promise<unknown> {
+  findPending(
+    @Req() req: { user: AuthenticatedUserProfile },
+  ): Promise<unknown> {
     return this.passwordChangeRequestsService.findPendingForReviewer(req.user);
   }
 
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Patch(':id/review')
   review(
     @Req() req: { user: AuthenticatedUserProfile },

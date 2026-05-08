@@ -1,12 +1,13 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
+import securityConfig from './config/security.config';
 import { CsrfOriginMiddleware } from './common/middleware/csrf-origin.middleware';
 
-import { JwtAuthGuard, RolesGuard } from './common/guards';
+import { AppThrottlerGuard, JwtAuthGuard, RolesGuard } from './common/guards';
 
 import { SupabaseModule } from './infrastructure/supabase/supabase.module';
 import { PrismaModule } from './infrastructure/prisma';
@@ -39,16 +40,29 @@ import { EncryptionModule } from './common/encryption/encryption.module';
     EncryptionModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig],
+      load: [appConfig, securityConfig],
       envFilePath: '.env',
     }),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60_000,
-        limit: 120,
-      },
-    ]),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        // Named throttlers: every request must pass BOTH (steady window + burst).
+        throttlers: [
+          {
+            name: 'global',
+            ttl: config.get<number>('security.throttleGlobalTtlMs') ?? 900_000,
+            limit: config.get<number>('security.throttleGlobalLimit') ?? 100,
+          },
+          {
+            name: 'burst',
+            ttl: config.get<number>('security.throttleBurstTtlMs') ?? 10_000,
+            limit: config.get<number>('security.throttleBurstLimit') ?? 25,
+          },
+        ],
+      }),
+    }),
     PrismaModule,
     SupabaseModule,
     AuthModule,
@@ -74,7 +88,7 @@ import { EncryptionModule } from './common/encryption/encryption.module';
   providers: [
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: AppThrottlerGuard,
     },
     {
       provide: APP_GUARD,

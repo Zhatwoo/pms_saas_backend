@@ -282,7 +282,7 @@ export class CustomersService {
       id_presented: dto.id_presented?.trim() || null,
       branch_id: branchId,
     };
-    this.encryption.applyCustomerFieldsForWrite(payload as Record<string, unknown>);
+    this.encryption.applyCustomerFieldsForWrite(payload);
 
     const created = await this.prisma.customers.create({
       data: payload,
@@ -291,9 +291,7 @@ export class CustomersService {
           ? CUSTOMER_SAFE_SELECT
           : CUSTOMER_FULL_SELECT,
     });
-    return this.encryption.decryptCustomerRow(
-      created as Record<string, unknown>,
-    ) as typeof created;
+    return this.encryption.decryptCustomerRow(created) as typeof created;
   }
 
   async findAll(
@@ -328,7 +326,7 @@ export class CustomersService {
     const uniqueCustomers = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
       const dec = this.encryption.decryptCustomerRow(
-        row as Record<string, unknown>,
+        row,
       ) as (typeof rows)[number];
       const branch = (dec as { branches?: { name?: string | null } | null })
         .branches;
@@ -362,7 +360,7 @@ export class CustomersService {
     if (!customer) return null;
 
     const decrypted = this.encryption.decryptCustomerRow(
-      customer as Record<string, unknown>,
+      customer,
     ) as NonNullable<typeof customer>;
 
     const group = await this.resolveCustomerNameGroup(user, decrypted);
@@ -494,7 +492,7 @@ export class CustomersService {
 
     await this.prisma.customers.update({
       where: { id },
-      data: forWrite as Prisma.customersUncheckedUpdateInput,
+      data: forWrite,
     });
 
     const trackedFields = [

@@ -15,7 +15,9 @@ import { IncidentTicketsService } from './incident-tickets.service';
 
 @Controller('incident-tickets')
 export class IncidentTicketsController {
-  constructor(private readonly incidentTicketsService: IncidentTicketsService) {}
+  constructor(
+    private readonly incidentTicketsService: IncidentTicketsService,
+  ) {}
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get()
@@ -28,10 +30,7 @@ export class IncidentTicketsController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Post()
-  create(
-    @Req() req: { user: AuthenticatedUserProfile },
-    @Body() body: any,
-  ) {
+  create(@Req() req: { user: AuthenticatedUserProfile }, @Body() body: any) {
     return this.incidentTicketsService.create(req.user, body);
   }
 

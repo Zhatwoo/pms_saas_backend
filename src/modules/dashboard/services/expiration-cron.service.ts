@@ -50,12 +50,16 @@ export class ExpirationCronService {
           // If it's negative, we notify as overdue. But to avoid duplicate overdues every single day,
           // we might just log it or notify if it's exactly -1 (1 day overdue)
           if (daysRemaining < 0 && daysRemaining !== -1) {
-             continue; // Only notify once when it becomes overdue (-1)
+            continue; // Only notify once when it becomes overdue (-1)
           }
 
           const isOverdue = daysRemaining < 0;
-          const statusText = isOverdue ? 'is overdue' : daysRemaining === 0 ? 'expires today' : `expires in ${daysRemaining} days`;
-          
+          const statusText = isOverdue
+            ? 'is overdue'
+            : daysRemaining === 0
+              ? 'expires today'
+              : `expires in ${daysRemaining} days`;
+
           await this.notificationsService.create({
             title: `Expiration Alert: ${item.item_id}`,
             subtitle: `Item ${item.item_name} (Ticket ${item.item_id}) ${statusText}.`,

@@ -1,12 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
-import { CreateQRReplacementRequestDto, ApproveQRReplacementRequestDto, RejectQRReplacementRequestDto } from '../dto/qr-replacement-request.dto';
+import {
+  CreateQRReplacementRequestDto,
+  ApproveQRReplacementRequestDto,
+  RejectQRReplacementRequestDto,
+} from '../dto/qr-replacement-request.dto';
 
 @Injectable()
 export class QRReplacementRequestsService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  async createRequest(userId: string, branchId: string, pawnedItemId: string, dto: CreateQRReplacementRequestDto) {
+  async createRequest(
+    userId: string,
+    branchId: string,
+    pawnedItemId: string,
+    dto: CreateQRReplacementRequestDto,
+  ) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase
@@ -23,7 +32,10 @@ export class QRReplacementRequestsService {
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to create QR replacement request: ${error.message}`);
+    if (error)
+      throw new Error(
+        `Failed to create QR replacement request: ${error.message}`,
+      );
     return data;
   }
 
@@ -32,7 +44,9 @@ export class QRReplacementRequestsService {
 
     const { data, error } = await supabase
       .from('qr_replacement_requests')
-      .select('*, requested_by_user:requested_by(id, full_name, email), pawned_item:pawned_item_id(qr_code, item_id)')
+      .select(
+        '*, requested_by_user:requested_by(id, full_name, email), pawned_item:pawned_item_id(qr_code, item_id)',
+      )
       .eq('branch_id', branchId)
       .order('created_at', { ascending: false });
 
@@ -50,7 +64,8 @@ export class QRReplacementRequestsService {
       .eq('status', status)
       .order('created_at', { ascending: false });
 
-    if (error) throw new Error(`Failed to fetch requests by status: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to fetch requests by status: ${error.message}`);
     return data;
   }
 
@@ -67,7 +82,11 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async approveRequest(requestId: string, userId: string, dto: ApproveQRReplacementRequestDto) {
+  async approveRequest(
+    requestId: string,
+    userId: string,
+    dto: ApproveQRReplacementRequestDto,
+  ) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase
@@ -86,7 +105,11 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async rejectRequest(requestId: string, userId: string, dto: RejectQRReplacementRequestDto) {
+  async rejectRequest(
+    requestId: string,
+    userId: string,
+    dto: RejectQRReplacementRequestDto,
+  ) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase
@@ -118,7 +141,8 @@ export class QRReplacementRequestsService {
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to mark request as completed: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to mark request as completed: ${error.message}`);
     return data;
   }
 
@@ -133,7 +157,9 @@ export class QRReplacementRequestsService {
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      throw new Error(`Failed to check QR replacement status: ${error.message}`);
+      throw new Error(
+        `Failed to check QR replacement status: ${error.message}`,
+      );
     }
 
     return !!data;

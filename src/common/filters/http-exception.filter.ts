@@ -4,8 +4,14 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
+
+/** HTTP 413 — used with literal comparisons to satisfy strict ESLint alongside `unknown` middleware errors. */
+const HTTP_PAYLOAD_TOO_LARGE = 413;
+/** HTTP 429 — rate limiting / quotas. */
+const HTTP_TOO_MANY_REQUESTS = 429;
 
 function extractMessage(payload: unknown): string {
   if (typeof payload === 'string' && payload.trim()) {
@@ -29,11 +35,59 @@ function extractMessage(payload: unknown): string {
   return '';
 }
 
+/** Payload errors from Express body-parser; avoid surfacing parser internals (stack / limit strings) to clients. */
+function isPayloadTooLargeException(exception: unknown): boolean {
+  if (exception instanceof HttpException) {
+    return exception.getStatus() === HTTP_PAYLOAD_TOO_LARGE;
+  }
+  if (!exception || typeof exception !== 'object') return false;
+  const e = exception as Record<string, unknown>;
+  if (e.type === 'entity.too.large') return true;
+  if (typeof e.status === 'number' && e.status === HTTP_PAYLOAD_TOO_LARGE) {
+    return true;
+  }
+  if (
+    typeof e.statusCode === 'number' &&
+    e.statusCode === HTTP_PAYLOAD_TOO_LARGE
+  ) {
+    return true;
+  }
+  return false;
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+
+    // Standard contract for abusive traffic / quotas (do not expose internal throttler details).
+    if (exception instanceof HttpException) {
+      if (exception.getStatus() === HTTP_TOO_MANY_REQUESTS) {
+        response.status(HTTP_TOO_MANY_REQUESTS).json({
+          success: false,
+          message: 'Too many requests. Please try again later.',
+        });
+        return;
+      }
+      if (exception.getStatus() === HTTP_PAYLOAD_TOO_LARGE) {
+        response.status(HTTP_PAYLOAD_TOO_LARGE).json({
+          success: false,
+          message: 'Request body is too large.',
+        });
+        return;
+      }
+    }
+
+    if (isPayloadTooLargeException(exception)) {
+      response.status(HTTP_PAYLOAD_TOO_LARGE).json({
+        success: false,
+        message: 'Request body is too large.',
+      });
+      return;
+    }
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
@@ -71,9 +125,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       errorResponse.data = extraData;
     }
 
-    console.error(
-      `[HttpExceptionFilter] ${status}:`,
-      message,
+    this.logger.error(
+      `[HttpExceptionFilter] ${status}: ${message}`,
       exception instanceof Error && !(exception instanceof HttpException)
         ? exception.stack
         : '',

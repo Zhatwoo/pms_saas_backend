@@ -314,17 +314,21 @@ export class FundRequestsService {
       ? dto.fileData.split(',')[1]
       : dto.fileData;
     const fileBuffer = Buffer.from(base64Data, 'base64');
-    
+
     const extension = this.getUploadExtension(dto.fileData, dto.fileName);
     const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
     if (!allowedExtensions.includes(extension)) {
-      throw new BadRequestException('Invalid file extension. Only JPG, PNG, and WEBP are allowed.');
+      throw new BadRequestException(
+        'Invalid file extension. Only JPG, PNG, and WEBP are allowed.',
+      );
     }
-    
+
     const contentType = this.getUploadContentType(dto.fileData, dto.fileName);
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
     if (!allowedMimeTypes.includes(contentType)) {
-      throw new BadRequestException('Invalid file type. Only JPEG, PNG, and WEBP are allowed.');
+      throw new BadRequestException(
+        'Invalid file type. Only JPEG, PNG, and WEBP are allowed.',
+      );
     }
 
     const MAX_SIZE = 5 * 1024 * 1024;
@@ -963,7 +967,10 @@ export class FundRequestsService {
         category: 'Requests',
       });
     } catch (notifErr) {
-      console.error('[FundRequestsService] Failed to notify super admins about fund request creation:', notifErr);
+      console.error(
+        '[FundRequestsService] Failed to notify super admins about fund request creation:',
+        notifErr,
+      );
     }
 
     return mapped;
@@ -1137,7 +1144,10 @@ export class FundRequestsService {
         });
       }
     } catch (notifErr) {
-      console.error('[FundRequestsService] Failed to notify direct transfer recipients:', notifErr);
+      console.error(
+        '[FundRequestsService] Failed to notify direct transfer recipients:',
+        notifErr,
+      );
     }
 
     return mapped;
@@ -1293,7 +1303,10 @@ export class FundRequestsService {
         category: 'Requests',
       });
     } catch (notifErr) {
-      console.error('[FundRequestsService] Failed to notify branch about review result:', notifErr);
+      console.error(
+        '[FundRequestsService] Failed to notify branch about review result:',
+        notifErr,
+      );
     }
 
     return mapped;
@@ -1595,7 +1608,10 @@ export class FundRequestsService {
         category: 'Requests',
       });
     } catch (notifErr) {
-      console.error('[FundRequestsService] Failed to notify destination branch after source confirmation:', notifErr);
+      console.error(
+        '[FundRequestsService] Failed to notify destination branch after source confirmation:',
+        notifErr,
+      );
     }
 
     return mapped;
@@ -1666,18 +1682,19 @@ export class FundRequestsService {
         .includes('expense');
 
       if (!existing.source_branch_id && !isExpenseTransfer) {
-        const ownerOutTransaction = await this.createOwnerOutTransferTransaction({
-          request: existing,
-          amount: confirmedAmount,
-          transferReference:
-            this.compactText(existing.transfer_reference_no) ??
-            this.compactText(existing.transfer_reference),
-          transferNotes:
-            this.compactText(dto.confirmationNotes) ??
-            this.compactText(existing.transfer_notes),
-          referenceId,
-          destinationBranchName: resolvedDestinationBranch.name,
-        });
+        const ownerOutTransaction =
+          await this.createOwnerOutTransferTransaction({
+            request: existing,
+            amount: confirmedAmount,
+            transferReference:
+              this.compactText(existing.transfer_reference_no) ??
+              this.compactText(existing.transfer_reference),
+            transferNotes:
+              this.compactText(dto.confirmationNotes) ??
+              this.compactText(existing.transfer_notes),
+            referenceId,
+            destinationBranchName: resolvedDestinationBranch.name,
+          });
         ownerOutTransactionId = ownerOutTransaction.id;
       }
 
@@ -1695,7 +1712,9 @@ export class FundRequestsService {
         direction: isExpenseTransfer ? 'out' : 'in',
       });
       inboundTransactionId = inboundTransaction.id;
-      const balanceDelta = isExpenseTransfer ? -confirmedAmount : confirmedAmount;
+      const balanceDelta = isExpenseTransfer
+        ? -confirmedAmount
+        : confirmedAmount;
       await this.adjustDailyBalance(existing.branch_id, balanceDelta);
     } catch (err) {
       const errorMessage =
@@ -1765,7 +1784,10 @@ export class FundRequestsService {
         });
       }
     } catch (notifErr) {
-      console.error('[FundRequestsService] Failed to notify source branch after transfer confirmation:', notifErr);
+      console.error(
+        '[FundRequestsService] Failed to notify source branch after transfer confirmation:',
+        notifErr,
+      );
     }
 
     await this.writeFundLog({
@@ -1774,7 +1796,11 @@ export class FundRequestsService {
       action: 'BRANCH_CASH_ON_HAND_UPDATED',
       details: {
         requestNo: mapped.requestNo,
-        delta: existing.purpose?.toLowerCase().includes('expense') && mapped.confirmedReceivedAmount ? -mapped.confirmedReceivedAmount : mapped.confirmedReceivedAmount,
+        delta:
+          existing.purpose?.toLowerCase().includes('expense') &&
+          mapped.confirmedReceivedAmount
+            ? -mapped.confirmedReceivedAmount
+            : mapped.confirmedReceivedAmount,
       },
     });
     return mapped;

@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
+import { AUTH_STRICT_THROTTLE } from '../../../config/throttle-auth.constants';
 import { AuthService } from '../services/auth.service';
 import { BranchesService } from '../../branches/services/branches.service';
 import { LoginDto } from '../dto/login.dto';
@@ -68,14 +69,15 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  // Strict auth surface: brute-force / credential stuffing mitigation (aligned with THROTTLE_AUTH_* env).
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post('register')
   register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post('login')
   async login(
     @Body() loginDto: LoginDto,
@@ -115,6 +117,8 @@ export class AuthController {
     return this.authService.getProfile(req.user.id);
   }
 
+  /** Confirms possession of password before sensitive actions — rate-limit like login. */
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post('verify-password')
   async verify(@Req() req: any, @Body() dto: VerifyPasswordDto) {
     const isValid = await this.authService.verifyPassword(
@@ -130,6 +134,7 @@ export class AuthController {
     return { success: true };
   }
 
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post('change-password')
   async changePassword(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -142,6 +147,7 @@ export class AuthController {
     );
   }
 
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post('change-password-request')
   async requestChangePassword(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -154,6 +160,7 @@ export class AuthController {
     );
   }
 
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Post('request-change-password')
   async requestChangePasswordLegacyPath(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -176,6 +183,8 @@ export class AuthController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  /** Admin review affects account credentials — tighter limits reduce abuse/noise. */
+  @Throttle(AUTH_STRICT_THROTTLE)
   @Patch('password-change-requests/:requestId/review')
   reviewPasswordChangeRequest(
     @Req() req: { user: AuthenticatedUserProfile },

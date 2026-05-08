@@ -18,7 +18,11 @@ export class PawnTicketsController {
     @Query('status') status?: string,
     @Query('search') search?: string,
   ) {
-    return this.pawnTicketsService.findAll(req.user, { branch, status, search });
+    return this.pawnTicketsService.findAll(req.user, {
+      branch,
+      status,
+      search,
+    });
   }
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
