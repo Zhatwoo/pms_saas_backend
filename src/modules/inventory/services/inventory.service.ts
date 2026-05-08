@@ -98,7 +98,10 @@ export class InventoryService {
 
     return Promise.all(
       urls
-        .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+        .filter(
+          (url): url is string =>
+            typeof url === 'string' && url.trim().length > 0,
+        )
         .map((url) => this.resolveStorageUrl(url)),
     );
   }
@@ -149,7 +152,9 @@ export class InventoryService {
 
     if (filters.date) {
       // Support both plain date "YYYY-MM-DD" and timestamp columns
-      query = query.gte('pawn_date', filters.date).lt('pawn_date', this.nextDay(filters.date));
+      query = query
+        .gte('pawn_date', filters.date)
+        .lt('pawn_date', this.nextDay(filters.date));
     }
 
     const from = (filters.page - 1) * filters.limit;
@@ -196,13 +201,15 @@ export class InventoryService {
     };
   }
 
-  async findPawnedCategories(user: UserWithBranch, branch?: string, date?: string): Promise<{ category: string; count: number }[]> {
+  async findPawnedCategories(
+    user: UserWithBranch,
+    branch?: string,
+    date?: string,
+  ): Promise<{ category: string; count: number }[]> {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
-    let query = client
-      .from('pawned_items')
-      .select('category');
+    let query = client.from('pawned_items').select('category');
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
@@ -212,7 +219,9 @@ export class InventoryService {
 
     if (date) {
       // Support both plain date "YYYY-MM-DD" and timestamp columns
-      query = query.gte('pawn_date', `${date}`).lt('pawn_date', this.nextDay(date));
+      query = query
+        .gte('pawn_date', `${date}`)
+        .lt('pawn_date', this.nextDay(date));
     }
 
     const { data, error } = await query;
@@ -229,13 +238,15 @@ export class InventoryService {
       .sort((a, b) => b.count - a.count);
   }
 
-  async findPawnedCalendar(user: UserWithBranch, branch?: string, month?: string): Promise<Record<string, number>> {
+  async findPawnedCalendar(
+    user: UserWithBranch,
+    branch?: string,
+    month?: string,
+  ): Promise<Record<string, number>> {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
-    let query = client
-      .from('pawned_items')
-      .select('pawn_date');
+    let query = client.from('pawned_items').select('pawn_date');
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
@@ -382,9 +393,7 @@ export class InventoryService {
             customerError,
           );
         } else if (customer) {
-          customerData = this.encryption.decryptCustomerRow(
-            customer as Record<string, unknown>,
-          ) as CustomerSnapshot;
+          customerData = this.encryption.decryptCustomerRow(customer);
         }
       }
 
@@ -893,7 +902,9 @@ export class InventoryService {
       });
 
     if (error) {
-      throw new InternalServerErrorException(`Photo upload failed: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Photo upload failed: ${error.message}`,
+      );
     }
 
     const { data: signedData, error: signError } = await client.storage
@@ -939,23 +950,28 @@ export class InventoryService {
 
     const { data, error } = await client
       .from('sale_items')
-      .insert([{
-        item_id: dto.item_id || `SALE-${Date.now()}`,
-        item_name: dto.item_name,
-        category: dto.category,
-        branch: branchName,
-        branch_id: branchId,
-        available_date: new Date().toISOString().split('T')[0],
-        price: dto.price || 0,
-        status: dto.status || 'Available',
-        image_url: imageUrl || null,
-      }])
+      .insert([
+        {
+          item_id: dto.item_id || `SALE-${Date.now()}`,
+          item_name: dto.item_name,
+          category: dto.category,
+          branch: branchName,
+          branch_id: branchId,
+          available_date: new Date().toISOString().split('T')[0],
+          price: dto.price || 0,
+          status: dto.status || 'Available',
+          image_url: imageUrl || null,
+        },
+      ])
       .select()
       .single();
 
     if (error) {
       console.error('SUPABASE INSERT ERROR:', error);
-      require('fs').appendFileSync('supabase-error.log', JSON.stringify(error) + '\n');
+      require('fs').appendFileSync(
+        'supabase-error.log',
+        JSON.stringify(error) + '\n',
+      );
       throw new InternalServerErrorException(error.message);
     }
     return data;
@@ -999,7 +1015,9 @@ export class InventoryService {
     }
 
     if (filters.date) {
-      query = query.gte('available_date', filters.date).lt('available_date', this.nextDay(filters.date));
+      query = query
+        .gte('available_date', filters.date)
+        .lt('available_date', this.nextDay(filters.date));
     }
 
     const from = (filters.page - 1) * filters.limit;
@@ -1027,7 +1045,10 @@ export class InventoryService {
     };
   }
 
-  async findForSaleStats(user: UserWithBranch, branch?: string): Promise<{
+  async findForSaleStats(
+    user: UserWithBranch,
+    branch?: string,
+  ): Promise<{
     totalAvailable: number;
     totalSold: number;
     unpricedCount: number;
@@ -1037,9 +1058,12 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
-    let query = client.from('sale_items').select('status, price, available_date');
+    let query = client
+      .from('sale_items')
+      .select('status, price, available_date');
     if (branchId) query = query.eq('branch_id', branchId);
-    else if (branchNameIlike) query = query.ilike('branch', `%${branchNameIlike}%`);
+    else if (branchNameIlike)
+      query = query.ilike('branch', `%${branchNameIlike}%`);
 
     const { data, error } = await query;
     if (error) throw new InternalServerErrorException(error.message);
@@ -1047,7 +1071,11 @@ export class InventoryService {
     const now = new Date();
     const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    let totalAvailable = 0, totalSold = 0, unpricedCount = 0, soldThisMonth = 0, revenueThisMonth = 0;
+    let totalAvailable = 0,
+      totalSold = 0,
+      unpricedCount = 0,
+      soldThisMonth = 0,
+      revenueThisMonth = 0;
     for (const row of data || []) {
       if (row.status === 'Available') {
         totalAvailable++;
@@ -1061,7 +1089,13 @@ export class InventoryService {
         }
       }
     }
-    return { totalAvailable, totalSold, unpricedCount, soldThisMonth, revenueThisMonth };
+    return {
+      totalAvailable,
+      totalSold,
+      unpricedCount,
+      soldThisMonth,
+      revenueThisMonth,
+    };
   }
 
   async findPublicForSale(): Promise<{
@@ -1084,12 +1118,12 @@ export class InventoryService {
     const [saleResult, branchResult] = await Promise.all([
       client
         .from('sale_items')
-        .select('id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url, created_at')
+        .select(
+          'id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url, created_at',
+        )
         .eq('status', 'Available')
         .order('created_at', { ascending: false }),
-      client
-        .from('branches')
-        .select('id, name, location'),
+      client.from('branches').select('id, name, location'),
     ]);
 
     if (saleResult.error) {
@@ -1134,13 +1168,17 @@ export class InventoryService {
     };
   }
 
-  async findForSaleCategories(user: UserWithBranch, branch?: string): Promise<{ category: string; count: number }[]> {
+  async findForSaleCategories(
+    user: UserWithBranch,
+    branch?: string,
+  ): Promise<{ category: string; count: number }[]> {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
     let query = client.from('sale_items').select('category');
     if (branchId) query = query.eq('branch_id', branchId);
-    else if (branchNameIlike) query = query.ilike('branch', `%${branchNameIlike}%`);
+    else if (branchNameIlike)
+      query = query.ilike('branch', `%${branchNameIlike}%`);
 
     const { data, error } = await query;
     if (error) throw new InternalServerErrorException(error.message);
@@ -1150,22 +1188,31 @@ export class InventoryService {
       const cat = (row.category || 'Uncategorized').trim();
       counts[cat] = (counts[cat] || 0) + 1;
     }
-    return Object.entries(counts).map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count);
+    return Object.entries(counts)
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count);
   }
 
-  async findForSaleCalendar(user: UserWithBranch, branch?: string, month?: string): Promise<Record<string, { available: number; sold: number }>> {
+  async findForSaleCalendar(
+    user: UserWithBranch,
+    branch?: string,
+    month?: string,
+  ): Promise<Record<string, { available: number; sold: number }>> {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
     let query = client.from('sale_items').select('available_date, status');
     if (branchId) query = query.eq('branch_id', branchId);
-    else if (branchNameIlike) query = query.ilike('branch', `%${branchNameIlike}%`);
+    else if (branchNameIlike)
+      query = query.ilike('branch', `%${branchNameIlike}%`);
 
     if (month) {
       const [y, m] = month.split('-').map(Number);
       const firstDay = `${month}-01`;
       const lastDay = new Date(y, m, 0).toISOString().split('T')[0];
-      query = query.gte('available_date', firstDay).lte('available_date', lastDay);
+      query = query
+        .gte('available_date', firstDay)
+        .lte('available_date', lastDay);
     }
 
     const { data, error } = await query;
@@ -1204,10 +1251,10 @@ export class InventoryService {
 
     const { error: updateErr } = await client
       .from('sale_items')
-      .update({ 
-        status: 'Sold', 
+      .update({
+        status: 'Sold',
         price: soldPrice,
-        customer_id: customerId || null
+        customer_id: customerId || null,
       })
       .eq('id', itemId);
     if (updateErr) {
@@ -1216,23 +1263,28 @@ export class InventoryService {
 
     // Create a transactions row so ledger, reports, and dashboard all see this sale.
     const today = new Date().toISOString().split('T')[0];
-    const { error: txErr } = await client.from('transactions').insert([{
-      transaction_no: `SELL-${Date.now()}`,
-      branch_id: branchId,
-      branch: item.branch ?? 'Unknown',
-      purpose: 'Sold Item',
-      transaction_date: today,
-      transaction_time: new Date().toTimeString().slice(0, 8),
-      cash_in: soldPrice,
-      cash_out: 0,
-      unit: item.item_name ?? null,
-      unit_code: item.item_id ?? null,
-      details: `Item sold: ${item.item_name ?? 'Unknown'} for ₱${soldPrice.toLocaleString()}`,
-      related_sale_item_id: itemId,
-      customer_id: customerId || null,
-    }]);
+    const { error: txErr } = await client.from('transactions').insert([
+      {
+        transaction_no: `SELL-${Date.now()}`,
+        branch_id: branchId,
+        branch: item.branch ?? 'Unknown',
+        purpose: 'Sold Item',
+        transaction_date: today,
+        transaction_time: new Date().toTimeString().slice(0, 8),
+        cash_in: soldPrice,
+        cash_out: 0,
+        unit: item.item_name ?? null,
+        unit_code: item.item_id ?? null,
+        details: `Item sold: ${item.item_name ?? 'Unknown'} for ₱${soldPrice.toLocaleString()}`,
+        related_sale_item_id: itemId,
+        customer_id: customerId || null,
+      },
+    ]);
     if (txErr) {
-      console.error('[InventoryService] Failed to create sale transaction', txErr);
+      console.error(
+        '[InventoryService] Failed to create sale transaction',
+        txErr,
+      );
     }
 
     await adjustDailyBalance(client, branchId, soldPrice);
@@ -1303,7 +1355,9 @@ export class InventoryService {
         requestedByRole: user.role,
         reason,
         proofPhoto: proofPhoto || null,
-        message: message || `Replacement requested due to sticker being ${reason.toLowerCase()}.`,
+        message:
+          message ||
+          `Replacement requested due to sticker being ${reason.toLowerCase()}.`,
         requestStatus: 'pending',
         requestedAt: new Date().toISOString(),
       }),
@@ -1325,7 +1379,7 @@ export class InventoryService {
     note?: string,
   ) {
     const client = this.supabase.getClient();
-    
+
     const { data: requestLog, error: requestLogError } = await client
       .from('activity_logs')
       .select('*')
@@ -1336,14 +1390,15 @@ export class InventoryService {
       throw new NotFoundException('Replacement request not found');
     }
 
-    let parsedDetails = JSON.parse(requestLog.details || '{}');
+    const parsedDetails = JSON.parse(requestLog.details || '{}');
     if (parsedDetails.requestStatus !== 'pending') {
       throw new ConflictException('Request already processed');
     }
 
-    const reviewedAction = decision === 'approve' 
-      ? 'QR_REPLACEMENT_APPROVED' 
-      : 'QR_REPLACEMENT_REJECTED';
+    const reviewedAction =
+      decision === 'approve'
+        ? 'QR_REPLACEMENT_APPROVED'
+        : 'QR_REPLACEMENT_REJECTED';
 
     const updatedDetails = {
       ...parsedDetails,

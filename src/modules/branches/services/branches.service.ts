@@ -259,12 +259,8 @@ export class BranchesService {
     const client = this.supabaseService.getClient();
 
     const [pawnedResult, saleResult] = await Promise.all([
-      client
-        .from('pawned_items')
-        .select('branch_id, amount, status'),
-      client
-        .from('sale_items')
-        .select('branch_id, price, status'),
+      client.from('pawned_items').select('branch_id, amount, status'),
+      client.from('sale_items').select('branch_id, price, status'),
     ]);
 
     const branchStats = new Map<
@@ -297,7 +293,10 @@ export class BranchesService {
       }
     }
 
-    const result: Record<string, { pawnedItems: number; forSaleItems: number; totalValue: number }> = {};
+    const result: Record<
+      string,
+      { pawnedItems: number; forSaleItems: number; totalValue: number }
+    > = {};
     for (const [id, stats] of branchStats) {
       result[id] = stats;
     }

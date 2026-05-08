@@ -103,7 +103,7 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('User account not found');
     }
 
-    request.user = this.toRequestUser(user as UserRow);
+    request.user = this.toRequestUser(user);
     return true;
   }
 

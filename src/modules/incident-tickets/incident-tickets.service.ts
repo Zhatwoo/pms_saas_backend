@@ -32,7 +32,13 @@ interface UpdateIncidentTicketDto {
 interface IncidentTicketEventPayload {
   ticketId: string;
   branchId: string;
-  action: 'reported' | 'assigned' | 'unassigned' | 'escalated' | 'resolved' | 'reopened';
+  action:
+    | 'reported'
+    | 'assigned'
+    | 'unassigned'
+    | 'escalated'
+    | 'resolved'
+    | 'reopened';
   actorUserId?: string | null;
   subjectUserId?: string | null;
   notes?: string | null;
@@ -48,19 +54,25 @@ export class IncidentTicketsService {
   private ensureBranchAccess(user: AuthenticatedUserProfile, branchId: string) {
     if (user.role === Role.SUPER_ADMIN) return;
     if (!user.branchId || user.branchId !== branchId) {
-      throw new ForbiddenException('You cannot access incident tickets for this branch.');
+      throw new ForbiddenException(
+        'You cannot access incident tickets for this branch.',
+      );
     }
   }
 
   private ensureManagerAccess(user: AuthenticatedUserProfile) {
     if (user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN) return;
-    throw new ForbiddenException('You can only view the status of incident tickets you submitted.');
+    throw new ForbiddenException(
+      'You can only view the status of incident tickets you submitted.',
+    );
   }
 
   async findAll(user: AuthenticatedUserProfile, branch?: string) {
     const client = this.supabaseService.getClient();
     const scopedBranchId =
-      user.role === Role.SUPER_ADMIN ? branch || undefined : user.branchId || undefined;
+      user.role === Role.SUPER_ADMIN
+        ? branch || undefined
+        : user.branchId || undefined;
 
     let query = client
       .from('incident_tickets')
@@ -112,7 +124,9 @@ export class IncidentTicketsService {
 
     if (error) {
       this.logger.error(`Failed to fetch incident tickets: ${error.message}`);
-      throw new InternalServerErrorException('Failed to fetch incident tickets');
+      throw new InternalServerErrorException(
+        'Failed to fetch incident tickets',
+      );
     }
 
     return (data ?? []).map((ticket) => ({
@@ -126,7 +140,8 @@ export class IncidentTicketsService {
   }
 
   async create(user: AuthenticatedUserProfile, dto: CreateIncidentTicketDto) {
-    const branchId = user.role === Role.SUPER_ADMIN ? dto.branchId : user.branchId;
+    const branchId =
+      user.role === Role.SUPER_ADMIN ? dto.branchId : user.branchId;
 
     if (!branchId) {
       throw new BadRequestException('Branch is required.');
@@ -135,16 +150,18 @@ export class IncidentTicketsService {
     this.ensureBranchAccess(user, branchId);
 
     if (!dto.title?.trim() || !dto.summary?.trim() || !dto.category?.trim()) {
-      throw new BadRequestException('Title, summary, and category are required.');
+      throw new BadRequestException(
+        'Title, summary, and category are required.',
+      );
     }
 
     const escalationOwnerUserId = dto.requiresManagerEscalation
       ? await this.resolveManagerId(branchId)
       : null;
 
-    const { data, error } = await this.supabaseService.getClient().rpc(
-      'raise_incident_ticket',
-      {
+    const { data, error } = await this.supabaseService
+      .getClient()
+      .rpc('raise_incident_ticket', {
         p_title: dto.title.trim(),
         p_summary: dto.summary.trim(),
         p_category: dto.category.trim(),
@@ -158,7 +175,8 @@ export class IncidentTicketsService {
         p_transaction_ref: dto.transactionRef?.trim() || null,
         p_inventory_item_ref: null,
         p_amount_impact:
-          typeof dto.amountImpact === 'number' && Number.isFinite(dto.amountImpact)
+          typeof dto.amountImpact === 'number' &&
+          Number.isFinite(dto.amountImpact)
             ? dto.amountImpact
             : null,
         p_requires_manager_escalation: Boolean(dto.requiresManagerEscalation),
@@ -166,8 +184,7 @@ export class IncidentTicketsService {
         p_metadata: {
           created_from: 'backend-incident-tickets-api',
         },
-      },
-    );
+      });
 
     if (error) {
       this.logger.error(`Failed to create incident ticket: ${error.message}`);
@@ -215,7 +232,9 @@ export class IncidentTicketsService {
       .maybeSingle();
 
     if (fetchError) {
-      this.logger.error(`Failed to fetch incident ticket ${id}: ${fetchError.message}`);
+      this.logger.error(
+        `Failed to fetch incident ticket ${id}: ${fetchError.message}`,
+      );
       throw new InternalServerErrorException('Failed to load incident ticket');
     }
 
@@ -342,8 +361,12 @@ export class IncidentTicketsService {
       .maybeSingle();
 
     if (error) {
-      this.logger.error(`Failed to update incident ticket ${id}: ${error.message}`);
-      throw new InternalServerErrorException('Failed to update incident ticket');
+      this.logger.error(
+        `Failed to update incident ticket ${id}: ${error.message}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to update incident ticket',
+      );
     }
 
     for (const event of events) {
@@ -364,7 +387,9 @@ export class IncidentTicketsService {
       .limit(1);
 
     if (error) {
-      this.logger.warn(`Failed to resolve manager for branch ${branchId}: ${error.message}`);
+      this.logger.warn(
+        `Failed to resolve manager for branch ${branchId}: ${error.message}`,
+      );
       return null;
     }
 
@@ -386,8 +411,12 @@ export class IncidentTicketsService {
       .maybeSingle();
 
     if (error) {
-      this.logger.warn(`Failed to validate incident assignee ${assigneeId}: ${error.message}`);
-      throw new InternalServerErrorException('Failed to validate incident assignee');
+      this.logger.warn(
+        `Failed to validate incident assignee ${assigneeId}: ${error.message}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to validate incident assignee',
+      );
     }
 
     if (!data) {
@@ -402,7 +431,8 @@ export class IncidentTicketsService {
   }
 
   private async recordEvent(payload: IncidentTicketEventPayload) {
-    const { error } = await this.supabaseService.getClient()
+    const { error } = await this.supabaseService
+      .getClient()
       .from('incident_ticket_events')
       .insert({
         ticket_id: payload.ticketId,

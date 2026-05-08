@@ -45,7 +45,11 @@ export class BranchFinanceController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Body() body: ConfirmDailyBalanceDto,
   ) {
-    return this.branchFinanceService.confirmDailyBalance(req.user, body.type, body.amount);
+    return this.branchFinanceService.confirmDailyBalance(
+      req.user,
+      body.type,
+      body.amount,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

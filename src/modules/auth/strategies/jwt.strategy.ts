@@ -68,7 +68,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             return done(null, supabaseJwtSecret);
           }
 
-          return jwksSecretProvider(_req as any, rawJwtToken, done as any);
+          return jwksSecretProvider(_req, rawJwtToken, done as any);
         } catch (error) {
           return done(error as Error);
         }

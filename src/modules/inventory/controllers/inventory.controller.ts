@@ -180,7 +180,12 @@ export class InventoryController {
   requestQrReplacement(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() dto: { reason: 'Damaged' | 'Lost' | 'Torn'; message?: string; proofPhoto?: string },
+    @Body()
+    dto: {
+      reason: 'Damaged' | 'Lost' | 'Torn';
+      message?: string;
+      proofPhoto?: string;
+    },
   ) {
     return this.inventoryService.requestQrReplacement(
       req.user,
@@ -341,7 +346,12 @@ export class InventoryController {
   markSold(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
-    @Body() dto: { sold_price: number; branch_id: number | string; customer_id?: string },
+    @Body()
+    dto: {
+      sold_price: number;
+      branch_id: number | string;
+      customer_id?: string;
+    },
   ) {
     return this.inventoryService.markSoldAndAddToBalance(
       req.user,

@@ -234,7 +234,9 @@ export class AuthService {
       });
 
     if (error) {
-      throw new BadRequestException(error.message || 'Failed to update password');
+      throw new BadRequestException(
+        error.message || 'Failed to update password',
+      );
     }
 
     return { message: 'Password updated successfully' };
@@ -291,7 +293,9 @@ export class AuthService {
       });
 
     if (error) {
-      throw new BadRequestException(error.message || 'Failed to submit request');
+      throw new BadRequestException(
+        error.message || 'Failed to submit request',
+      );
     }
 
     return {
@@ -378,7 +382,10 @@ export class AuthService {
       ),
     );
 
-    const userMap = new Map<string, { full_name: string | null; role: string | null }>();
+    const userMap = new Map<
+      string,
+      { full_name: string | null; role: string | null }
+    >();
 
     if (requesterIds.length > 0) {
       const { data: users, error: usersError } = await client
@@ -401,7 +408,9 @@ export class AuthService {
           full_name:
             requester.full_name == null
               ? null
-              : this.encryption.decryptUserFullName(String(requester.full_name)),
+              : this.encryption.decryptUserFullName(
+                  String(requester.full_name),
+                ),
           role: requester.role == null ? null : String(requester.role),
         });
       }
@@ -434,7 +443,9 @@ export class AuthService {
             ? details.requestedByName
             : requester?.full_name || 'Unknown user',
         approverRole:
-          typeof details.approverRole === 'string' ? details.approverRole : null,
+          typeof details.approverRole === 'string'
+            ? details.approverRole
+            : null,
         branchId: row.branch_id || null,
       };
     });
@@ -506,11 +517,14 @@ export class AuthService {
         : null;
 
     if (!approverRole || approverRole !== reviewer.role) {
-      throw new UnauthorizedException('You are not allowed to review this request');
+      throw new UnauthorizedException(
+        'You are not allowed to review this request',
+      );
     }
 
     const reviewedAt = new Date().toISOString();
-    const nextStatus = normalizedDecision === 'approve' ? 'approved' : 'rejected';
+    const nextStatus =
+      normalizedDecision === 'approve' ? 'approved' : 'rejected';
 
     const reviewDetails = {
       ...parsedDetails,
@@ -538,26 +552,28 @@ export class AuthService {
         ? 'PASSWORD_CHANGE_REQUEST_APPROVED'
         : 'PASSWORD_CHANGE_REQUEST_REJECTED';
 
-    const { error: reviewLogError } = await client.from('activity_logs').insert({
-      user_id: reviewer.id,
-      branch_id: logRow.branch_id || null,
-      action: reviewAction,
-      details: JSON.stringify({
-        requestId,
-        requestedByUserId:
-          typeof parsedDetails.requestedByUserId === 'string'
-            ? parsedDetails.requestedByUserId
-            : logRow.user_id,
-        requestedByRole:
-          typeof parsedDetails.requestedByRole === 'string'
-            ? parsedDetails.requestedByRole
-            : null,
-        reviewedAt,
-        reviewedByUserId: reviewer.id,
-        reviewedByRole: reviewer.role,
-        reviewNote: safeNote || null,
-      }),
-    });
+    const { error: reviewLogError } = await client
+      .from('activity_logs')
+      .insert({
+        user_id: reviewer.id,
+        branch_id: logRow.branch_id || null,
+        action: reviewAction,
+        details: JSON.stringify({
+          requestId,
+          requestedByUserId:
+            typeof parsedDetails.requestedByUserId === 'string'
+              ? parsedDetails.requestedByUserId
+              : logRow.user_id,
+          requestedByRole:
+            typeof parsedDetails.requestedByRole === 'string'
+              ? parsedDetails.requestedByRole
+              : null,
+          reviewedAt,
+          reviewedByUserId: reviewer.id,
+          reviewedByRole: reviewer.role,
+          reviewNote: safeNote || null,
+        }),
+      });
 
     if (reviewLogError) {
       this.logger.warn(

@@ -23,8 +23,7 @@ export class CreateUserDto {
   role: 'super_admin' | 'superadmin' | 'admin' | 'employee' | 'branch';
 
   @ValidateIf(
-    (o: CreateUserDto) =>
-      o.role !== 'super_admin' && o.role !== 'superadmin',
+    (o: CreateUserDto) => o.role !== 'super_admin' && o.role !== 'superadmin',
   )
   @IsUUID()
   branchId?: string | null;

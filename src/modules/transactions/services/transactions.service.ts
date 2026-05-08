@@ -173,13 +173,16 @@ export class TransactionsService {
     return purpose;
   }
 
-  private assertMoneyShape(purpose: string, amounts: {
-    cashIn: number;
-    cashOut: number;
-    pawnAmount: number;
-    returnAmount: number;
-    storageFee: number;
-  }) {
+  private assertMoneyShape(
+    purpose: string,
+    amounts: {
+      cashIn: number;
+      cashOut: number;
+      pawnAmount: number;
+      returnAmount: number;
+      storageFee: number;
+    },
+  ) {
     const hasCashIn = amounts.cashIn > 0;
     const hasCashOut = amounts.cashOut > 0;
 
@@ -196,7 +199,9 @@ export class TransactionsService {
         );
       }
       if (amounts.cashIn !== 0) {
-        throw new BadRequestException('Pawn transactions cannot include cash_in');
+        throw new BadRequestException(
+          'Pawn transactions cannot include cash_in',
+        );
       }
       return;
     }
@@ -214,7 +219,11 @@ export class TransactionsService {
       const expected = Number(
         (amounts.storageFee + amounts.returnAmount).toFixed(2),
       );
-      if (expected <= 0 || amounts.cashIn !== expected || amounts.cashOut !== 0) {
+      if (
+        expected <= 0 ||
+        amounts.cashIn !== expected ||
+        amounts.cashOut !== 0
+      ) {
         throw new BadRequestException(
           'Renew transactions must set cash_in to storage_fee + return_amount',
         );
@@ -231,7 +240,9 @@ export class TransactionsService {
 
     if (purpose === 'Expense') {
       if (amounts.cashOut <= 0 || amounts.cashIn !== 0) {
-        throw new BadRequestException('Expense transactions must be cash-out only');
+        throw new BadRequestException(
+          'Expense transactions must be cash-out only',
+        );
       }
       return;
     }
@@ -292,18 +303,23 @@ export class TransactionsService {
   ) {
     const date = this.toDbDate(recordDate);
     const current = await client.daily_balances.findUnique({
-      where: { branch_id_record_date: { branch_id: branchId, record_date: date } },
+      where: {
+        branch_id_record_date: { branch_id: branchId, record_date: date },
+      },
       select: { starting_balance: true, ending_balance: true },
     });
 
     if (current) {
-      const nextEndingBalance = this.toNumber(current.ending_balance) + netChange;
+      const nextEndingBalance =
+        this.toNumber(current.ending_balance) + netChange;
       if (nextEndingBalance < 0) {
         throw new BadRequestException('Insufficient branch cash balance');
       }
 
       await client.daily_balances.update({
-        where: { branch_id_record_date: { branch_id: branchId, record_date: date } },
+        where: {
+          branch_id_record_date: { branch_id: branchId, record_date: date },
+        },
         data: {
           ending_balance: nextEndingBalance,
           updated_at: new Date(),
@@ -357,7 +373,8 @@ export class TransactionsService {
     const targetName = normalizeCustomerFullName(customer.full_name);
     const matchingCustomerIds = candidates
       .filter(
-        (candidate) => normalizeCustomerFullName(candidate.full_name) === targetName,
+        (candidate) =>
+          normalizeCustomerFullName(candidate.full_name) === targetName,
       )
       .map((candidate) => candidate.id);
 
@@ -388,14 +405,18 @@ export class TransactionsService {
       cashIn: this.normalizeMoney(dtoClean.cash_in, 'cash_in'),
       cashOut: this.normalizeMoney(dtoClean.cash_out, 'cash_out'),
       pawnAmount: this.normalizeMoney(dtoClean.pawn_amount, 'pawn_amount'),
-      returnAmount: this.normalizeMoney(dtoClean.return_amount, 'return_amount'),
+      returnAmount: this.normalizeMoney(
+        dtoClean.return_amount,
+        'return_amount',
+      ),
       storageFee: this.normalizeMoney(dtoClean.storage_fee, 'storage_fee'),
     };
     this.assertMoneyShape(purpose, amounts);
 
     // 1. Resolve Branch Info
-    const branchId =
-      isSuperAdmin(user) ? (dtoClean.branch_id ?? null) : requireBranchId(user);
+    const branchId = isSuperAdmin(user)
+      ? (dtoClean.branch_id ?? null)
+      : requireBranchId(user);
     const isSystemExpense =
       !branchId && user.role === Role.SUPER_ADMIN && purpose === 'Expense';
 
@@ -418,7 +439,11 @@ export class TransactionsService {
 
     if (branchId && dtoClean.customer_id) {
       const customer = await this.prisma.customers.findFirst({
-        where: { id: dtoClean.customer_id, branch_id: branchId, deleted_at: null },
+        where: {
+          id: dtoClean.customer_id,
+          branch_id: branchId,
+          deleted_at: null,
+        },
         select: { id: true },
       });
       if (!customer) {
@@ -553,10 +578,14 @@ export class TransactionsService {
           const start = new Date();
           if (range === 'weekly') start.setDate(start.getDate() - 7);
           if (range === 'monthly') start.setMonth(start.getMonth() - 1);
-          where.transaction_date = { gte: this.toDbDate(start.toISOString().slice(0, 10)) };
+          where.transaction_date = {
+            gte: this.toDbDate(start.toISOString().slice(0, 10)),
+          };
         }
       } else if (range === 'daily' || !range) {
-        where.transaction_date = this.toDbDate(date || getPhCalendarDateString());
+        where.transaction_date = this.toDbDate(
+          date || getPhCalendarDateString(),
+        );
       }
     }
 
@@ -590,7 +619,11 @@ export class TransactionsService {
     return this.mapTransaction(data);
   }
 
-  async update(user: UserWithBranch, id: string, dto: Partial<CreateTransactionDto>) {
+  async update(
+    user: UserWithBranch,
+    id: string,
+    dto: Partial<CreateTransactionDto>,
+  ) {
     const existing = await this.prisma.transactions.findUnique({
       where: { id },
       select: { id: true, branch_id: true },
@@ -670,7 +703,10 @@ export class TransactionsService {
       const balanceDate = this.toDbDate(date || getPhCalendarDateString());
       const balanceData = await this.prisma.daily_balances.findUnique({
         where: {
-          branch_id_record_date: { branch_id: scoped, record_date: balanceDate },
+          branch_id_record_date: {
+            branch_id: scoped,
+            record_date: balanceDate,
+          },
         },
         select: { starting_balance: true, ending_balance: true },
       });

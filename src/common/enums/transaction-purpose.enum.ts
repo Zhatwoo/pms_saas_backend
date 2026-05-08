@@ -44,7 +44,13 @@ export const TRANSFER_PURPOSES: ReadonlySet<string> = new Set([
  * Check if a purpose string (case-insensitive) is a journal entry
  * that should be excluded from sales/revenue calculations.
  */
-export function isNonRevenuePurpose(purpose: string | null | undefined): boolean {
+export function isNonRevenuePurpose(
+  purpose: string | null | undefined,
+): boolean {
   const p = (purpose ?? '').trim();
-  return JOURNAL_PURPOSES.has(p) || TRANSFER_PURPOSES.has(p) || p === TransactionPurpose.PAWN;
+  return (
+    JOURNAL_PURPOSES.has(p) ||
+    TRANSFER_PURPOSES.has(p) ||
+    p === TransactionPurpose.PAWN
+  );
 }

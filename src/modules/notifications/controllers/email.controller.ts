@@ -12,9 +12,13 @@ export class EmailController {
   @Post('send-expiration-blast/:category')
   async sendExpirationBlast(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Param('category') category: 'overdue' | 'threeDays' | 'sevenDays' | 'thirtyDays',
+    @Param('category')
+    category: 'overdue' | 'threeDays' | 'sevenDays' | 'thirtyDays',
   ) {
-    const branchId = req.user.role === Role.SUPER_ADMIN ? undefined : (req.user.branchId || undefined);
+    const branchId =
+      req.user.role === Role.SUPER_ADMIN
+        ? undefined
+        : req.user.branchId || undefined;
 
     return this.emailService.sendExpirationBlast(req.user, {
       category,

@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  BadRequestException,
+} from '@nestjs/common';
 import { Role, TransactionPurpose } from '../../common/enums';
 import type { UserWithBranch } from '../../common/utils/branch-scope.util';
 import {
@@ -10,9 +14,7 @@ import {
   SupabaseService,
   type AuthenticatedUserProfile,
 } from '../../infrastructure/supabase/supabase.service';
-import {
-  computeBranchDaySnapshot,
-} from '../../common/utils/daily-balance-aggregate.util';
+import { computeBranchDaySnapshot } from '../../common/utils/daily-balance-aggregate.util';
 
 interface TransactionRow {
   id: string;
@@ -299,7 +301,11 @@ export class BranchFinanceService {
     if (purpose === 'buy back') {
       return 'buy_back';
     }
-    if (purpose === 'renew' || purpose === 'renewal' || purpose === 'reappraise') {
+    if (
+      purpose === 'renew' ||
+      purpose === 'renewal' ||
+      purpose === 'reappraise'
+    ) {
       return 'renewal';
     }
     if (
@@ -656,7 +662,9 @@ export class BranchFinanceService {
       .eq('transaction_date', today);
 
     const todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
-      const p = String(tx.purpose ?? '').toLowerCase().trim();
+      const p = String(tx.purpose ?? '')
+        .toLowerCase()
+        .trim();
       if (p === 'start' || p === 'end') return sum;
       return (
         sum +
@@ -677,17 +685,19 @@ export class BranchFinanceService {
     }
 
     if (existing) {
-      const startBal = type === 'starting'
-        ? confirmedAmount
-        : Number(existing.starting_balance ?? 0);
+      const startBal =
+        type === 'starting'
+          ? confirmedAmount
+          : Number(existing.starting_balance ?? 0);
 
       // When type='starting': the employee's declaration IS the current cash truth.
       // Transactions that already happened today are already reflected in the declared amount.
       // So ending = confirmedAmount. Future transactions will adjust via adjustDailyBalance.
       // When type='ending': recompute from start + todayNet for reconciliation.
-      const endingBal = type === 'starting'
-        ? confirmedAmount
-        : Number((startBal + todayNet).toFixed(2));
+      const endingBal =
+        type === 'starting'
+          ? confirmedAmount
+          : Number((startBal + todayNet).toFixed(2));
 
       const update = {
         ...(type === 'starting' ? { starting_balance: confirmedAmount } : {}),
@@ -715,13 +725,16 @@ export class BranchFinanceService {
           .order('record_date', { ascending: false })
           .limit(1)
           .maybeSingle();
-        startBal = priorRow ? Number(Number(priorRow.ending_balance ?? 0).toFixed(2)) : 0;
+        startBal = priorRow
+          ? Number(Number(priorRow.ending_balance ?? 0).toFixed(2))
+          : 0;
       }
 
       // Same logic: starting declaration sets ending = declared amount.
-      const endingBal = type === 'starting'
-        ? startBal
-        : Number((startBal + todayNet).toFixed(2));
+      const endingBal =
+        type === 'starting'
+          ? startBal
+          : Number((startBal + todayNet).toFixed(2));
 
       const row: Record<string, unknown> = {
         branch_id: branchId,
@@ -740,7 +753,8 @@ export class BranchFinanceService {
     // Upsert a journal transaction so it appears in ledger.
     // cash_in/cash_out are ZERO — Start/End are not real cash movement;
     // they only record the confirmed balance in daily_balances.
-    const purpose = type === 'starting' ? TransactionPurpose.START : TransactionPurpose.END;
+    const purpose =
+      type === 'starting' ? TransactionPurpose.START : TransactionPurpose.END;
     const { data: branch } = await client
       .from('branches')
       .select('name')
@@ -779,11 +793,7 @@ export class BranchFinanceService {
       await client.from('transactions').insert([txPayload]);
     }
 
-    if (
-      type === 'starting' &&
-      user.role === Role.EMPLOYEE &&
-      user.id
-    ) {
+    if (type === 'starting' && user.role === Role.EMPLOYEE && user.id) {
       await this.upsertDailyOpeningPendingForEmployee({
         client,
         employeeId: user.id,
@@ -795,11 +805,7 @@ export class BranchFinanceService {
 
     // After closing (end) balance, require this employee to go through opening again
     // (starting cash + inventory) for the same PH calendar day.
-    if (
-      type === 'ending' &&
-      user.role === Role.EMPLOYEE &&
-      user.id
-    ) {
+    if (type === 'ending' && user.role === Role.EMPLOYEE && user.id) {
       const { error: openingResetError } = await client
         .from('daily_opening')
         .delete()

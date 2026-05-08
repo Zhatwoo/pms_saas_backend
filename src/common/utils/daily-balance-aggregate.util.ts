@@ -93,7 +93,11 @@ export function computeBranchDaySnapshot(
 
 /** Net cash movement from ledger rows; excludes Start/End confirmations (already in daily_balances). */
 export function netCashFromTransactions(
-  rows: Array<{ purpose?: string | null; cash_in?: unknown; cash_out?: unknown }>,
+  rows: Array<{
+    purpose?: string | null;
+    cash_in?: unknown;
+    cash_out?: unknown;
+  }>,
 ): number {
   let net = 0;
   for (const tx of rows) {

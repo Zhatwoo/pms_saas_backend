@@ -110,10 +110,7 @@ export class RewardsService {
 
   /* ───────────── Customer Rewards (earned / claimed) ───────────── */
 
-  async findCustomerRewards(
-    user: UserWithBranch,
-    customerId: string,
-  ) {
+  async findCustomerRewards(user: UserWithBranch, customerId: string) {
     const where: Prisma.customer_rewardsWhereInput = {
       customer_id: customerId,
       ...(!isSuperAdmin(user) ? buildBranchFilter(user) : {}),
@@ -214,10 +211,7 @@ export class RewardsService {
 
   /* ───────────── Customer Progress (for progress indicators) ───────────── */
 
-  async getCustomerProgress(
-    user: UserWithBranch,
-    customerId: string,
-  ) {
+  async getCustomerProgress(user: UserWithBranch, customerId: string) {
     const branchFilter = isSuperAdmin(user) ? {} : buildBranchFilter(user);
 
     // Get customer's transaction stats
@@ -265,9 +259,10 @@ export class RewardsService {
 
       // Filter by transaction_type if specified
       const txCountProgress = Math.min(transactionCount, txCountRequired);
-      const amountProgress = amountRequired > 0
-        ? Math.min(totalAmount, amountRequired)
-        : amountRequired;
+      const amountProgress =
+        amountRequired > 0
+          ? Math.min(totalAmount, amountRequired)
+          : amountRequired;
 
       const txCountMet = transactionCount >= txCountRequired;
       const amountMet = amountRequired <= 0 || totalAmount >= amountRequired;

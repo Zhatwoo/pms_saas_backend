@@ -18,7 +18,11 @@ export class ReportsService {
     return 0;
   }
 
-  private resolveDateRange(period?: string, startDate?: string, endDate?: string): { fromDate: string; toDate: string; trendDays: number } {
+  private resolveDateRange(
+    period?: string,
+    startDate?: string,
+    endDate?: string,
+  ): { fromDate: string; toDate: string; trendDays: number } {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
     const p = (period ?? 'daily').toLowerCase() as Period;
@@ -54,13 +58,24 @@ export class ReportsService {
         break;
     }
 
-    const fromDate = p === 'daily' ? todayStr : from.toISOString().split('T')[0];
+    const fromDate =
+      p === 'daily' ? todayStr : from.toISOString().split('T')[0];
     return { fromDate, toDate: todayStr, trendDays };
   }
 
-  async getSystemReport(user: AuthenticatedUserProfile, branchQuery?: string, period?: string, startDate?: string, endDate?: string) {
+  async getSystemReport(
+    user: AuthenticatedUserProfile,
+    branchQuery?: string,
+    period?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
     const client = this.supabaseService.getClient();
-    const { fromDate, toDate, trendDays } = this.resolveDateRange(period, startDate, endDate);
+    const { fromDate, toDate, trendDays } = this.resolveDateRange(
+      period,
+      startDate,
+      endDate,
+    );
 
     const branchId = effectiveBranchIdForQuery(user, branchQuery);
 
@@ -83,7 +98,10 @@ export class ReportsService {
     const { data: salesData } = await salesQuery;
 
     const totalSales = (salesData || []).reduce(
-      (sum, row) => isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in),
+      (sum, row) =>
+        isNonRevenuePurpose(row.purpose)
+          ? sum
+          : sum + this.toMoney(row.cash_in),
       0,
     );
 
@@ -154,7 +172,11 @@ export class ReportsService {
     // Build a map for every day in the range
     const rangeStart = new Date(trendStart);
     const rangeEnd = new Date(trendEnd);
-    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+    for (
+      let d = new Date(rangeStart);
+      d <= rangeEnd;
+      d.setDate(d.getDate() + 1)
+    ) {
       trendMap.set(d.toISOString().split('T')[0], 0);
     }
 
@@ -167,8 +189,18 @@ export class ReportsService {
     }
 
     const monthNames = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     const salesTrend = Array.from(trendMap.entries()).map(([date, sales]) => {
       const d = new Date(date);
@@ -192,7 +224,10 @@ export class ReportsService {
     if (maxIdx >= 0) salesTrend[maxIdx].type = 'high';
 
     const totalTrendSales = salesTrend.reduce((sum, e) => sum + e.sales, 0);
-    const trendAverage = salesTrend.length > 0 ? Math.round(totalTrendSales / salesTrend.length) : 0;
+    const trendAverage =
+      salesTrend.length > 0
+        ? Math.round(totalTrendSales / salesTrend.length)
+        : 0;
 
     const peakEntry = salesTrend.reduce(
       (best, e) => (e.sales > best.sales ? e : best),
@@ -208,14 +243,11 @@ export class ReportsService {
     if (branchId) cashOutQuery = cashOutQuery.eq('branch_id', branchId);
     const { data: cashOutData } = await cashOutQuery;
 
-    const totalExpenses = (cashOutData || []).reduce(
-      (sum, row) => {
-        const p = (row.purpose ?? '').trim().toLowerCase();
-        if (p === 'start' || p === 'end') return sum;
-        return sum + this.toMoney(row.cash_out);
-      },
-      0,
-    );
+    const totalExpenses = (cashOutData || []).reduce((sum, row) => {
+      const p = (row.purpose ?? '').trim().toLowerCase();
+      if (p === 'start' || p === 'end') return sum;
+      return sum + this.toMoney(row.cash_out);
+    }, 0);
 
     // Opening balance
     let openingQuery = client
@@ -256,11 +288,23 @@ export class ReportsService {
     };
   }
 
-  async getBranchSummary(user: AuthenticatedUserProfile, branchQuery?: string, period?: string, startDate?: string, endDate?: string) {
+  async getBranchSummary(
+    user: AuthenticatedUserProfile,
+    branchQuery?: string,
+    period?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
     return this.getSystemReport(user, branchQuery, period, startDate, endDate);
   }
 
-  async getTransactionReport(user: AuthenticatedUserProfile, branchQuery?: string, period?: string, startDate?: string, endDate?: string) {
+  async getTransactionReport(
+    user: AuthenticatedUserProfile,
+    branchQuery?: string,
+    period?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
     return this.getSystemReport(user, branchQuery, period, startDate, endDate);
   }
 }

@@ -15,7 +15,10 @@ export class TransactionsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Body() createTransactionDto: CreateTransactionDto,
   ) {
-    return this.transactionsService.create(req.user, createTransactionDto as any);
+    return this.transactionsService.create(
+      req.user,
+      createTransactionDto as any,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

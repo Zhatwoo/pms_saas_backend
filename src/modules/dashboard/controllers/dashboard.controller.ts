@@ -19,7 +19,13 @@ export class DashboardController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.dashboardService.getPawnKpis(req.user, branch, period, startDate, endDate);
+    return this.dashboardService.getPawnKpis(
+      req.user,
+      branch,
+      period,
+      startDate,
+      endDate,
+    );
   }
 
   @Get('expiration-monitoring')
@@ -34,7 +40,7 @@ export class DashboardController {
   async emailBlast(
     @Req() req: { user: AuthenticatedUserProfile },
     @Body() body: { bucket: string },
-    @Query('branch') branch?: string
+    @Query('branch') branch?: string,
   ) {
     return this.dashboardService.sendExpirationEmailBlast(
       req.user,
