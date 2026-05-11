@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Role } from '../../common/enums';
 import type { UserWithBranch } from '../../common/utils/branch-scope.util';
 import {
@@ -15,6 +16,7 @@ import {
   SupabaseService,
   type AuthenticatedUserProfile,
 } from '../../infrastructure/supabase/supabase.service';
+import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { buildBranchDaySnapshotFromFetched } from '../../common/utils/daily-balance-aggregate.util';
 import { FinanceAuditService } from './services/finance-audit.service';
 import { FinanceDailyBalanceService } from './services/finance-daily-balance.service';
@@ -133,6 +135,7 @@ export class BranchFinanceService {
 
   constructor(
     private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly financeDailyBalance: FinanceDailyBalanceService,
     private readonly financeAudit: FinanceAuditService,
     private readonly branchBusinessSession: BranchBusinessSessionService,
@@ -622,24 +625,65 @@ export class BranchFinanceService {
     );
     const needsPrior = branchIds.filter((id) => !todayByBranch.has(id));
     const priorByBranch = new Map<string, DailyBalanceRow>();
-    await Promise.all(
-      needsPrior.map(async (bid) => {
-        const { data, error } = await client
-          .from('daily_balances')
-          .select(
-            'branch_id, record_date, starting_balance, ending_balance, updated_at',
-          )
-          .eq('branch_id', bid)
-          .lt('record_date', today)
-          .order('record_date', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (error) {
-          throw new InternalServerErrorException(error.message);
+    /**
+     * One round-trip via Prisma (session pooler-safe). The previous
+     * `Promise.all(needsPrior.map(...))` issued N concurrent PostgREST requests and
+     * exhausted Supabase session-mode pools (EMAXCONNSESSION / pool_size).
+     */
+    if (needsPrior.length > 0) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+        throw new InternalServerErrorException('Invalid branch calendar date');
+      }
+      try {
+        const priorRows = await this.prisma.$queryRaw<
+          Array<{
+            branch_id: string;
+            record_date: Date | string;
+            starting_balance: string | number | null;
+            ending_balance: string | number | null;
+            updated_at: Date | string | null;
+          }>
+        >(Prisma.sql`
+          SELECT DISTINCT ON (branch_id)
+            branch_id,
+            record_date,
+            starting_balance,
+            ending_balance,
+            updated_at
+          FROM daily_balances
+          WHERE branch_id IN (${Prisma.join(
+            needsPrior.map((id) => Prisma.sql`${id}::uuid`),
+          )})
+            AND record_date < CAST(${today} AS DATE)
+          ORDER BY branch_id, record_date DESC
+        `);
+
+        for (const row of priorRows) {
+          const recordDate = String(row.record_date).slice(0, 10);
+          const updatedAtRaw = row.updated_at;
+          priorByBranch.set(row.branch_id, {
+            branch_id: row.branch_id,
+            record_date: recordDate,
+            starting_balance: row.starting_balance,
+            ending_balance: row.ending_balance,
+            updated_at:
+              updatedAtRaw instanceof Date
+                ? updatedAtRaw.toISOString()
+                : updatedAtRaw != null
+                  ? String(updatedAtRaw)
+                  : null,
+          });
         }
-        if (data) priorByBranch.set(bid, data as DailyBalanceRow);
-      }),
-    );
+      } catch (err) {
+        this.logger.error(
+          `getSummary prior balances batch failed: ${err instanceof Error ? err.message : String(err)}`,
+          err instanceof Error ? err.stack : undefined,
+        );
+        throw new InternalServerErrorException(
+          err instanceof Error ? err.message : 'Prior balance lookup failed',
+        );
+      }
+    }
 
     const summaries: BranchFinanceSummary[] = (branches as BranchRow[]).map(
       (branch) => {
