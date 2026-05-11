@@ -497,6 +497,14 @@ export class PawnTicketsService {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         result = await this.prisma.$transaction(async (tx) => {
+          const manilaDate = getPhCalendarDateString();
+          await this.financeDailyBalance.assertNetChangePermittedInTx(
+            tx,
+            branchId,
+            manilaDate,
+            -pawnAmount,
+          );
+
           let customer: { id: string; [key: string]: unknown } | null = null;
 
           if (dto.customerId) {

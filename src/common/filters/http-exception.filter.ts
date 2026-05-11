@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 
 /** HTTP 413 — used with literal comparisons to satisfy strict ESLint alongside `unknown` middleware errors. */
@@ -89,6 +90,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      const prismaBody = {
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message:
+          process.env.NODE_ENV !== 'production'
+            ? exception.message
+            : 'Database error',
+        prismaCode: exception.code,
+        timestamp: new Date().toISOString(),
+      };
+      this.logger.error(
+        `[HttpExceptionFilter] Prisma ${exception.code}: ${exception.message}`,
+        exception.stack,
+      );
+      response.status(HttpStatus.INTERNAL_SERVER_ERROR).json(prismaBody);
+      return;
+    }
+
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
     let extraData: unknown = undefined;
@@ -123,6 +142,27 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (extraData !== undefined) {
       errorResponse.data = extraData;
+    }
+
+    if (exception instanceof HttpException) {
+      const raw = exception.getResponse();
+      if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+        const body = raw as Record<string, unknown>;
+        const passthrough = [
+          'error',
+          'code',
+          'available_balance',
+          'required_amount',
+          'branch_id',
+          'business_date',
+          'sessionStatus',
+        ] as const;
+        for (const key of passthrough) {
+          if (body[key] !== undefined) {
+            errorResponse[key] = body[key];
+          }
+        }
+      }
     }
 
     this.logger.error(

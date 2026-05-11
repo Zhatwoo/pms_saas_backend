@@ -43,6 +43,8 @@ type ProcessedCustomerLogTarget = {
 const CUSTOMER_SAFE_SELECT = {
   id: true,
   full_name: true,
+  /** Needed for pawn forms / Philippine address line (street); already scoped to employee branch. */
+  address: true,
   contact_number: true,
   email: true,
   id_presented: true,
