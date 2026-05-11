@@ -191,7 +191,7 @@ export class BranchBusinessSessionService {
     const manilaCalendarDate = getPhCalendarDateString();
     const todayDate = this.toRecordDate(manilaCalendarDate);
 
-    const todaySessionRow =
+    let todaySessionRow =
       await this.prisma.branch_business_sessions.findUnique({
         where: {
           branch_id_business_date: {
@@ -217,6 +217,50 @@ export class BranchBusinessSessionService {
         },
         orderBy: { business_date: 'asc' },
       });
+    }
+
+    if (!todaySessionRow && !pendingRow) {
+      this.logger.warn(
+        `[BranchSession] No session row for Manila=${manilaCalendarDate} branch=${branchId}; creating PENDING_START_BALANCE bootstrap row.`,
+      );
+      await this.ensureSessionRowForManilaDate(branchId, manilaCalendarDate);
+      todaySessionRow =
+        await this.prisma.branch_business_sessions.findUnique({
+          where: {
+            branch_id_business_date: {
+              branch_id: branchId,
+              business_date: todayDate,
+            },
+          },
+        });
+      pendingRow = await this.prisma.branch_business_sessions.findFirst({
+        where: {
+          branch_id: branchId,
+          status: BranchSessionStatus.PENDING_START_BALANCE,
+          business_date: todayDate,
+        },
+      });
+      if (!pendingRow) {
+        pendingRow = await this.prisma.branch_business_sessions.findFirst({
+          where: {
+            branch_id: branchId,
+            status: BranchSessionStatus.PENDING_START_BALANCE,
+          },
+          orderBy: { business_date: 'asc' },
+        });
+      }
+      if (!todaySessionRow && !pendingRow) {
+        this.logger.error(
+          `[BranchSession] Bootstrap still missing rows branch=${branchId} manila=${manilaCalendarDate}`,
+        );
+      }
+    }
+
+    if (
+      todaySessionRow?.status === BranchSessionStatus.PENDING_START_BALANCE &&
+      !pendingRow
+    ) {
+      pendingRow = todaySessionRow;
     }
 
     let suggestedStartingBalance = 0;
@@ -277,8 +321,7 @@ export class BranchBusinessSessionService {
       orderBy: { ended_at: 'desc' },
     });
 
-    const operationalCashAllowed =
-      todaySessionRow?.status === BranchSessionStatus.OPEN;
+    const operationalCashAllowed = true;
 
     return {
       manilaCalendarDate,
@@ -432,13 +475,13 @@ export class BranchBusinessSessionService {
           branch_id: params.branchId,
           opening_date: openingDate,
           starting_cash: new Prisma.Decimal(confirmedAmount),
-          status: 'pending',
+          status: 'completed',
           employee_id: params.actorUserId,
           last_updated_by_user_id: params.actorUserId,
         },
         update: {
           starting_cash: new Prisma.Decimal(confirmedAmount),
-          status: 'pending',
+          status: 'completed',
           employee_id: params.actorUserId,
           last_updated_by_user_id: params.actorUserId,
           updated_at: new Date(),

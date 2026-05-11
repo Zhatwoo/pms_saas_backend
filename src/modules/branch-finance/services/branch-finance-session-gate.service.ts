@@ -1,62 +1,61 @@
-import {
-  ForbiddenException,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
-import { BranchSessionStatus } from '../constants/branch-session-status';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 
 type Tx = Prisma.TransactionClient;
 
+/**
+ * Operational cash postings require an open branch_day_sessions row for the Manila calendar date.
+ */
 @Injectable()
 export class BranchFinanceSessionGateService {
-  private readonly logger = new Logger(BranchFinanceSessionGateService.name);
+  constructor() {}
 
-  constructor(private readonly prisma: PrismaService) {}
-
-  private toRecordDate(dateStr: string): Date {
-    return new Date(`${dateStr}T00:00:00.000Z`);
-  }
-
-  /**
-   * Operational cash postings require an OPEN session for the Manila business date.
-   * Locks the session row when present so close/start flows serialize with postings.
-   */
   async assertOperationalPostingAllowed(
     tx: Tx,
     branchId: string,
     businessDateStr: string,
   ): Promise<void> {
-    const date = this.toRecordDate(businessDateStr);
+    const date = new Date(`${businessDateStr}T00:00:00.000Z`);
 
     await tx.$executeRaw`
-      SELECT id FROM branch_business_sessions
-      WHERE branch_id = ${branchId}::uuid AND business_date = ${date}::date
+      SELECT id FROM branch_day_sessions
+      WHERE branch_id = ${branchId}::uuid AND session_date = ${date}::date
       FOR UPDATE
     `;
 
-    const row = await tx.branch_business_sessions.findUnique({
+    const row = await tx.branch_day_sessions.findUnique({
       where: {
-        branch_id_business_date: { branch_id: branchId, business_date: date },
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: date,
+        },
       },
-      select: { status: true },
     });
 
-    if (row?.status === BranchSessionStatus.OPEN) {
-      return;
+    if (!row) {
+      throw new HttpException(
+        {
+          message:
+            'Starting balance is required before posting transactions for this branch today.',
+          error: 'REQUIRES_STARTING_BALANCE',
+          branch_id: branchId,
+          business_date: businessDateStr,
+        },
+        HttpStatus.FORBIDDEN,
+      );
     }
 
-    this.logger.warn(
-      `Blocked operational cash for branch=${branchId} date=${businessDateStr} session=${row?.status ?? 'MISSING'}`,
-    );
-
-    throw new ForbiddenException({
-      code: 'BRANCH_FINANCE_SESSION_BLOCKED',
-      message:
-        'This branch business day is not open for cash transactions. Submit starting balance for the new business day or wait until the branch day opens.',
-      sessionStatus: row?.status ?? 'MISSING',
-      businessDate: businessDateStr,
-    });
+    if (row.is_closed) {
+      throw new HttpException(
+        {
+          message:
+            'Branch is closed for the day. Please start a new session.',
+          error: 'SESSION_CLOSED',
+          branch_id: branchId,
+          business_date: businessDateStr,
+        },
+        HttpStatus.FORBIDDEN,
+      );
+    }
   }
 }

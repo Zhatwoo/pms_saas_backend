@@ -13,6 +13,7 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { BranchDaySessionService } from '../../branch-finance/services/branch-day-session.service';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 
@@ -24,6 +25,7 @@ export class AuthService {
     private supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly branchDaySession: BranchDaySessionService,
   ) {}
 
   private isActiveBranchStatus(status: string | null | undefined): boolean {
@@ -153,9 +155,19 @@ export class AuthService {
       data.user.id,
     );
 
+    let requiresStartingBalance = false;
+    if (
+      user.branchId &&
+      user.role !== Role.SUPER_ADMIN
+    ) {
+      requiresStartingBalance =
+        await this.branchDaySession.requiresStartingBalance(user.branchId);
+    }
+
     return {
       access_token: data.session.access_token,
       expires_in: data.session.expires_in,
+      requiresStartingBalance,
       user: {
         id: user.id,
         authId: user.authId,

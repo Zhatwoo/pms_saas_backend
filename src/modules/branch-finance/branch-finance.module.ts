@@ -6,6 +6,7 @@ import { FinanceAuditService } from './services/finance-audit.service';
 import { FinanceDailyBalanceService } from './services/finance-daily-balance.service';
 import { BranchBusinessSessionService } from './services/branch-business-session.service';
 import { BranchFinanceSessionGateService } from './services/branch-finance-session-gate.service';
+import { BranchDaySessionService } from './services/branch-day-session.service';
 
 import { BranchFinanceEndDayCronService } from './branch-finance-end-day.cron';
 
@@ -15,6 +16,7 @@ import { BranchFinanceEndDayCronService } from './branch-finance-end-day.cron';
   providers: [
     BranchFinanceSessionGateService,
     FinanceDailyBalanceService,
+    BranchDaySessionService,
     BranchBusinessSessionService,
     BranchFinanceService,
     FinanceAuditService,
@@ -22,6 +24,7 @@ import { BranchFinanceEndDayCronService } from './branch-finance-end-day.cron';
   ],
   exports: [
     BranchFinanceService,
+    BranchDaySessionService,
     FinanceDailyBalanceService,
     FinanceAuditService,
     BranchBusinessSessionService,
