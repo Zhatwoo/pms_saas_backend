@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { Role } from '../../../common/enums';
@@ -372,6 +373,8 @@ export class PawnTicketsService {
       providedSerialNumber && !providedSerialNumber.startsWith('PENDING')
         ? providedSerialNumber
         : await this.generateNextSerialNumberForBranch(branchId);
+    const selectedCustomerId = dto.customerId?.trim() || null;
+    const customerIdForUpload = selectedCustomerId || randomUUID();
 
     // 1. Process Photos if present
     const verificationMode = this.getVerificationMode(dto.customer.idPresented);
@@ -401,7 +404,11 @@ export class PawnTicketsService {
 
       idPhotoUrl = await this.uploadPhoto(
         dto.item.idPhoto,
-        this.buildUploadPath('id-front'),
+        this.buildCustomerIdUploadPath(
+          branchId,
+          customerIdForUpload,
+          'id-front',
+        ),
         'id_pictures',
       );
     } else {
@@ -413,13 +420,21 @@ export class PawnTicketsService {
 
       idPhotoUrl = await this.uploadPhoto(
         dto.item.idPhoto,
-        this.buildUploadPath('id-front'),
+        this.buildCustomerIdUploadPath(
+          branchId,
+          customerIdForUpload,
+          'id-front',
+        ),
         'id_pictures',
       );
 
       idBackPhotoUrl = await this.uploadPhoto(
         dto.item.idBackPhoto,
-        this.buildUploadPath('id-back'),
+        this.buildCustomerIdUploadPath(
+          branchId,
+          customerIdForUpload,
+          'id-back',
+        ),
         'id_pictures',
       );
     }
@@ -507,10 +522,10 @@ export class PawnTicketsService {
 
           let customer: { id: string; [key: string]: unknown } | null = null;
 
-          if (dto.customerId) {
+          if (selectedCustomerId) {
             const existingCustomer = await tx.customers.findFirst({
               where: {
-                id: dto.customerId,
+                id: selectedCustomerId,
                 branch_id: branchId,
                 deleted_at: null,
               },
@@ -528,6 +543,7 @@ export class PawnTicketsService {
               string,
               unknown
             >;
+            customerWrite.id = customerIdForUpload;
             this.encryption.applyCustomerFieldsForWrite(customerWrite);
             customer = await tx.customers.create({
               data: customerWrite as typeof customerPayload,
@@ -730,6 +746,14 @@ export class PawnTicketsService {
 
   private buildBranchScopedUploadPath(branchId: string, prefix: string) {
     return `${branchId}/${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+  }
+
+  private buildCustomerIdUploadPath(
+    branchId: string,
+    customerId: string,
+    filename: 'id-front' | 'id-back',
+  ) {
+    return `${branchId}/${customerId}/${filename}.jpg`;
   }
 
   async findByUnitCode(unitCode: string) {
