@@ -48,8 +48,10 @@ export interface BranchBusinessSessionSnapshot {
 }
 
 /**
- * Branch-wide Manila business-day lifecycle: OPEN → (manual/auto) CLOSED → next calendar PENDING_START_BALANCE → OPEN after shared starting balance.
- * Coordinates daily_balances, journal Start/End markers (Prisma), daily_opening, inventory snapshot on close, and concurrency locks on session rows.
+ * Branch-wide Manila business-day lifecycle: OPEN → end-day may reset same calendar date to
+ * PENDING_START_BALANCE (same-day reopen) or CLOSED → next calendar PENDING_START_BALANCE → OPEN after
+ * shared starting balance. Coordinates daily_balances, journal Start/End markers (Prisma), daily_opening,
+ * inventory snapshot on close, and concurrency locks on session rows.
  */
 @Injectable()
 export class BranchBusinessSessionService {
@@ -183,6 +185,9 @@ export class BranchBusinessSessionService {
   }
 
   async getSnapshot(branchId: string): Promise<BranchBusinessSessionSnapshot> {
+    await this.reconcileStaleFuturePendingWhenTodayClosed(branchId);
+    await this.reconcileStalePriorPendingWhenCalendarAdvanced(branchId);
+
     const manilaCalendarDate = getPhCalendarDateString();
     const todayDate = this.toRecordDate(manilaCalendarDate);
 
@@ -196,13 +201,23 @@ export class BranchBusinessSessionService {
         },
       });
 
-    const pendingRow = await this.prisma.branch_business_sessions.findFirst({
+    let pendingRow = await this.prisma.branch_business_sessions.findFirst({
       where: {
         branch_id: branchId,
         status: BranchSessionStatus.PENDING_START_BALANCE,
+        business_date: todayDate,
       },
-      orderBy: { business_date: 'asc' },
     });
+
+    if (!pendingRow) {
+      pendingRow = await this.prisma.branch_business_sessions.findFirst({
+        where: {
+          branch_id: branchId,
+          status: BranchSessionStatus.PENDING_START_BALANCE,
+        },
+        orderBy: { business_date: 'asc' },
+      });
+    }
 
     let suggestedStartingBalance = 0;
     if (pendingRow) {
@@ -315,13 +330,26 @@ export class BranchBusinessSessionService {
     const confirmedAmount = Number(params.amount.toFixed(2));
 
     return this.prisma.$transaction(async (tx) => {
-      const pending = await tx.branch_business_sessions.findFirst({
+      const todayStr = getPhCalendarDateString();
+      const todayDate = this.toRecordDate(todayStr);
+
+      let pending = await tx.branch_business_sessions.findFirst({
         where: {
           branch_id: params.branchId,
           status: BranchSessionStatus.PENDING_START_BALANCE,
+          business_date: todayDate,
         },
-        orderBy: { business_date: 'asc' },
       });
+
+      if (!pending) {
+        pending = await tx.branch_business_sessions.findFirst({
+          where: {
+            branch_id: params.branchId,
+            status: BranchSessionStatus.PENDING_START_BALANCE,
+          },
+          orderBy: { business_date: 'asc' },
+        });
+      }
 
       if (!pending) {
         throw new BadRequestException({
@@ -504,6 +532,214 @@ export class BranchBusinessSessionService {
     }
   }
 
+  /**
+   * Legacy state: today's session is CLOSED but a future calendar PENDING row exists (e.g. next day
+   * was created while Manila calendar is still "today"). Removes the future row and resets today to
+   * PENDING so staff can submit starting balance again on the same Manila date.
+   */
+  private async reconcileStaleFuturePendingWhenTodayClosed(
+    branchId: string,
+  ): Promise<void> {
+    const manilaCalendarDate = getPhCalendarDateString();
+    const todayDate = this.toRecordDate(manilaCalendarDate);
+
+    const todayRow = await this.prisma.branch_business_sessions.findUnique({
+      where: {
+        branch_id_business_date: {
+          branch_id: branchId,
+          business_date: todayDate,
+        },
+      },
+    });
+
+    if (
+      !todayRow ||
+      (todayRow.status !== BranchSessionStatus.CLOSED &&
+        todayRow.status !== BranchSessionStatus.AUTO_CLOSED)
+    ) {
+      return;
+    }
+
+    const pendingRows = await this.prisma.branch_business_sessions.findMany({
+      where: {
+        branch_id: branchId,
+        status: BranchSessionStatus.PENDING_START_BALANCE,
+      },
+    });
+
+    const futurePending = pendingRows.find(
+      (p) => this.formatBusinessDate(p.business_date) > manilaCalendarDate,
+    );
+
+    if (!futurePending) {
+      return;
+    }
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          SELECT id FROM branch_business_sessions
+          WHERE branch_id = ${branchId}::uuid AND business_date = ${todayDate}::date
+          FOR UPDATE
+        `;
+
+        await tx.branch_business_sessions.delete({
+          where: { id: futurePending.id },
+        });
+
+        await tx.branch_business_sessions.update({
+          where: { id: todayRow.id },
+          data: {
+            status: BranchSessionStatus.PENDING_START_BALANCE,
+            locked: false,
+            ended_at: null,
+            ended_by_user_id: null,
+            auto_closed: false,
+            starting_balance: null,
+            ending_balance: null,
+            started_at: null,
+            started_by_user_id: null,
+            inventory_valuation_snapshot: {},
+            updated_at: new Date(),
+          },
+        });
+      });
+      this.logger.warn(
+        `[BranchSession] Reconciled same-Manila-date reopen branch=${branchId} date=${manilaCalendarDate}`,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(
+        `[BranchSession] reconcileStaleFuturePending skipped branch=${branchId}: ${msg}`,
+      );
+    }
+  }
+
+  /**
+   * After a same-calendar-day end-day, the session row stays PENDING with ended_at set until someone
+   * submits starting balance again. If the Manila calendar advances first, finalize that prior date as
+   * CLOSED and ensure today's row exists as PENDING_START_BALANCE.
+   */
+  private async reconcileStalePriorPendingWhenCalendarAdvanced(
+    branchId: string,
+  ): Promise<void> {
+    const manilaCalendarDate = getPhCalendarDateString();
+    const todayDate = this.toRecordDate(manilaCalendarDate);
+
+    const todayRow = await this.prisma.branch_business_sessions.findUnique({
+      where: {
+        branch_id_business_date: {
+          branch_id: branchId,
+          business_date: todayDate,
+        },
+      },
+    });
+
+    if (todayRow?.status === BranchSessionStatus.OPEN) {
+      return;
+    }
+
+    const stalePreview =
+      await this.prisma.branch_business_sessions.findFirst({
+        where: {
+          branch_id: branchId,
+          status: BranchSessionStatus.PENDING_START_BALANCE,
+          business_date: { lt: todayDate },
+          ended_at: { not: null },
+        },
+        orderBy: { business_date: 'asc' },
+      });
+
+    if (!stalePreview) {
+      return;
+    }
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        for (let i = 0; i < 12; i += 1) {
+          const stale = await tx.branch_business_sessions.findFirst({
+            where: {
+              branch_id: branchId,
+              status: BranchSessionStatus.PENDING_START_BALANCE,
+              business_date: { lt: todayDate },
+              ended_at: { not: null },
+            },
+            orderBy: { business_date: 'asc' },
+          });
+
+          if (!stale) {
+            break;
+          }
+
+          await tx.$executeRaw`
+            SELECT id FROM branch_business_sessions WHERE id = ${stale.id}::uuid FOR UPDATE
+          `;
+
+          const row = await tx.branch_business_sessions.findUnique({
+            where: { id: stale.id },
+          });
+          if (
+            !row ||
+            row.status !== BranchSessionStatus.PENDING_START_BALANCE ||
+            !row.ended_at ||
+            row.business_date >= todayDate
+          ) {
+            break;
+          }
+
+          const dbBal = await tx.daily_balances.findUnique({
+            where: {
+              branch_id_record_date: {
+                branch_id: branchId,
+                record_date: row.business_date,
+              },
+            },
+            select: { ending_balance: true },
+          });
+          const endBal = dbBal?.ending_balance;
+
+          const closeData: Prisma.branch_business_sessionsUpdateInput = {
+            status: BranchSessionStatus.CLOSED,
+            locked: true,
+            updated_at: new Date(),
+          };
+          if (endBal != null) {
+            closeData.ending_balance = new Prisma.Decimal(endBal);
+          }
+          await tx.branch_business_sessions.update({
+            where: { id: row.id },
+            data: closeData,
+          });
+        }
+
+        await tx.branch_business_sessions.upsert({
+          where: {
+            branch_id_business_date: {
+              branch_id: branchId,
+              business_date: todayDate,
+            },
+          },
+          create: {
+            branch_id: branchId,
+            business_date: todayDate,
+            status: BranchSessionStatus.PENDING_START_BALANCE,
+            locked: false,
+            auto_closed: false,
+          },
+          update: {},
+        });
+      });
+      this.logger.warn(
+        `[BranchSession] Finalized prior PENDING-after-close for new Manila date branch=${branchId} today=${manilaCalendarDate}`,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(
+        `[BranchSession] reconcileStalePriorPending skipped branch=${branchId}: ${msg}`,
+      );
+    }
+  }
+
   private async finalizeBranchDay(params: {
     branchId: string;
     closeDateStr: string;
@@ -609,36 +845,59 @@ export class BranchBusinessSessionService {
         },
       );
 
-      await tx.branch_business_sessions.update({
-        where: { id: sessionRow.id },
-        data: {
-          status: autoClosed
-            ? BranchSessionStatus.AUTO_CLOSED
-            : BranchSessionStatus.CLOSED,
-          ending_balance: new Prisma.Decimal(balances.endingBalance),
-          ended_at: new Date(),
-          ended_by_user_id: actorUserId,
-          auto_closed: autoClosed,
-          locked: true,
-          inventory_valuation_snapshot: inventorySnapshot,
-          updated_at: new Date(),
-        },
-      });
+      const sameManilaCalendarDay =
+        closeDateStr === getPhCalendarDateString();
 
-      await tx.branch_business_sessions.upsert({
-        where: {
-          branch_id_business_date: {
+      if (sameManilaCalendarDay) {
+        await tx.branch_business_sessions.update({
+          where: { id: sessionRow.id },
+          data: {
+            status: BranchSessionStatus.PENDING_START_BALANCE,
+            starting_balance: null,
+            ending_balance: null,
+            started_at: null,
+            started_by_user_id: null,
+            auto_closed: false,
+            locked: false,
+            inventory_valuation_snapshot: inventorySnapshot,
+            updated_at: new Date(),
+          },
+        });
+        this.logger.log(
+          `[BranchSession] Same-Manila-date end-day → pending restart branch=${branchId} date=${closeDateStr}`,
+        );
+      } else {
+        await tx.branch_business_sessions.update({
+          where: { id: sessionRow.id },
+          data: {
+            status: autoClosed
+              ? BranchSessionStatus.AUTO_CLOSED
+              : BranchSessionStatus.CLOSED,
+            ending_balance: new Prisma.Decimal(balances.endingBalance),
+            ended_at: new Date(),
+            ended_by_user_id: actorUserId,
+            auto_closed: autoClosed,
+            locked: true,
+            inventory_valuation_snapshot: inventorySnapshot,
+            updated_at: new Date(),
+          },
+        });
+
+        await tx.branch_business_sessions.upsert({
+          where: {
+            branch_id_business_date: {
+              branch_id: branchId,
+              business_date: nextBusinessDate,
+            },
+          },
+          create: {
             branch_id: branchId,
             business_date: nextBusinessDate,
+            status: BranchSessionStatus.PENDING_START_BALANCE,
           },
-        },
-        create: {
-          branch_id: branchId,
-          business_date: nextBusinessDate,
-          status: BranchSessionStatus.PENDING_START_BALANCE,
-        },
-        update: {},
-      });
+          update: {},
+        });
+      }
 
       await tx.daily_opening.deleteMany({
         where: {
@@ -664,6 +923,7 @@ export class BranchBusinessSessionService {
       return {
         kind: 'closed' as const,
         endingBalance: balances.endingBalance,
+        sameDayReopen: sameManilaCalendarDay,
       };
     });
 
@@ -687,12 +947,20 @@ export class BranchBusinessSessionService {
       };
     }
 
+    const closed = txResult as {
+      kind: 'closed';
+      endingBalance: number;
+      sameDayReopen: boolean;
+    };
+
     return {
       skipped: false,
       closureApplied: true,
       businessDate: closeDateStr,
-      endingBalance: txResult.endingBalance,
-      nextBusinessDate: nextBusinessDateStr,
+      endingBalance: closed.endingBalance,
+      nextBusinessDate: closed.sameDayReopen
+        ? closeDateStr
+        : nextBusinessDateStr,
     };
   }
 }

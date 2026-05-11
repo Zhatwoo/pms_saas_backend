@@ -19,6 +19,7 @@ import { buildBranchDaySnapshotFromFetched } from '../../common/utils/daily-bala
 import { FinanceAuditService } from './services/finance-audit.service';
 import { FinanceDailyBalanceService } from './services/finance-daily-balance.service';
 import { BranchBusinessSessionService } from './services/branch-business-session.service';
+import { BranchSessionStatus } from './constants/branch-session-status';
 
 interface TransactionRow {
   id: string;
@@ -244,6 +245,21 @@ export class BranchFinanceService {
 
     const branchId = requireUserBranchId(user);
     const openingDate = getPhCalendarDateString();
+
+    const sessionSnap = await this.branchBusinessSession.getSnapshot(branchId);
+    const needsSharedStartingBalance =
+      sessionSnap.pendingStartingSession != null ||
+      sessionSnap.todaySession?.status ===
+        BranchSessionStatus.PENDING_START_BALANCE;
+
+    if (needsSharedStartingBalance) {
+      return {
+        openingDate,
+        status: 'none',
+        checklistStep: 'CASH_ON_HAND',
+      };
+    }
+
     const client = this.supabaseService.getClient();
 
     const { data: row, error } = await client

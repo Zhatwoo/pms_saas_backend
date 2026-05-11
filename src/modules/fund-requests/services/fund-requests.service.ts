@@ -1545,6 +1545,8 @@ export class FundRequestsService {
         sourceBranch.id,
         getPhCalendarDateString(),
         -sentAmount,
+        undefined,
+        { bypassOperationalSessionGate: true },
       );
     } catch (err) {
       const errorMessage =
@@ -1554,6 +1556,8 @@ export class FundRequestsService {
           sourceBranch.id,
           getPhCalendarDateString(),
           -sentAmount,
+          undefined,
+          { bypassOperationalSessionGate: true },
         );
       } else {
         throw err;
@@ -1629,23 +1633,34 @@ export class FundRequestsService {
     assertResourceBranch(user, existing.branch_id);
 
     if (!this.isPendingConfirmationRow(existing)) {
-      if (existing.receiver_user_id && existing.receiver_user_id !== user.id) {
-        throw new ForbiddenException(
-          'This transfer is assigned to another receiver',
-        );
-      }
+      throw new BadRequestException(
+        'Only pending confirmation requests can be confirmed',
+      );
+    }
+
+    if (existing.receiver_user_id && existing.receiver_user_id !== user.id) {
+      throw new ForbiddenException(
+        'This transfer is assigned to another receiver',
+      );
+    }
+
+    if (
+      !existing.receiver_user_id &&
+      existing.receiver_role &&
+      existing.receiver_role !== this.toReceiverRole(user.role)
+    ) {
+      const employeeMayConfirmAdminReceiverHint =
+        user.role === Role.EMPLOYEE && existing.receiver_role === 'admin';
+      const adminMayConfirmEmployeeReceiverHint =
+        user.role === Role.ADMIN && existing.receiver_role === 'employee';
       if (
-        existing.receiver_role &&
-        existing.receiver_role !== this.toReceiverRole(user.role)
+        !employeeMayConfirmAdminReceiverHint &&
+        !adminMayConfirmEmployeeReceiverHint
       ) {
         throw new ForbiddenException(
           'Your role is not allowed to confirm this transfer',
         );
       }
-
-      throw new BadRequestException(
-        'Only pending confirmation requests can be confirmed',
-      );
     }
 
     const destinationBranch = Array.isArray(existing.branches)
@@ -1716,6 +1731,8 @@ export class FundRequestsService {
         existing.branch_id,
         getPhCalendarDateString(),
         balanceDelta,
+        undefined,
+        { bypassOperationalSessionGate: true },
       );
     } catch (err) {
       const errorMessage =
@@ -1732,6 +1749,8 @@ export class FundRequestsService {
           existing.branch_id,
           getPhCalendarDateString(),
           balanceDeltaFallback,
+          undefined,
+          { bypassOperationalSessionGate: true },
         );
       } else {
         throw err;
