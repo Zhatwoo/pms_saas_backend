@@ -6,7 +6,8 @@ import {
 import nodemailer, { type Transporter } from 'nodemailer';
 import { Role, isNonRevenuePurpose } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
-import { computeBranchDaySnapshot } from '../../../common/utils/daily-balance-aggregate.util';
+import { buildBranchDaySnapshotFromFetched } from '../../../common/utils/daily-balance-aggregate.util';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
@@ -29,6 +30,7 @@ interface BranchRecord {
   branch_code: string | null;
   location?: string | null;
   status: string | null;
+  opening_cash_balance?: number | string | null;
 }
 
 interface DailyBalanceRow {
@@ -477,12 +479,62 @@ export class DashboardService {
     );
   }
 
+  /**
+   * Per-branch today + prior daily_balances (no global row cap) for accurate carry-forward.
+   */
+  private async loadBalanceSnapshotMapsForBranches(
+    client: ReturnType<SupabaseService['getClient']>,
+    branchIds: string[],
+    asOfDate: string,
+  ): Promise<{
+    todayByBranch: Map<string, DailyBalanceRow>;
+    priorByBranch: Map<string, DailyBalanceRow>;
+  }> {
+    if (branchIds.length === 0) {
+      return { todayByBranch: new Map(), priorByBranch: new Map() };
+    }
+    const { data: todayRows, error: todayErr } = await client
+      .from('daily_balances')
+      .select(
+        'branch_id, record_date, starting_balance, ending_balance, updated_at',
+      )
+      .in('branch_id', branchIds)
+      .eq('record_date', asOfDate);
+    if (todayErr) {
+      throw new InternalServerErrorException(todayErr.message);
+    }
+    const todayByBranch = new Map(
+      (todayRows ?? []).map((r: DailyBalanceRow) => [r.branch_id, r]),
+    );
+    const needsPrior = branchIds.filter((id) => !todayByBranch.has(id));
+    const priorByBranch = new Map<string, DailyBalanceRow>();
+    await Promise.all(
+      needsPrior.map(async (bid) => {
+        const { data, error } = await client
+          .from('daily_balances')
+          .select(
+            'branch_id, record_date, starting_balance, ending_balance, updated_at',
+          )
+          .eq('branch_id', bid)
+          .lt('record_date', asOfDate)
+          .order('record_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          throw new InternalServerErrorException(error.message);
+        }
+        if (data) priorByBranch.set(bid, data as DailyBalanceRow);
+      }),
+    );
+    return { todayByBranch, priorByBranch };
+  }
+
   private buildBranchFinanceSummaries(params: {
     branches: BranchRecord[];
-    /** All daily_balances rows fetched for these branches (any dates). */
-    balanceRows: DailyBalanceRow[];
+    todayByBranch: Map<string, DailyBalanceRow>;
+    priorByBranch: Map<string, DailyBalanceRow>;
     transferredFunds: TransferredFundRow[];
-    /** ISO date (YYYY-MM-DD) for "today's" snapshot per branch. */
+    /** ISO date (YYYY-MM-DD) Manila business day. */
     asOfDate: string;
   }) {
     const transferredSummaryByBranch = new Map<
@@ -506,12 +558,13 @@ export class DashboardService {
 
     return params.branches.map((branch) => {
       const transferred = transferredSummaryByBranch.get(branch.id);
-      const snap = computeBranchDaySnapshot(
-        params.balanceRows,
-        branch.id,
-        params.asOfDate,
-        { carryForward: true },
-      );
+      const openingFallback = this.toMoney(branch.opening_cash_balance);
+      const snap = buildBranchDaySnapshotFromFetched({
+        today: params.asOfDate,
+        todayRow: params.todayByBranch.get(branch.id),
+        priorRow: params.priorByBranch.get(branch.id),
+        openingCashFallback: openingFallback,
+      });
 
       return {
         branchId: branch.id,
@@ -585,7 +638,6 @@ export class DashboardService {
           usersCountResult,
           pendingUsersCountResult,
           branchesResult,
-          latestBalancesResult,
           transferredFundsResult,
           fundRowsResult,
           recentRequestsResult,
@@ -604,15 +656,8 @@ export class DashboardService {
             .eq('account_status', 'pending'),
           client
             .from('branches')
-            .select('id, name, branch_code, location, status')
+            .select('id, name, branch_code, location, status, opening_cash_balance')
             .order('name', { ascending: true }),
-          client
-            .from('daily_balances')
-            .select(
-              'branch_id, record_date, starting_balance, ending_balance, updated_at',
-            )
-            .order('record_date', { ascending: false })
-            .limit(4000),
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
@@ -674,7 +719,6 @@ export class DashboardService {
           usersCountResult.error,
           pendingUsersCountResult.error,
           branchesResult.error,
-          latestBalancesResult.error,
           transferredFundsResult.error,
           fundRowsResult.error,
           recentRequestsResult.error,
@@ -685,6 +729,16 @@ export class DashboardService {
         if (errors.length > 0) {
           throw new InternalServerErrorException(errors[0]?.message);
         }
+
+        const asOfDateSa = getPhCalendarDateString();
+        const branchListSa = branchesResult.data ?? [];
+        const branchIdsSa = branchListSa.map((b) => b.id);
+        const { todayByBranch: todayMapSa, priorByBranch: priorMapSa } =
+          await this.loadBalanceSnapshotMapsForBranches(
+            client,
+            branchIdsSa,
+            asOfDateSa,
+          );
 
         return {
           view: 'super_admin',
@@ -707,10 +761,11 @@ export class DashboardService {
             ),
           },
           branchBalances: this.buildBranchFinanceSummaries({
-            branches: branchesResult.data ?? [],
-            balanceRows: latestBalancesResult.data ?? [],
+            branches: branchListSa,
+            todayByBranch: todayMapSa,
+            priorByBranch: priorMapSa,
             transferredFunds: transferredFundsResult.data ?? [],
-            asOfDate: new Date().toISOString().split('T')[0],
+            asOfDate: asOfDateSa,
           }),
           recentFundRequests: (recentRequestsResult.data ?? []).map((row) =>
             this.mapDashboardFundRequest(row),
@@ -725,13 +780,12 @@ export class DashboardService {
         const [
           branchResult,
           fundRowsResult,
-          latestBalanceResult,
           transferredFundsResult,
           todayTransactionsResult,
         ] = await Promise.all([
           client
             .from('branches')
-            .select('id, name, branch_code, location, status')
+            .select('id, name, branch_code, location, status, opening_cash_balance')
             .eq('id', branchId)
             .maybeSingle(),
           client
@@ -754,14 +808,6 @@ export class DashboardService {
             .eq('branch_id', branchId)
             .order('created_at', { ascending: false }),
           client
-            .from('daily_balances')
-            .select(
-              'branch_id, record_date, starting_balance, ending_balance, updated_at',
-            )
-            .eq('branch_id', branchId)
-            .order('record_date', { ascending: false })
-            .limit(90),
-          client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
             .eq('branch_id', branchId)
@@ -770,13 +816,13 @@ export class DashboardService {
             .from('transactions')
             .select('purpose, cash_in, cash_out')
             .eq('branch_id', branchId)
-            .eq('transaction_date', new Date().toISOString().split('T')[0]),
+            .eq('transaction_date', getPhCalendarDateString())
+            .is('voided_at', null),
         ]);
 
         const errors = [
           branchResult.error,
           fundRowsResult.error,
-          latestBalanceResult.error,
           transferredFundsResult.error,
           todayTransactionsResult.error,
         ].filter(Boolean);
@@ -785,13 +831,18 @@ export class DashboardService {
           throw new InternalServerErrorException(errors[0]?.message);
         }
 
-        const todayStrAdmin = new Date().toISOString().split('T')[0];
-        const adminBalanceRows = (latestBalanceResult.data ??
-          []) as DailyBalanceRow[];
+        const todayStrAdmin = getPhCalendarDateString();
+        const { todayByBranch: admToday, priorByBranch: admPrior } =
+          await this.loadBalanceSnapshotMapsForBranches(
+            client,
+            [branchId],
+            todayStrAdmin,
+          );
         const adminFinance =
           this.buildBranchFinanceSummaries({
             branches: branchResult.data ? [branchResult.data] : [],
-            balanceRows: adminBalanceRows,
+            todayByBranch: admToday,
+            priorByBranch: admPrior,
             transferredFunds: transferredFundsResult.data ?? [],
             asOfDate: todayStrAdmin,
           })[0] ?? null;
@@ -820,13 +871,12 @@ export class DashboardService {
         const [
           employeeBranchResult,
           employeeFundRowsResult,
-          employeeLatestBalanceResult,
           employeeTransferredFundsResult,
           employeeTodayTransactionsResult,
         ] = await Promise.all([
           client
             .from('branches')
-            .select('id, name, branch_code, location, status')
+            .select('id, name, branch_code, location, status, opening_cash_balance')
             .eq('id', employeeBranchId)
             .maybeSingle(),
           client
@@ -849,14 +899,6 @@ export class DashboardService {
             .eq('branch_id', employeeBranchId)
             .order('created_at', { ascending: false }),
           client
-            .from('daily_balances')
-            .select(
-              'branch_id, record_date, starting_balance, ending_balance, updated_at',
-            )
-            .eq('branch_id', employeeBranchId)
-            .order('record_date', { ascending: false })
-            .limit(90),
-          client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
             .eq('branch_id', employeeBranchId)
@@ -865,13 +907,13 @@ export class DashboardService {
             .from('transactions')
             .select('purpose, cash_in, cash_out')
             .eq('branch_id', employeeBranchId)
-            .eq('transaction_date', new Date().toISOString().split('T')[0]),
+            .eq('transaction_date', getPhCalendarDateString())
+            .is('voided_at', null),
         ]);
 
         const employeeErrors = [
           employeeBranchResult.error,
           employeeFundRowsResult.error,
-          employeeLatestBalanceResult.error,
           employeeTransferredFundsResult.error,
           employeeTodayTransactionsResult.error,
         ].filter(Boolean);
@@ -880,15 +922,20 @@ export class DashboardService {
           throw new InternalServerErrorException(employeeErrors[0]?.message);
         }
 
-        const todayStrEmp = new Date().toISOString().split('T')[0];
-        const empBalanceRows = (employeeLatestBalanceResult.data ??
-          []) as DailyBalanceRow[];
+        const todayStrEmp = getPhCalendarDateString();
+        const { todayByBranch: empToday, priorByBranch: empPrior } =
+          await this.loadBalanceSnapshotMapsForBranches(
+            client,
+            [employeeBranchId],
+            todayStrEmp,
+          );
         const empFinance =
           this.buildBranchFinanceSummaries({
             branches: employeeBranchResult.data
               ? [employeeBranchResult.data]
               : [],
-            balanceRows: empBalanceRows,
+            todayByBranch: empToday,
+            priorByBranch: empPrior,
             transferredFunds: employeeTransferredFundsResult.data ?? [],
             asOfDate: todayStrEmp,
           })[0] ?? null;

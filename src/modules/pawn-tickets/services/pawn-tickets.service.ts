@@ -17,6 +17,7 @@ import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-d
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 
 type PawnTicketDbClient = any;
 
@@ -27,6 +28,7 @@ export class PawnTicketsService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly encryption: EncryptionService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
   private getVerificationMode(idPresented?: string | null) {
@@ -196,67 +198,6 @@ export class PawnTicketsService {
   private toNumber(value: any | number | string | null | undefined) {
     if (value == null) return 0;
     return Number(value);
-  }
-
-  private async adjustDailyBalance(
-    branchId: string,
-    netChange: number,
-    client: PawnTicketDbClient = this.prisma,
-  ) {
-    const recordDate = this.toDbDate(getPhCalendarDateString());
-    const current = await client.daily_balances.findUnique({
-      where: {
-        branch_id_record_date: { branch_id: branchId, record_date: recordDate },
-      },
-      select: { ending_balance: true },
-    });
-
-    if (current) {
-      const nextEndingBalance =
-        this.toNumber(current.ending_balance) + netChange;
-      if (nextEndingBalance < 0) {
-        throw new BadRequestException(
-          `Insufficient branch cash balance. Available balance is ${this.toNumber(current.ending_balance).toFixed(2)}, pawn cash out is ${Math.abs(netChange).toFixed(2)}.`,
-        );
-      }
-
-      await client.daily_balances.update({
-        where: {
-          branch_id_record_date: {
-            branch_id: branchId,
-            record_date: recordDate,
-          },
-        },
-        data: {
-          ending_balance: nextEndingBalance,
-          updated_at: new Date(),
-        },
-      });
-      return;
-    }
-
-    const prior = await client.daily_balances.findFirst({
-      where: { branch_id: branchId, record_date: { lt: recordDate } },
-      orderBy: { record_date: 'desc' },
-      select: { ending_balance: true },
-    });
-    const carried = this.toNumber(prior?.ending_balance);
-    const nextEndingBalance = carried + netChange;
-
-    if (nextEndingBalance < 0) {
-      throw new BadRequestException(
-        `Insufficient branch cash balance. Available balance is ${carried.toFixed(2)}, pawn cash out is ${Math.abs(netChange).toFixed(2)}.`,
-      );
-    }
-
-    await client.daily_balances.create({
-      data: {
-        branch_id: branchId,
-        record_date: recordDate,
-        starting_balance: carried,
-        ending_balance: nextEndingBalance,
-      },
-    });
   }
 
   private formatSupabaseError(error: unknown): string {
@@ -653,7 +594,12 @@ export class PawnTicketsService {
             Number(transactionPayload.cash_in ?? 0) -
             Number(transactionPayload.cash_out ?? 0);
           if (netChange !== 0) {
-            await this.adjustDailyBalance(branchId, netChange, tx);
+            await this.financeDailyBalance.applyNetChange(
+              branchId,
+              getPhCalendarDateString(),
+              netChange,
+              tx,
+            );
           }
 
           await tx.activity_logs.create({

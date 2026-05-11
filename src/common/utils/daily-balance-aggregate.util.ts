@@ -91,16 +91,50 @@ export function computeBranchDaySnapshot(
   };
 }
 
+/**
+ * Build snapshot from explicit today/prior rows (correct per-branch fetch), not a global capped window.
+ * When there is no today row and no prior row, uses openingCashFallback (e.g. branches.opening_cash_balance).
+ */
+export function buildBranchDaySnapshotFromFetched(params: {
+  today: string;
+  todayRow: DailyBalanceRowLike | null | undefined;
+  priorRow: DailyBalanceRowLike | null | undefined;
+  openingCashFallback: number;
+}): BranchDaySnapshot {
+  const { today, todayRow, priorRow, openingCashFallback } = params;
+  if (todayRow && todayRow.record_date === today) {
+    return {
+      startingBalance: toMoneyNumber(todayRow.starting_balance),
+      endingBalance: toMoneyNumber(todayRow.ending_balance),
+      recordDate: todayRow.record_date,
+      updatedAt:
+        typeof todayRow.updated_at === 'string' ? todayRow.updated_at : null,
+    };
+  }
+  const carried = priorRow
+    ? toMoneyNumber(priorRow.ending_balance)
+    : toMoneyNumber(openingCashFallback);
+  return {
+    startingBalance: carried,
+    endingBalance: carried,
+    recordDate: priorRow?.record_date ?? null,
+    updatedAt:
+      typeof priorRow?.updated_at === 'string' ? priorRow.updated_at : null,
+  };
+}
+
 /** Net cash movement from ledger rows; excludes Start/End confirmations (already in daily_balances). */
 export function netCashFromTransactions(
   rows: Array<{
     purpose?: string | null;
     cash_in?: unknown;
     cash_out?: unknown;
+    voided_at?: string | null;
   }>,
 ): number {
   let net = 0;
   for (const tx of rows) {
+    if (tx.voided_at != null && tx.voided_at !== '') continue;
     const p = (tx.purpose ?? '').toLowerCase().trim();
     if (p === 'start' || p === 'end') continue;
     net += toMoneyNumber(tx.cash_in) - toMoneyNumber(tx.cash_out);

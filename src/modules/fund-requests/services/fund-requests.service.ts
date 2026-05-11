@@ -13,8 +13,9 @@ import {
   requireUserBranchId,
   superAdminBranchNameFilter,
 } from '../../../common/utils/branch-scope.util';
-import { adjustDailyBalance as sharedAdjustDailyBalance } from '../../../common/utils/daily-balance.util';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
@@ -156,14 +157,12 @@ export class FundRequestsService {
     private readonly activityLogsService: ActivityLogsService,
     private readonly notificationsService: NotificationsService,
     private readonly encryption: EncryptionService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
-  private toDatePart(date: Date): string {
-    return date.toISOString().split('T')[0];
-  }
-
-  private toTimePart(date: Date): string {
-    return date.toISOString().split('T')[1]?.slice(0, 8) ?? '00:00:00';
+  /** Manila calendar date key YYYYMMDD for request/transfer numbering. */
+  private phDateKey(d = new Date()): string {
+    return getPhCalendarDateString(d).replace(/-/g, '');
   }
 
   private compactText(value?: string | null): string | null {
@@ -631,17 +630,6 @@ export class FundRequestsService {
     };
   }
 
-  private async adjustDailyBalance(
-    branchId: string,
-    delta: number,
-  ): Promise<void> {
-    await sharedAdjustDailyBalance(
-      this.supabaseService.getClient(),
-      branchId,
-      delta,
-    );
-  }
-
   private async createTransferTransaction(params: {
     branch: BranchRow;
     request: FundRequestRow;
@@ -653,7 +641,7 @@ export class FundRequestsService {
     counterpartBranchName?: string | null;
   }): Promise<{ id: string }> {
     const now = new Date();
-    const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+    const prefix = `FT-${this.phDateKey(now)}-`;
     const transactionNo = await this.getNextCode(
       'transactions',
       'transaction_no',
@@ -689,8 +677,9 @@ export class FundRequestsService {
         branch_id: params.branch.id,
         branch: params.branch.name,
         purpose: 'Fund Transfer',
-        transaction_date: this.toDatePart(now),
-        transaction_time: this.toTimePart(now),
+        // Align with Prisma/daily_balances: Asia/Manila business date (not UTC).
+        transaction_date: getPhCalendarDateString(now),
+        transaction_time: now.toTimeString().slice(0, 8),
         cash_in: isInbound ? params.amount : 0,
         cash_out: isInbound ? 0 : params.amount,
         return_amount: 0,
@@ -721,7 +710,7 @@ export class FundRequestsService {
     destinationBranchName: string;
   }): Promise<{ id: string }> {
     const now = new Date();
-    const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+    const prefix = `FT-${this.phDateKey(now)}-`;
     const transactionNo = await this.getNextCode(
       'transactions',
       'transaction_no',
@@ -746,8 +735,8 @@ export class FundRequestsService {
         branch_id: null,
         branch: 'System / Head Office',
         purpose: 'Fund Transfer',
-        transaction_date: this.toDatePart(now),
-        transaction_time: this.toTimePart(now),
+        transaction_date: getPhCalendarDateString(now),
+        transaction_time: now.toTimeString().slice(0, 8),
         cash_in: 0,
         cash_out: params.amount,
         return_amount: 0,
@@ -781,7 +770,7 @@ export class FundRequestsService {
     let outboundId: string | null = null;
     if (params.sourceBranch) {
       const now = new Date();
-      const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+      const prefix = `FT-${this.phDateKey(now)}-`;
       const transactionNo = await this.getNextCode(
         'transactions',
         'transaction_no',
@@ -795,8 +784,8 @@ export class FundRequestsService {
           branch_id: params.sourceBranch.id,
           branch: params.sourceBranch.name,
           purpose: 'Fund Transfer',
-          transaction_date: this.toDatePart(now),
-          transaction_time: this.toTimePart(now),
+          transaction_date: getPhCalendarDateString(now),
+          transaction_time: now.toTimeString().slice(0, 8),
           cash_in: 0,
           cash_out: params.amount,
           return_amount: 0,
@@ -921,7 +910,7 @@ export class FundRequestsService {
     const requestNo = await this.getNextCode(
       'fund_requests',
       'request_no',
-      `FR-${this.toDatePart(now).replace(/-/g, '')}-`,
+      `FR-${this.phDateKey(now)}-`,
     );
 
     const { data, error } = await this.supabaseService
@@ -1012,7 +1001,7 @@ export class FundRequestsService {
     const requestNo = await this.getNextCode(
       'fund_requests',
       'request_no',
-      `DF-${this.toDatePart(now).replace(/-/g, '')}-`,
+      `DF-${this.phDateKey(now)}-`,
     );
     const amount = this.normalizeMoney(dto.amount);
     const transferMode = dto.transferMode ?? 'cash';
@@ -1552,12 +1541,20 @@ export class FundRequestsService {
         counterpartBranchName: destinationBranch.name,
       });
       outboundTransactionId = outboundTransaction.id;
-      await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+      await this.financeDailyBalance.applyNetChange(
+        sourceBranch.id,
+        getPhCalendarDateString(),
+        -sentAmount,
+      );
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
-        await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+        await this.financeDailyBalance.applyNetChange(
+          sourceBranch.id,
+          getPhCalendarDateString(),
+          -sentAmount,
+        );
       } else {
         throw err;
       }
@@ -1715,7 +1712,11 @@ export class FundRequestsService {
       const balanceDelta = isExpenseTransfer
         ? -confirmedAmount
         : confirmedAmount;
-      await this.adjustDailyBalance(existing.branch_id, balanceDelta);
+      await this.financeDailyBalance.applyNetChange(
+        existing.branch_id,
+        getPhCalendarDateString(),
+        balanceDelta,
+      );
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
@@ -1727,7 +1728,11 @@ export class FundRequestsService {
           .includes('expense')
           ? -confirmedAmount
           : confirmedAmount;
-        await this.adjustDailyBalance(existing.branch_id, balanceDeltaFallback);
+        await this.financeDailyBalance.applyNetChange(
+          existing.branch_id,
+          getPhCalendarDateString(),
+          balanceDeltaFallback,
+        );
       } else {
         throw err;
       }

@@ -3,7 +3,7 @@ import {
   InternalServerErrorException,
   BadRequestException,
 } from '@nestjs/common';
-import { Role, TransactionPurpose } from '../../common/enums';
+import { Role } from '../../common/enums';
 import type { UserWithBranch } from '../../common/utils/branch-scope.util';
 import {
   effectiveBranchIdForQuery,
@@ -14,7 +14,10 @@ import {
   SupabaseService,
   type AuthenticatedUserProfile,
 } from '../../infrastructure/supabase/supabase.service';
-import { computeBranchDaySnapshot } from '../../common/utils/daily-balance-aggregate.util';
+import { buildBranchDaySnapshotFromFetched } from '../../common/utils/daily-balance-aggregate.util';
+import { FinanceAuditService } from './services/finance-audit.service';
+import { FinanceDailyBalanceService } from './services/finance-daily-balance.service';
+import { BranchBusinessSessionService } from './services/branch-business-session.service';
 
 interface TransactionRow {
   id: string;
@@ -35,6 +38,12 @@ interface TransactionRow {
   created_at: string;
 }
 
+/** Subset for getSummary aggregation + shared classify/description helpers. */
+type SummaryTxRow = Pick<
+  TransactionRow,
+  'purpose' | 'unit' | 'cash_in' | 'cash_out' | 'unit_code' | 'details'
+> & { voided_at?: string | null };
+
 interface DailyBalanceRow {
   branch_id: string;
   record_date: string;
@@ -48,6 +57,7 @@ interface BranchRow {
   name: string;
   branch_code: string | null;
   status: string | null;
+  opening_cash_balance?: number | string | null;
 }
 
 export type LedgerEntryType =
@@ -117,10 +127,105 @@ export interface BranchFinanceSummary {
 
 @Injectable()
 export class BranchFinanceService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
+    private readonly financeAudit: FinanceAuditService,
+    private readonly branchBusinessSession: BranchBusinessSessionService,
+  ) {}
+
+  async getBusinessSession(user: UserWithBranch, branchQuery?: string) {
+    const branchId =
+      user.role === Role.SUPER_ADMIN
+        ? effectiveBranchIdForQuery(user, branchQuery)
+        : requireUserBranchId(user);
+
+    if (!branchId) {
+      throw new BadRequestException('Branch context is required.');
+    }
+
+    const snap = await this.branchBusinessSession.getSnapshot(branchId);
+    const latestBalance = await this.getLatestBalance(user, branchQuery);
+
+    return {
+      ...snap,
+      latestBalance: {
+        startingBalance: latestBalance.startingBalance,
+        endingBalance: latestBalance.endingBalance,
+        date: latestBalance.date,
+      },
+    };
+  }
+
+  async endBranchDay(
+    user: AuthenticatedUserProfile,
+    dto: { confirmed: boolean; physicalEndingAmount?: number },
+    audit?: { ipAddress?: string | null; userAgent?: string | null },
+  ) {
+    if (!dto.confirmed) {
+      throw new BadRequestException({
+        code: 'END_DAY_CONFIRMATION_REQUIRED',
+        message:
+          'Please confirm that you are ending the branch business day before proceeding.',
+      });
+    }
+
+    const branchId = requireUserBranchId(user);
+
+    const res = await this.branchBusinessSession.endBranchDayManual({
+      branchId,
+      actorUserId: user.id ?? null,
+      physicalEndingAmount: dto.physicalEndingAmount,
+    });
+
+    if (res.closureApplied) {
+      const closingAmt =
+        dto.physicalEndingAmount != null
+          ? Number(dto.physicalEndingAmount.toFixed(2))
+          : res.endingBalance;
+
+      await this.financeAudit.log({
+        branchId,
+        userId: user.id ?? null,
+        eventType: 'BRANCH_DAY_END_MANUAL',
+        payload: {
+          businessDate: res.businessDate,
+          endingBalance: res.endingBalance,
+          nextBusinessDate: res.nextBusinessDate,
+          physicalEndingAmount: dto.physicalEndingAmount ?? null,
+        },
+        ipAddress: audit?.ipAddress ?? null,
+        userAgent: audit?.userAgent ?? null,
+      });
+
+      await this.financeAudit.log({
+        branchId,
+        userId: user.id ?? null,
+        eventType: 'DAILY_BALANCE_CLOSING',
+        payload: {
+          confirmedAmount: closingAmt,
+          startingBalance: null,
+          endingBalance: res.endingBalance,
+          date: res.businessDate,
+        },
+        ipAddress: audit?.ipAddress ?? null,
+        userAgent: audit?.userAgent ?? null,
+      });
+    }
+
+    return {
+      success: true,
+      skipped: res.skipped ?? false,
+      closureApplied: res.closureApplied ?? false,
+      businessDate: res.businessDate,
+      endingBalance: res.endingBalance,
+      nextBusinessDate: res.nextBusinessDate,
+    };
+  }
 
   /**
-   * Opening checklist for employees: one row per employee per branch per PH calendar day.
+   * Branch opening checklist status (shared by all employees at the branch).
+   * Backed by daily_opening: unique (branch_id, opening_date). Employee ids are audit-only.
    */
   async getEmployeeDailyOpeningStatus(
     user: AuthenticatedUserProfile,
@@ -141,7 +246,6 @@ export class BranchFinanceService {
     const { data: row, error } = await client
       .from('daily_opening')
       .select('status, starting_cash')
-      .eq('employee_id', user.id)
       .eq('branch_id', branchId)
       .eq('opening_date', openingDate)
       .maybeSingle();
@@ -182,14 +286,15 @@ export class BranchFinanceService {
       const nowIso = new Date().toISOString();
       const { error: upErr } = await client.from('daily_opening').upsert(
         {
-          employee_id: user.id,
           branch_id: branchId,
           opening_date: openingDate,
           starting_cash: 0,
           status: 'completed',
+          employee_id: user.id ?? null,
+          last_updated_by_user_id: user.id ?? null,
           updated_at: nowIso,
         },
-        { onConflict: 'employee_id,branch_id,opening_date' },
+        { onConflict: 'branch_id,opening_date' },
       );
       if (upErr) {
         throw new InternalServerErrorException(upErr.message);
@@ -209,6 +314,9 @@ export class BranchFinanceService {
     };
   }
 
+  /**
+   * Marks branch inventory step complete for today's Manila session (any employee may submit).
+   */
   async completeEmployeeDailyOpening(user: AuthenticatedUserProfile) {
     if (user.role !== Role.EMPLOYEE) {
       return { success: true, skipped: true as const };
@@ -222,7 +330,6 @@ export class BranchFinanceService {
     const { data: existing, error: selErr } = await client
       .from('daily_opening')
       .select('id, status')
-      .eq('employee_id', user.id)
       .eq('branch_id', branchId)
       .eq('opening_date', openingDate)
       .maybeSingle();
@@ -233,7 +340,7 @@ export class BranchFinanceService {
 
     if (!existing) {
       throw new BadRequestException(
-        'No opening record for today. Confirm starting cash first.',
+        'No branch opening record for today. Confirm branch starting cash first.',
       );
     }
 
@@ -243,19 +350,32 @@ export class BranchFinanceService {
 
     const { error: updErr } = await client
       .from('daily_opening')
-      .update({ status: 'completed', updated_at: nowIso })
-      .eq('id', existing.id);
+      .update({
+        status: 'completed',
+        updated_at: nowIso,
+        last_updated_by_user_id: user.id ?? null,
+      })
+      .eq('branch_id', branchId)
+      .eq('opening_date', openingDate);
 
     if (updErr) {
       throw new InternalServerErrorException(updErr.message);
     }
 
+    await this.financeAudit.log({
+      branchId,
+      userId: user.id ?? null,
+      eventType: 'BRANCH_OPENING_INVENTORY_COMPLETED',
+      payload: { openingDate },
+    });
+
     return { success: true };
   }
 
-  private async upsertDailyOpeningPendingForEmployee(params: {
+  /** Upsert pending branch opening after starting cash is confirmed (single session per branch/day). */
+  private async upsertBranchDailyOpeningPending(params: {
     client: ReturnType<SupabaseService['getClient']>;
-    employeeId: string;
+    actorUserId: string | null;
     branchId: string;
     openingDate: string;
     startingCash: number;
@@ -263,14 +383,15 @@ export class BranchFinanceService {
     const nowIso = new Date().toISOString();
     const { error } = await params.client.from('daily_opening').upsert(
       {
-        employee_id: params.employeeId,
         branch_id: params.branchId,
         opening_date: params.openingDate,
         starting_cash: params.startingCash,
         status: 'pending',
+        employee_id: params.actorUserId,
+        last_updated_by_user_id: params.actorUserId,
         updated_at: nowIso,
       },
-      { onConflict: 'employee_id,branch_id,opening_date' },
+      { onConflict: 'branch_id,opening_date' },
     );
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -282,7 +403,7 @@ export class BranchFinanceService {
     return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
   }
 
-  private classifyTransaction(row: TransactionRow): LedgerEntryType {
+  private classifyTransaction(row: SummaryTxRow): LedgerEntryType {
     const purpose = (row.purpose ?? '').toLowerCase().trim();
     const unit = (row.unit ?? '').toLowerCase().trim();
 
@@ -324,7 +445,7 @@ export class BranchFinanceService {
     return 'other';
   }
 
-  private buildDescription(row: TransactionRow, type: LedgerEntryType): string {
+  private buildDescription(row: SummaryTxRow, type: LedgerEntryType): string {
     const parts: string[] = [];
 
     switch (type) {
@@ -374,7 +495,7 @@ export class BranchFinanceService {
     return parts.join(' ');
   }
 
-  private getItemName(row: TransactionRow): string | null {
+  private getItemName(row: SummaryTxRow): string | null {
     if (!row.unit) return null;
     const lower = row.unit.toLowerCase().trim();
     if (lower === 'fund_transfer' || lower === 'fund_transfer_out') return null;
@@ -412,7 +533,7 @@ export class BranchFinanceService {
 
     let branchesQuery = client
       .from('branches')
-      .select('id, name, branch_code, status')
+      .select('id, name, branch_code, status, opening_cash_balance')
       .order('name', { ascending: true });
 
     if (branchId) {
@@ -430,22 +551,22 @@ export class BranchFinanceService {
 
     const branchIds = (branches as BranchRow[]).map((b) => b.id);
 
-    const balancesQuery = client
+    const todayBalancesQuery = client
       .from('daily_balances')
       .select(
         'branch_id, record_date, starting_balance, ending_balance, updated_at',
       )
       .in('branch_id', branchIds)
-      .order('record_date', { ascending: false })
-      .limit(4000);
+      .eq('record_date', today);
 
     const todayTxQuery = client
       .from('transactions')
       .select(
-        'branch_id, purpose, unit, cash_in, cash_out, pawn_amount, storage_fee',
+        'branch_id, purpose, unit, unit_code, details, cash_in, cash_out, pawn_amount, storage_fee, voided_at',
       )
       .in('branch_id', branchIds)
-      .eq('transaction_date', today);
+      .eq('transaction_date', today)
+      .is('voided_at', null);
 
     const fundReqQuery = client
       .from('fund_requests')
@@ -454,7 +575,7 @@ export class BranchFinanceService {
       .in('status', ['pending', 'approved', 'transferred']);
 
     const [balancesResult, todayTxResult, fundReqResult] = await Promise.all([
-      balancesQuery,
+      todayBalancesQuery,
       todayTxQuery,
       fundReqQuery,
     ]);
@@ -469,11 +590,39 @@ export class BranchFinanceService {
       throw new InternalServerErrorException(fundReqResult.error.message);
     }
 
-    const balanceRows = (balancesResult.data ?? []) as DailyBalanceRow[];
+    const todayByBranch = new Map(
+      (balancesResult.data ?? []).map((r: DailyBalanceRow) => [r.branch_id, r]),
+    );
+    const needsPrior = branchIds.filter((id) => !todayByBranch.has(id));
+    const priorByBranch = new Map<string, DailyBalanceRow>();
+    await Promise.all(
+      needsPrior.map(async (bid) => {
+        const { data, error } = await client
+          .from('daily_balances')
+          .select(
+            'branch_id, record_date, starting_balance, ending_balance, updated_at',
+          )
+          .eq('branch_id', bid)
+          .lt('record_date', today)
+          .order('record_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          throw new InternalServerErrorException(error.message);
+        }
+        if (data) priorByBranch.set(bid, data as DailyBalanceRow);
+      }),
+    );
 
     const summaries: BranchFinanceSummary[] = (branches as BranchRow[]).map(
       (branch) => {
-        const snap = computeBranchDaySnapshot(balanceRows, branch.id, today);
+        const openingFallback = this.toMoney(branch.opening_cash_balance);
+        const snap = buildBranchDaySnapshotFromFetched({
+          today,
+          todayRow: todayByBranch.get(branch.id),
+          priorRow: priorByBranch.get(branch.id),
+          openingCashFallback: openingFallback,
+        });
         const branchTx = (todayTxResult.data ?? []).filter(
           (t: any) => t.branch_id === branch.id,
         );
@@ -496,7 +645,8 @@ export class BranchFinanceService {
         let todayCashIn = 0;
         let todayCashOut = 0;
 
-        const operationalTx = branchTx.filter((tx: TransactionRow) => {
+        const operationalTx = branchTx.filter((tx: SummaryTxRow) => {
+          if (tx.voided_at != null && tx.voided_at !== '') return false;
           const p = (tx.purpose ?? '').toLowerCase().trim();
           return p !== 'start' && p !== 'end';
         });
@@ -507,7 +657,7 @@ export class BranchFinanceService {
           todayCashIn += ci;
           todayCashOut += co;
 
-          const type = this.classifyTransaction(tx as TransactionRow);
+          const type = this.classifyTransaction(tx);
           switch (type) {
             case 'pawn':
               breakdown.pawnOut += co;
@@ -641,186 +791,67 @@ export class BranchFinanceService {
     user: AuthenticatedUserProfile,
     type: 'starting' | 'ending',
     amount: number,
+    audit?: { ipAddress?: string | null; userAgent?: string | null },
   ) {
     if (!type || !['starting', 'ending'].includes(type)) {
       throw new BadRequestException('type must be "starting" or "ending"');
+    }
+    if (type === 'ending') {
+      throw new BadRequestException({
+        code: 'USE_END_DAY_ENDPOINT',
+        message:
+          'To close the branch business day, use POST /branch-finance/end-day. Employee ending balances alone do not apply; closure is branch-wide.',
+      });
     }
     if (!Number.isFinite(amount) || amount < 0) {
       throw new BadRequestException('amount must be a non-negative number');
     }
 
     const branchId = requireUserBranchId(user);
-    const client = this.supabaseService.getClient();
-    const today = getPhCalendarDateString();
     const confirmedAmount = Number(amount.toFixed(2));
 
-    // Always compute net of today's operational transactions (exclude start/end markers).
-    const { data: todayTxs } = await client
-      .from('transactions')
-      .select('purpose, cash_in, cash_out')
-      .eq('branch_id', branchId)
-      .eq('transaction_date', today);
+    const result = await this.branchBusinessSession.submitStartingBalance({
+      branchId,
+      actorUserId: user.id ?? null,
+      amount: confirmedAmount,
+    });
 
-    const todayNet = (todayTxs ?? []).reduce((sum: number, tx: any) => {
-      const p = String(tx.purpose ?? '')
-        .toLowerCase()
-        .trim();
-      if (p === 'start' || p === 'end') return sum;
-      return (
-        sum +
-        (parseFloat(String(tx.cash_in ?? 0)) || 0) -
-        (parseFloat(String(tx.cash_out ?? 0)) || 0)
-      );
-    }, 0);
+    await this.financeAudit.log({
+      branchId,
+      userId: user.id ?? null,
+      eventType: 'BRANCH_SESSION_OPENED',
+      payload: {
+        confirmedAmount,
+        startingBalance: result.startingBalance,
+        endingBalance: result.endingBalance,
+        businessDate: result.businessDate,
+      },
+      ipAddress: audit?.ipAddress ?? null,
+      userAgent: audit?.userAgent ?? null,
+    });
 
-    const { data: existing, error: existingError } = await client
-      .from('daily_balances')
-      .select('id, starting_balance, ending_balance')
-      .eq('branch_id', branchId)
-      .eq('record_date', today)
-      .maybeSingle();
+    await this.financeAudit.log({
+      branchId,
+      userId: user.id ?? null,
+      eventType: 'DAILY_BALANCE_OPENING',
+      payload: {
+        confirmedAmount,
+        startingBalance: result.startingBalance,
+        endingBalance: result.endingBalance,
+        date: result.businessDate,
+      },
+      ipAddress: audit?.ipAddress ?? null,
+      userAgent: audit?.userAgent ?? null,
+    });
 
-    if (existingError) {
-      throw new InternalServerErrorException(existingError.message);
-    }
-
-    if (existing) {
-      const startBal =
-        type === 'starting'
-          ? confirmedAmount
-          : Number(existing.starting_balance ?? 0);
-
-      // When type='starting': the employee's declaration IS the current cash truth.
-      // Transactions that already happened today are already reflected in the declared amount.
-      // So ending = confirmedAmount. Future transactions will adjust via adjustDailyBalance.
-      // When type='ending': recompute from start + todayNet for reconciliation.
-      const endingBal =
-        type === 'starting'
-          ? confirmedAmount
-          : Number((startBal + todayNet).toFixed(2));
-
-      const update = {
-        ...(type === 'starting' ? { starting_balance: confirmedAmount } : {}),
-        ending_balance: endingBal,
-      };
-      const { error: updateError } = await client
-        .from('daily_balances')
-        .update(update)
-        .eq('id', existing.id);
-      if (updateError) {
-        throw new InternalServerErrorException(updateError.message);
-      }
-    } else {
-      // No record yet for today — create one.
-      let startBal = 0;
-      if (type === 'starting') {
-        startBal = confirmedAmount;
-      } else {
-        // Carry forward previous day's ending balance.
-        const { data: priorRow } = await client
-          .from('daily_balances')
-          .select('ending_balance')
-          .eq('branch_id', branchId)
-          .lt('record_date', today)
-          .order('record_date', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        startBal = priorRow
-          ? Number(Number(priorRow.ending_balance ?? 0).toFixed(2))
-          : 0;
-      }
-
-      // Same logic: starting declaration sets ending = declared amount.
-      const endingBal =
-        type === 'starting'
-          ? startBal
-          : Number((startBal + todayNet).toFixed(2));
-
-      const row: Record<string, unknown> = {
-        branch_id: branchId,
-        record_date: today,
-        starting_balance: startBal,
-        ending_balance: endingBal,
-      };
-      const { error: insertError } = await client
-        .from('daily_balances')
-        .insert(row);
-      if (insertError) {
-        throw new InternalServerErrorException(insertError.message);
-      }
-    }
-
-    // Upsert a journal transaction so it appears in ledger.
-    // cash_in/cash_out are ZERO — Start/End are not real cash movement;
-    // they only record the confirmed balance in daily_balances.
-    const purpose =
-      type === 'starting' ? TransactionPurpose.START : TransactionPurpose.END;
-    const { data: branch } = await client
-      .from('branches')
-      .select('name')
-      .eq('id', branchId)
-      .maybeSingle();
-
-    // Idempotency: one Start and one End per branch per day (update if exists).
-    const { data: existingTx } = await client
-      .from('transactions')
-      .select('id')
-      .eq('branch_id', branchId)
-      .eq('transaction_date', today)
-      .eq('purpose', purpose)
-      .maybeSingle();
-
-    const txPayload = {
-      transaction_no: `${purpose.toUpperCase()}-${Date.now()}`,
-      branch_id: branchId,
-      branch: branch?.name ?? 'Unknown',
-      purpose,
-      transaction_date: today,
-      transaction_time: new Date().toTimeString().slice(0, 8),
-      // Both Start and End are journal markers, NOT real cash movement.
-      // The actual starting/ending values live in daily_balances.
-      cash_in: 0,
-      cash_out: 0,
-      details: `${type === 'starting' ? 'Opening' : 'Closing'} balance confirmed: ₱${confirmedAmount.toLocaleString()}`,
+    return {
+      success: true,
+      type: 'starting' as const,
+      amount: confirmedAmount,
+      date: result.businessDate,
+      startingBalance: result.startingBalance,
+      endingBalance: result.endingBalance,
     };
-
-    if (existingTx) {
-      await client
-        .from('transactions')
-        .update(txPayload)
-        .eq('id', existingTx.id);
-    } else {
-      await client.from('transactions').insert([txPayload]);
-    }
-
-    if (type === 'starting' && user.role === Role.EMPLOYEE && user.id) {
-      await this.upsertDailyOpeningPendingForEmployee({
-        client,
-        employeeId: user.id,
-        branchId,
-        openingDate: today,
-        startingCash: confirmedAmount,
-      });
-    }
-
-    // After closing (end) balance, require this employee to go through opening again
-    // (starting cash + inventory) for the same PH calendar day.
-    if (type === 'ending' && user.role === Role.EMPLOYEE && user.id) {
-      const { error: openingResetError } = await client
-        .from('daily_opening')
-        .delete()
-        .eq('employee_id', user.id)
-        .eq('branch_id', branchId)
-        .eq('opening_date', today);
-      if (openingResetError) {
-        console.warn(
-          '[BranchFinance] daily_opening reset after end balance:',
-          openingResetError.message,
-        );
-      }
-    }
-
-    return { success: true, type, amount: confirmedAmount, date: today };
   }
 
   async getLatestBalance(user: UserWithBranch, branchQuery?: string) {
@@ -866,6 +897,16 @@ export class BranchFinanceService {
         startingBalance = this.toMoney(priorRow.ending_balance);
         endingBalance = startingBalance;
         recordDate = priorRow.record_date;
+      } else {
+        const { data: branchRow } = await client
+          .from('branches')
+          .select('opening_cash_balance')
+          .eq('id', branchId)
+          .maybeSingle();
+        const opening = this.toMoney(branchRow?.opening_cash_balance);
+        startingBalance = opening;
+        endingBalance = opening;
+        recordDate = null;
       }
     }
 

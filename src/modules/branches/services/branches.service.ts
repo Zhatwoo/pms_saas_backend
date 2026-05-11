@@ -10,6 +10,11 @@ import { Role } from '../../../common/enums';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import {
+  inventoryLineValue,
+  isStatusIncludedInInventoryValuation,
+  type InventoryValuationMode,
+} from '../../../common/utils/inventory-valuation.util';
 
 @Injectable()
 export class BranchesService {
@@ -258,10 +263,26 @@ export class BranchesService {
   async getOverviewStats() {
     const client = this.supabaseService.getClient();
 
-    const [pawnedResult, saleResult] = await Promise.all([
-      client.from('pawned_items').select('branch_id, amount, status'),
+    const [branchesMeta, pawnedResult, saleResult] = await Promise.all([
+      client.from('branches').select('id, inventory_valuation_mode'),
+      client
+        .from('pawned_items')
+        .select(
+          'branch_id, amount, status, appraised_value, estimated_resale_value',
+        ),
       client.from('sale_items').select('branch_id, price, status'),
     ]);
+
+    const modeByBranch = new Map<string, InventoryValuationMode>();
+    for (const b of branchesMeta.data ?? []) {
+      if (!b?.id) continue;
+      modeByBranch.set(
+        b.id,
+        b.inventory_valuation_mode === 'APPRAISED_VALUE'
+          ? 'APPRAISED_VALUE'
+          : 'LOAN_AMOUNT',
+      );
+    }
 
     const branchStats = new Map<
       string,
@@ -275,13 +296,22 @@ export class BranchesService {
       return branchStats.get(id)!;
     };
 
+    // Pawn book value: Active + Expired (forfeited pipeline) + Inventory; per-branch LOAN_AMOUNT vs APPRAISED_VALUE.
     for (const item of pawnedResult.data ?? []) {
       if (!item.branch_id) continue;
+      if (!isStatusIncludedInInventoryValuation(item.status as string)) continue;
       const s = ensure(item.branch_id);
-      if (item.status === 'Active') {
-        s.pawnedItems += 1;
-        s.totalValue += Number(item.amount ?? 0);
-      }
+      const mode = modeByBranch.get(item.branch_id) ?? 'LOAN_AMOUNT';
+      const line = inventoryLineValue(
+        {
+          amount: item.amount,
+          appraised_value: item.appraised_value,
+          estimated_resale_value: item.estimated_resale_value,
+        },
+        mode,
+      );
+      s.pawnedItems += 1;
+      s.totalValue += Number(line.toFixed(2));
     }
 
     for (const item of saleResult.data ?? []) {
