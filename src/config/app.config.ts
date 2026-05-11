@@ -1,5 +1,9 @@
 export default () => ({
   port: parseInt(process.env.PORT ?? '4000', 10),
+  /** When set, binding retries on EADDRINUSE if the primary PORT is taken (e.g. stray nest start). */
+  portFallback: process.env.PORT_FALLBACK
+    ? parseInt(process.env.PORT_FALLBACK, 10)
+    : undefined,
   supabase: {
     url: process.env.SUPABASE_URL || '',
     anonKey: process.env.SUPABASE_ANON_KEY || '',

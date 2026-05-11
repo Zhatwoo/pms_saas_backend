@@ -1,7 +1,8 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
-  BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { Role } from '../../common/enums';
 import type { UserWithBranch } from '../../common/utils/branch-scope.util';
@@ -127,6 +128,8 @@ export interface BranchFinanceSummary {
 
 @Injectable()
 export class BranchFinanceService {
+  private readonly logger = new Logger(BranchFinanceService.name);
+
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly financeDailyBalance: FinanceDailyBalanceService,
@@ -297,6 +300,10 @@ export class BranchFinanceService {
         { onConflict: 'branch_id,opening_date' },
       );
       if (upErr) {
+        this.logger.error(
+          `daily_opening upsert failed (branch=${branchId} date=${openingDate}): ${upErr.message}`,
+          upErr instanceof Error ? upErr.stack : undefined,
+        );
         throw new InternalServerErrorException(upErr.message);
       }
       return {
@@ -394,6 +401,10 @@ export class BranchFinanceService {
       { onConflict: 'branch_id,opening_date' },
     );
     if (error) {
+      this.logger.error(
+        `daily_opening upsert failed (branch=${params.branchId} date=${params.openingDate}): ${error.message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       throw new InternalServerErrorException(error.message);
     }
   }

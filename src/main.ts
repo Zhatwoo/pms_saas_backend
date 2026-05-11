@@ -8,6 +8,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { createValidationPipe } from './common/pipes';
 import type { Application, NextFunction, Request, Response } from 'express';
 import { json, urlencoded } from 'express';
+import { listenNestApplication } from './common/utils/bootstrap-listen.util';
 
 /** Route prefixes accepting large Base64-in-JSON bodies (pawn, inventory proofs, bulk photos). Must stay higher than general API defaults to avoid breaking uploads. */
 const HEAVY_JSON_ROUTE_PREFIXES = [
@@ -130,12 +131,24 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Accept'],
   });
 
-  const port =
+  const preferredPort =
     configService.get<number>('port') ??
     parseInt(process.env.PORT ?? '4000', 10) ??
     4000;
-  await app.listen(port, '0.0.0.0');
-  logger.log(`Listening on ${port}`);
+  const fallbackRaw = configService.get<number>('portFallback');
+  const fallbackPort =
+    fallbackRaw != null &&
+    Number.isFinite(fallbackRaw) &&
+    fallbackRaw > 0 &&
+    fallbackRaw !== preferredPort
+      ? fallbackRaw
+      : undefined;
+
+  await listenNestApplication(app, logger, {
+    preferredPort,
+    fallbackPort,
+    host: '0.0.0.0',
+  });
 }
 void bootstrap().catch((err: unknown) => {
   const log = new Logger('Bootstrap');
