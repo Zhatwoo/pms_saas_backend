@@ -4,6 +4,7 @@ import { Role } from '../../common/enums';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
 import { BranchFinanceService } from './branch-finance.service';
 import { ConfirmDailyBalanceDto } from './dto/confirm-daily-balance.dto';
+import { EndBranchDayDto } from './dto/end-branch-day.dto';
 
 @Controller('branch-finance')
 export class BranchFinanceController {
@@ -40,15 +41,46 @@ export class BranchFinanceController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('business-session')
+  getBusinessSession(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.branchFinanceService.getBusinessSession(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('end-day')
+  endBranchDay(
+    @Req() req: { user: AuthenticatedUserProfile; ip?: string; headers?: Record<string, unknown> },
+    @Body() body: EndBranchDayDto,
+  ) {
+    return this.branchFinanceService.endBranchDay(req.user, body, {
+      ipAddress: req.ip ?? null,
+      userAgent:
+        typeof req.headers?.['user-agent'] === 'string'
+          ? req.headers['user-agent']
+          : null,
+    });
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Post('daily-balance')
   confirmDailyBalance(
-    @Req() req: { user: AuthenticatedUserProfile },
+    @Req() req: { user: AuthenticatedUserProfile; ip?: string; headers?: Record<string, unknown> },
     @Body() body: ConfirmDailyBalanceDto,
   ) {
     return this.branchFinanceService.confirmDailyBalance(
       req.user,
       body.type,
       body.amount,
+      {
+        ipAddress: req.ip ?? null,
+        userAgent:
+          typeof req.headers?.['user-agent'] === 'string'
+            ? req.headers['user-agent']
+            : null,
+      },
     );
   }
 

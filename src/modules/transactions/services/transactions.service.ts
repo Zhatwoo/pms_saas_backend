@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
-import { Prisma } from '@prisma/client';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   assertBranchAccess,
@@ -21,6 +20,7 @@ import { RewardsService } from '../../rewards/services/rewards.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 
 type CustomerGroupMatch = {
   id: string;
@@ -123,8 +123,6 @@ const ALLOWED_TRANSACTION_PURPOSES = new Set([
   'Fund Transfer',
 ]);
 
-type TransactionDbClient = PrismaService | Prisma.TransactionClient;
-
 @Injectable()
 export class TransactionsService {
   constructor(
@@ -132,6 +130,7 @@ export class TransactionsService {
     private readonly notificationsService: NotificationsService,
     private readonly rewardsService: RewardsService,
     private readonly encryption: EncryptionService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
   private toDbDate(value?: string | null): Date {
@@ -295,60 +294,6 @@ export class TransactionsService {
     };
   }
 
-  private async adjustDailyBalance(
-    branchId: string,
-    netChange: number,
-    recordDate = getPhCalendarDateString(),
-    client: TransactionDbClient = this.prisma,
-  ) {
-    const date = this.toDbDate(recordDate);
-    const current = await client.daily_balances.findUnique({
-      where: {
-        branch_id_record_date: { branch_id: branchId, record_date: date },
-      },
-      select: { starting_balance: true, ending_balance: true },
-    });
-
-    if (current) {
-      const nextEndingBalance =
-        this.toNumber(current.ending_balance) + netChange;
-      if (nextEndingBalance < 0) {
-        throw new BadRequestException('Insufficient branch cash balance');
-      }
-
-      await client.daily_balances.update({
-        where: {
-          branch_id_record_date: { branch_id: branchId, record_date: date },
-        },
-        data: {
-          ending_balance: nextEndingBalance,
-          updated_at: new Date(),
-        },
-      });
-      return;
-    }
-
-    const prior = await client.daily_balances.findFirst({
-      where: { branch_id: branchId, record_date: { lt: date } },
-      orderBy: { record_date: 'desc' },
-      select: { ending_balance: true },
-    });
-    const carried = this.toNumber(prior?.ending_balance);
-    const nextEndingBalance = carried + netChange;
-    if (nextEndingBalance < 0) {
-      throw new BadRequestException('Insufficient branch cash balance');
-    }
-
-    await client.daily_balances.create({
-      data: {
-        branch_id: branchId ?? undefined,
-        record_date: date,
-        starting_balance: carried,
-        ending_balance: nextEndingBalance,
-      },
-    });
-  }
-
   private async resolveCustomerTimelineScope(
     user: UserWithBranch,
     customerId: string,
@@ -489,11 +434,12 @@ export class TransactionsService {
       });
 
       const netChange = amounts.cashIn - amounts.cashOut;
+      // Single balance writer: same Manila business date as transaction_date above.
       if (branchId && netChange !== 0) {
-        await this.adjustDailyBalance(
+        await this.financeDailyBalance.applyNetChange(
           branchId,
-          netChange,
           getPhCalendarDateString(),
+          netChange,
           tx,
         );
       }

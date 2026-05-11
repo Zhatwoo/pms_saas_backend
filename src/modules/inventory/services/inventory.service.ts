@@ -14,8 +14,9 @@ import {
   inventoryBranchFilters,
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
-import { adjustDailyBalance } from '../../../common/utils/daily-balance.util';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 
 interface QueryFilters {
   branch?: string;
@@ -34,6 +35,7 @@ export class InventoryService {
     private supabase: SupabaseService,
     private notificationsService: NotificationsService,
     private readonly encryption: EncryptionService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
   private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
@@ -112,8 +114,13 @@ export class InventoryService {
     return d.toISOString().split('T')[0];
   }
 
+  /** Routes inventory-driven cash deltas through the unified daily balance writer (Manila date). */
   private async adjustBalance(branchId: string, delta: number): Promise<void> {
-    await adjustDailyBalance(this.supabase.getClient(), branchId, delta);
+    await this.financeDailyBalance.applyNetChange(
+      branchId,
+      getPhCalendarDateString(),
+      delta,
+    );
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -1262,7 +1269,7 @@ export class InventoryService {
     }
 
     // Create a transactions row so ledger, reports, and dashboard all see this sale.
-    const today = new Date().toISOString().split('T')[0];
+    const today = getPhCalendarDateString();
     const { error: txErr } = await client.from('transactions').insert([
       {
         transaction_no: `SELL-${Date.now()}`,
@@ -1287,7 +1294,11 @@ export class InventoryService {
       );
     }
 
-    await adjustDailyBalance(client, branchId, soldPrice);
+    await this.financeDailyBalance.applyNetChange(
+      branchId,
+      getPhCalendarDateString(),
+      soldPrice,
+    );
 
     return {
       message: 'Item marked as sold, amount added to branch balance',

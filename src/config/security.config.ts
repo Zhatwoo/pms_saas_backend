@@ -8,6 +8,12 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function parseEnvBool(raw: string | undefined, fallback: boolean): boolean {
+  if (raw == null || raw === '') return fallback;
+  const v = raw.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 export default () => ({
   security: {
     // Long window: default 100 requests / 15 minutes per IP (global API abuse / DDoS-ish volume).
@@ -47,6 +53,11 @@ export default () => ({
     httpJsonBodyLimitHeavyMb: parsePositiveInt(
       process.env.HTTP_JSON_BODY_LIMIT_HEAVY_MB,
       20,
+    ),
+    /** When false (default), daily balance ending cannot go negative on cash-out. */
+    allowNegativeBranchCashBalance: parseEnvBool(
+      process.env.ALLOW_NEGATIVE_BRANCH_CASH_BALANCE,
+      false,
     ),
   },
 });

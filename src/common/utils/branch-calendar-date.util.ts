@@ -10,3 +10,13 @@ export function getPhCalendarDateString(date: Date = new Date()): string {
     day: '2-digit',
   }).format(date);
 }
+
+/** Add whole calendar days to a YYYY-MM-DD string (civil date arithmetic in UTC components). */
+export function addManilaCalendarDays(dateStr: string, deltaDays: number): string {
+  const [y, mo, d] = dateStr.split('-').map((x) => parseInt(x, 10));
+  const js = new Date(Date.UTC(y, mo - 1, d + deltaDays));
+  const yy = js.getUTCFullYear();
+  const mm = String(js.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(js.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
