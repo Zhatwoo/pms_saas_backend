@@ -1,10 +1,16 @@
+import { DISPLAY_TIMEZONE_IANA, normalizeIntlTimeZone } from './timezone.util';
+
 /**
  * Branch business calendar date (YYYY-MM-DD) in Asia/Manila.
  * Used for daily_balances / daily_opening so "today" matches PH operations regardless of server TZ.
  */
-export function getPhCalendarDateString(date: Date = new Date()): string {
+export function getPhCalendarDateString(
+  date: Date = new Date(),
+  timeZone: string = DISPLAY_TIMEZONE_IANA,
+): string {
+  const tz = normalizeIntlTimeZone(timeZone);
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
+    timeZone: tz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
