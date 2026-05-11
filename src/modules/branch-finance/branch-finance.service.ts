@@ -20,8 +20,7 @@ import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { buildBranchDaySnapshotFromFetched } from '../../common/utils/daily-balance-aggregate.util';
 import { FinanceAuditService } from './services/finance-audit.service';
 import { FinanceDailyBalanceService } from './services/finance-daily-balance.service';
-import { BranchBusinessSessionService } from './services/branch-business-session.service';
-import { BranchSessionStatus } from './constants/branch-session-status';
+import { BranchDaySessionService } from './services/branch-day-session.service';
 
 interface TransactionRow {
   id: string;
@@ -138,7 +137,7 @@ export class BranchFinanceService {
     private readonly prisma: PrismaService,
     private readonly financeDailyBalance: FinanceDailyBalanceService,
     private readonly financeAudit: FinanceAuditService,
-    private readonly branchBusinessSession: BranchBusinessSessionService,
+    private readonly branchDaySession: BranchDaySessionService,
   ) {}
 
   async getBusinessSession(user: UserWithBranch, branchQuery?: string) {
@@ -151,7 +150,7 @@ export class BranchFinanceService {
       throw new BadRequestException('Branch context is required.');
     }
 
-    const snap = await this.branchBusinessSession.getSnapshot(branchId);
+    const snap = await this.branchDaySession.getSnapshot(branchId);
     const latestBalance = await this.getLatestBalance(user, branchQuery);
 
     return {
@@ -179,7 +178,7 @@ export class BranchFinanceService {
 
     const branchId = requireUserBranchId(user);
 
-    const res = await this.branchBusinessSession.endBranchDayManual({
+    const res = await this.branchDaySession.closeTodayManual({
       branchId,
       actorUserId: user.id ?? null,
       physicalEndingAmount: dto.physicalEndingAmount,
@@ -249,20 +248,6 @@ export class BranchFinanceService {
     const branchId = requireUserBranchId(user);
     const openingDate = getPhCalendarDateString();
 
-    const sessionSnap = await this.branchBusinessSession.getSnapshot(branchId);
-    const needsSharedStartingBalance =
-      sessionSnap.pendingStartingSession != null ||
-      sessionSnap.todaySession?.status ===
-        BranchSessionStatus.PENDING_START_BALANCE;
-
-    if (needsSharedStartingBalance) {
-      return {
-        openingDate,
-        status: 'none',
-        checklistStep: 'CASH_ON_HAND',
-      };
-    }
-
     const client = this.supabaseService.getClient();
 
     const { data: row, error } = await client
@@ -286,6 +271,26 @@ export class BranchFinanceService {
     }
 
     if (row?.status === 'pending') {
+      const nowIso = new Date().toISOString();
+      const { error: migrateErr } = await client
+        .from('daily_opening')
+        .update({
+          status: 'completed',
+          updated_at: nowIso,
+          last_updated_by_user_id: user.id ?? null,
+        })
+        .eq('branch_id', branchId)
+        .eq('opening_date', openingDate);
+
+      if (!migrateErr) {
+        return {
+          openingDate,
+          status: 'completed',
+          checklistStep: 'COMPLETED',
+          startingCash: this.toMoney(row.starting_cash),
+        };
+      }
+
       return {
         openingDate,
         status: 'pending',
@@ -881,7 +886,7 @@ export class BranchFinanceService {
     const branchId = requireUserBranchId(user);
     const confirmedAmount = Number(amount.toFixed(2));
 
-    const result = await this.branchBusinessSession.submitStartingBalance({
+    const result = await this.branchDaySession.submitStartingBalance({
       branchId,
       actorUserId: user.id ?? null,
       amount: confirmedAmount,

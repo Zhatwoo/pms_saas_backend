@@ -1545,8 +1545,6 @@ export class FundRequestsService {
         sourceBranch.id,
         getPhCalendarDateString(),
         -sentAmount,
-        undefined,
-        { bypassOperationalSessionGate: true },
       );
     } catch (err) {
       const errorMessage =
@@ -1556,8 +1554,6 @@ export class FundRequestsService {
           sourceBranch.id,
           getPhCalendarDateString(),
           -sentAmount,
-          undefined,
-          { bypassOperationalSessionGate: true },
         );
       } else {
         throw err;
@@ -1731,8 +1727,6 @@ export class FundRequestsService {
         existing.branch_id,
         getPhCalendarDateString(),
         balanceDelta,
-        undefined,
-        { bypassOperationalSessionGate: true },
       );
     } catch (err) {
       const errorMessage =
@@ -1749,8 +1743,6 @@ export class FundRequestsService {
           existing.branch_id,
           getPhCalendarDateString(),
           balanceDeltaFallback,
-          undefined,
-          { bypassOperationalSessionGate: true },
         );
       } else {
         throw err;

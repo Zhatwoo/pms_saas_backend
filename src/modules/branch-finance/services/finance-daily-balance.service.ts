@@ -7,7 +7,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
-import { BranchSessionStatus } from '../constants/branch-session-status';
 import { operationalNetFromRows } from '../utils/finance-ledger.util';
 import { BranchFinanceSessionGateService } from './branch-finance-session-gate.service';
 
@@ -17,7 +16,7 @@ type Tx = FinanceDailyBalanceTx;
 /**
  * Single writer for daily_balances: locked reads, Decimal math, branch opening capital fallback.
  * All cash-affecting modules must call applyNetChange (or confirmation helpers) instead of ad hoc Supabase updates.
- * Operational postings require branch_business_sessions.status === OPEN for that Manila date.
+ * Operational postings require an open branch_day_sessions Manila calendar row unless callers bypass the gate explicitly.
  */
 @Injectable()
 export class FinanceDailyBalanceService {
@@ -106,18 +105,17 @@ export class FinanceDailyBalanceService {
     if (prior) {
       carried = this.dec(prior.ending_balance);
     } else {
-      const sessionRow = await client.branch_business_sessions.findUnique({
+      const sessionRow = await client.branch_day_sessions.findUnique({
         where: {
-          branch_id_business_date: {
+          branch_id_session_date: {
             branch_id: branchId,
-            business_date: date,
+            session_date: date,
           },
         },
-        select: { status: true, starting_balance: true },
+        select: { starting_balance: true },
       });
       const sessionStart =
-        sessionRow?.status === BranchSessionStatus.OPEN &&
-        sessionRow.starting_balance != null
+        sessionRow?.starting_balance != null
           ? this.dec(sessionRow.starting_balance)
           : null;
       carried = sessionStart ?? this.dec(branch?.opening_cash_balance);
