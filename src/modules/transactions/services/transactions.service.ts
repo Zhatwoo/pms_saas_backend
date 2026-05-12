@@ -621,6 +621,7 @@ export class TransactionsService {
         transfer: 0,
         startingBalance: 0,
         endingBalance: 0,
+        sessionOpenedAt: null as string | null,
       },
     };
   }
@@ -643,10 +644,14 @@ export class TransactionsService {
       ).length,
       startingBalance: 0,
       endingBalance: 0,
+      sessionOpenedAt: null as string | null,
     };
+
+    let sessionOpenedAt: string | null = null;
 
     if (scoped) {
       const balanceDate = this.toDbDate(date || getPhCalendarDateString());
+      const balanceDateStr = date || getPhCalendarDateString();
       const balanceData = await this.prisma.daily_balances.findUnique({
         where: {
           branch_id_record_date: {
@@ -657,19 +662,45 @@ export class TransactionsService {
         select: { starting_balance: true, ending_balance: true },
       });
 
+      const sessionRow = await this.prisma.branch_day_sessions.findUnique({
+        where: {
+          branch_id_session_date: {
+            branch_id: scoped,
+            session_date: balanceDate,
+          },
+        },
+        select: { opened_at: true, is_closed: true },
+      });
+      sessionOpenedAt = sessionRow?.opened_at?.toISOString() ?? null;
+      stats.sessionOpenedAt = sessionOpenedAt;
+
+      if (balanceData && sessionRow?.is_closed) {
+        const bookAtClose = this.toNumber(balanceData.ending_balance);
+        stats.startingBalance = bookAtClose;
+        stats.endingBalance = bookAtClose;
+        return stats;
+      }
+
+      let startingBalanceCalc = 0;
       if (balanceData) {
-        stats.startingBalance = this.toNumber(balanceData.starting_balance);
-        stats.endingBalance = this.toNumber(balanceData.ending_balance);
+        startingBalanceCalc = this.toNumber(balanceData.starting_balance);
       } else {
         const priorRow = await this.prisma.daily_balances.findFirst({
           where: { branch_id: scoped, record_date: { lt: balanceDate } },
           orderBy: { record_date: 'desc' },
           select: { ending_balance: true },
         });
-        const carried = this.toNumber(priorRow?.ending_balance);
-        stats.startingBalance = carried;
-        stats.endingBalance = carried;
+        startingBalanceCalc = this.toNumber(priorRow?.ending_balance);
       }
+
+      stats.startingBalance = startingBalanceCalc;
+      const net = await this.financeDailyBalance.sumOperationalNetCash(
+        scoped,
+        balanceDateStr,
+      );
+      stats.endingBalance = Number(
+        (startingBalanceCalc + net).toFixed(2),
+      );
     }
 
     return stats;

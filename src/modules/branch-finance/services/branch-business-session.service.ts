@@ -266,46 +266,34 @@ export class BranchBusinessSessionService {
     let suggestedStartingBalance = 0;
     if (pendingRow) {
       const pendingStr = this.formatBusinessDate(pendingRow.business_date);
-      const priorStr = addManilaCalendarDays(pendingStr, -1);
-      const priorDate = this.toRecordDate(priorStr);
-      const priorBal = await this.prisma.daily_balances.findUnique({
-        where: {
-          branch_id_record_date: {
-            branch_id: branchId,
-            record_date: priorDate,
-          },
-        },
-        select: { ending_balance: true },
-      });
-      if (priorBal) {
-        suggestedStartingBalance = Number(
-          this.dec(priorBal.ending_balance).toFixed(2),
+      suggestedStartingBalance =
+        await this.financeDailyBalance.suggestedStartingCashForBusinessDate(
+          branchId,
+          pendingStr,
         );
-      } else {
-        const b = await this.prisma.branches.findUnique({
-          where: { id: branchId },
-          select: { opening_cash_balance: true },
-        });
-        suggestedStartingBalance = Number(
-          this.dec(b?.opening_cash_balance).toFixed(2),
-        );
-      }
     }
 
     let systemEndingBalanceToday: number | null = null;
     if (todaySessionRow?.status === BranchSessionStatus.OPEN) {
-      const dbRow = await this.prisma.daily_balances.findUnique({
-        where: {
-          branch_id_record_date: {
-            branch_id: branchId,
-            record_date: todayDate,
+      let startNum = 0;
+      if (todaySessionRow.starting_balance != null) {
+        startNum = Number(
+          this.dec(todaySessionRow.starting_balance).toFixed(2),
+        );
+      } else {
+        const dbRow = await this.prisma.daily_balances.findUnique({
+          where: {
+            branch_id_record_date: {
+              branch_id: branchId,
+              record_date: todayDate,
+            },
           },
-        },
-        select: { starting_balance: true },
-      });
-      const startNum = dbRow
-        ? Number(this.dec(dbRow.starting_balance).toFixed(2))
-        : 0;
+          select: { starting_balance: true },
+        });
+        startNum = dbRow
+          ? Number(this.dec(dbRow.starting_balance).toFixed(2))
+          : 0;
+      }
       const net = await this.financeDailyBalance.sumOperationalNetCash(
         branchId,
         manilaCalendarDate,

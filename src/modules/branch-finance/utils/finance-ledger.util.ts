@@ -9,6 +9,28 @@ export function isJournalPurposeStartEnd(purpose: string | null | undefined): bo
 }
 
 /**
+ * Inbound branch cash from a fund transfer journal (matches BranchFinanceService.classifyTransaction).
+ * Used to hide ledger/balance impact until the destination branch confirms receipt (fund_requests.status = transferred).
+ */
+export function isInboundBranchCashFundTransferRow(row: {
+  purpose?: string | null;
+  unit?: string | null;
+  cash_in?: unknown;
+  voided_at?: unknown;
+}): boolean {
+  if (row.voided_at != null && row.voided_at !== '') {
+    return false;
+  }
+  const ci = Number(row.cash_in ?? 0);
+  if (!Number.isFinite(ci) || ci <= 0) {
+    return false;
+  }
+  const unit = (row.unit ?? '').toLowerCase().trim();
+  const purpose = (row.purpose ?? '').toLowerCase().trim();
+  return unit === 'fund_transfer' || purpose === 'cash transfer';
+}
+
+/**
  * Net cash from posted transactions: cash_in minus cash_out for non-void, non-journal rows.
  * Used for daily reconciliation and opening confirmation (same-day ops before/after confirm).
  */

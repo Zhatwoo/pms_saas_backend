@@ -1,15 +1,14 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpStatus,
   Injectable,
   Logger,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { TransactionPurpose } from '../../../common/enums';
-import {
-  addManilaCalendarDays,
-  getPhCalendarDateString,
-} from '../../../common/utils/branch-calendar-date.util';
+import { Role, TransactionPurpose } from '../../../common/enums';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import type { BranchBusinessSessionSnapshot } from './branch-business-session.service';
 import { FinanceDailyBalanceService } from './finance-daily-balance.service';
@@ -63,25 +62,10 @@ export class BranchDaySessionService {
     branchId: string,
     businessDateStr: string,
   ): Promise<number> {
-    const priorStr = addManilaCalendarDays(businessDateStr, -1);
-    const priorDate = this.toRecordDate(priorStr);
-    const priorBal = await this.prisma.daily_balances.findUnique({
-      where: {
-        branch_id_record_date: {
-          branch_id: branchId,
-          record_date: priorDate,
-        },
-      },
-      select: { ending_balance: true },
-    });
-    if (priorBal) {
-      return Number(this.dec(priorBal.ending_balance).toFixed(2));
-    }
-    const b = await this.prisma.branches.findUnique({
-      where: { id: branchId },
-      select: { opening_cash_balance: true },
-    });
-    return Number(this.dec(b?.opening_cash_balance).toFixed(2));
+    return this.financeDailyBalance.suggestedStartingCashForBusinessDate(
+      branchId,
+      businessDateStr,
+    );
   }
 
   async getSnapshot(branchId: string): Promise<BranchBusinessSessionSnapshot> {
@@ -100,22 +84,9 @@ export class BranchDaySessionService {
     const needsStarting = !dayRow || dayRow.is_closed;
     const operationalCashAllowed = !!(dayRow && !dayRow.is_closed);
 
-    let pendingStartingSession: BranchBusinessSessionSnapshot['pendingStartingSession'] =
-      null;
-    if (needsStarting) {
-      pendingStartingSession = {
-        businessDate: manilaCalendarDate,
-        suggestedStartingBalance:
-          await this.computeSuggestedStartingBalance(
-            branchId,
-            manilaCalendarDate,
-          ),
-      };
-    }
-
-    let todaySession: BranchBusinessSessionSnapshot['todaySession'] = null;
+    let dbBalToday: { ending_balance: unknown } | null = null;
     if (dayRow) {
-      const dbBal = await this.prisma.daily_balances.findUnique({
+      dbBalToday = await this.prisma.daily_balances.findUnique({
         where: {
           branch_id_record_date: {
             branch_id: branchId,
@@ -124,12 +95,38 @@ export class BranchDaySessionService {
         },
         select: { ending_balance: true },
       });
+    }
+
+    let pendingStartingSession: BranchBusinessSessionSnapshot['pendingStartingSession'] =
+      null;
+    if (needsStarting) {
+      let suggestedStartingBalance =
+        await this.computeSuggestedStartingBalance(
+          branchId,
+          manilaCalendarDate,
+        );
+      if (
+        dayRow?.is_closed &&
+        dbBalToday?.ending_balance != null
+      ) {
+        suggestedStartingBalance = Number(
+          this.dec(dbBalToday.ending_balance).toFixed(2),
+        );
+      }
+      pendingStartingSession = {
+        businessDate: manilaCalendarDate,
+        suggestedStartingBalance,
+      };
+    }
+
+    let todaySession: BranchBusinessSessionSnapshot['todaySession'] = null;
+    if (dayRow) {
       todaySession = {
         status: dayRow.is_closed ? 'CLOSED' : 'OPEN',
         businessDate: this.formatBusinessDate(dayRow.session_date),
         startingBalance: Number(this.dec(dayRow.starting_balance).toFixed(2)),
-        endingBalance: dbBal
-          ? Number(this.dec(dbBal.ending_balance).toFixed(2))
+        endingBalance: dbBalToday
+          ? Number(this.dec(dbBalToday.ending_balance).toFixed(2))
           : null,
         startedAt: dayRow.opened_at.toISOString(),
         endedAt: dayRow.closed_at?.toISOString() ?? null,
@@ -140,18 +137,9 @@ export class BranchDaySessionService {
 
     let systemEndingBalanceToday: number | null = null;
     if (operationalCashAllowed && dayRow) {
-      const dbRow = await this.prisma.daily_balances.findUnique({
-        where: {
-          branch_id_record_date: {
-            branch_id: branchId,
-            record_date: todayDate,
-          },
-        },
-        select: { starting_balance: true },
-      });
-      const startNum = dbRow
-        ? Number(this.dec(dbRow.starting_balance).toFixed(2))
-        : Number(this.dec(dayRow.starting_balance).toFixed(2));
+      // Confirmed physical count lives on branch_day_sessions; use it for projections
+      // so we never show a stale daily_balances.starting_balance (e.g. carry-forward) after opening.
+      const startNum = Number(this.dec(dayRow.starting_balance).toFixed(2));
       const net = await this.financeDailyBalance.sumOperationalNetCash(
         branchId,
         manilaCalendarDate,
@@ -243,6 +231,7 @@ export class BranchDaySessionService {
   async submitStartingBalance(params: {
     branchId: string;
     actorUserId: string | null;
+    actorRole?: Role | null;
     amount: number;
   }): Promise<{
     success: boolean;
@@ -255,8 +244,27 @@ export class BranchDaySessionService {
       throw new BadRequestException('amount must be a non-negative number');
     }
 
+    const todayStr = getPhCalendarDateString();
+    if (params.actorRole !== Role.SUPER_ADMIN) {
+      const expectedRaw = await this.computeSuggestedStartingBalance(
+        params.branchId,
+        todayStr,
+      );
+      const expected = Number(Number(expectedRaw).toFixed(2));
+      if (Math.abs(expected - confirmedAmount) > 0.009) {
+        throw new UnprocessableEntityException({
+          statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+          code: 'STARTING_BALANCE_MISMATCH',
+          message:
+            'Ang tinayp na starting cash ay hindi tumugma sa inaasahang halaga mula sa huling natapos na araw ng branch (ledger book ending). Mag-file ng incident report para sa variance; hindi na-save ang starting balance.',
+          expectedAmount: expected,
+          enteredAmount: confirmedAmount,
+          businessDate: todayStr,
+        });
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      const todayStr = getPhCalendarDateString();
       const todayDate = this.toRecordDate(todayStr);
 
       await tx.$executeRaw`
