@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Role } from '../../../common/enums';
@@ -152,6 +153,8 @@ const FUND_REQUEST_SELECT = `
 
 @Injectable()
 export class FundRequestsService {
+  private readonly logger = new Logger(FundRequestsService.name);
+
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly activityLogsService: ActivityLogsService,
@@ -1545,6 +1548,8 @@ export class FundRequestsService {
         sourceBranch.id,
         getPhCalendarDateString(),
         -sentAmount,
+        undefined,
+        { bypassOperationalSessionGate: true },
       );
     } catch (err) {
       const errorMessage =
@@ -1554,6 +1559,8 @@ export class FundRequestsService {
           sourceBranch.id,
           getPhCalendarDateString(),
           -sentAmount,
+          undefined,
+          { bypassOperationalSessionGate: true },
         );
       } else {
         throw err;
@@ -1614,6 +1621,55 @@ export class FundRequestsService {
     return mapped;
   }
 
+  /**
+   * If destination confirm fails after journal rows or applyNetChange, undo so the branch
+   * can retry without stuck inbound lines or double-counted daily_balances.
+   */
+  private async rollbackDestinationFundConfirmArtifacts(params: {
+    branchId: string | null | undefined;
+    businessDateStr: string;
+    inboundTransactionId: string | null;
+    ownerOutTransactionId: string | null;
+    balanceDeltaApplied: number;
+  }): Promise<void> {
+    const bid = params.branchId;
+    if (bid && params.balanceDeltaApplied !== 0) {
+      try {
+        await this.financeDailyBalance.applyNetChange(
+          bid,
+          params.businessDateStr,
+          -params.balanceDeltaApplied,
+          undefined,
+          { bypassOperationalSessionGate: true },
+        );
+      } catch (e) {
+        this.logger.warn(
+          `rollbackDestinationFundConfirmArtifacts: reverse applyNetChange failed: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+
+    const client = this.supabaseService.getClient();
+    const nowIso = new Date().toISOString();
+    for (const id of [
+      params.inboundTransactionId,
+      params.ownerOutTransactionId,
+    ]) {
+      if (!id) continue;
+      const { error } = await client
+        .from('transactions')
+        .update({ voided_at: nowIso })
+        .eq('id', id);
+      if (error) {
+        this.logger.warn(
+          `rollbackDestinationFundConfirmArtifacts: void transaction ${id} failed: ${error.message}`,
+        );
+      }
+    }
+  }
+
   async confirm(
     user: AuthenticatedUserProfile,
     id: string,
@@ -1627,6 +1683,10 @@ export class FundRequestsService {
 
     const existing = await this.getFundRequestById(id);
     assertResourceBranch(user, existing.branch_id);
+
+    if (existing.status === 'transferred') {
+      return this.mapFundRequest(existing);
+    }
 
     if (!this.isPendingConfirmationRow(existing)) {
       throw new BadRequestException(
@@ -1678,8 +1738,11 @@ export class FundRequestsService {
       );
     }
 
+    const businessDateStr = getPhCalendarDateString();
     let inboundTransactionId: string | null = null;
     let ownerOutTransactionId: string | null = null;
+    let balanceDeltaApplied = 0;
+
     try {
       const referenceId =
         this.compactText(existing.transfer_reference_no) ??
@@ -1723,17 +1786,19 @@ export class FundRequestsService {
       const balanceDelta = isExpenseTransfer
         ? -confirmedAmount
         : confirmedAmount;
+
       await this.financeDailyBalance.applyNetChange(
         existing.branch_id,
-        getPhCalendarDateString(),
+        businessDateStr,
         balanceDelta,
+        undefined,
+        { bypassOperationalSessionGate: true },
       );
+      balanceDeltaApplied = balanceDelta;
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
-        // Allow confirmation to proceed even if legacy transactions purpose
-        // constraint rejects fund-transfer journal entries.
         const balanceDeltaFallback = existing.purpose
           ?.toLowerCase()
           .includes('expense')
@@ -1741,10 +1806,20 @@ export class FundRequestsService {
           : confirmedAmount;
         await this.financeDailyBalance.applyNetChange(
           existing.branch_id,
-          getPhCalendarDateString(),
+          businessDateStr,
           balanceDeltaFallback,
+          undefined,
+          { bypassOperationalSessionGate: true },
         );
+        balanceDeltaApplied = balanceDeltaFallback;
       } else {
+        await this.rollbackDestinationFundConfirmArtifacts({
+          branchId: existing.branch_id,
+          businessDateStr,
+          inboundTransactionId,
+          ownerOutTransactionId,
+          balanceDeltaApplied,
+        });
         throw err;
       }
     }
@@ -1772,6 +1847,13 @@ export class FundRequestsService {
       .single<FundRequestRow>();
 
     if (error) {
+      await this.rollbackDestinationFundConfirmArtifacts({
+        branchId: existing.branch_id,
+        businessDateStr,
+        inboundTransactionId,
+        ownerOutTransactionId,
+        balanceDeltaApplied,
+      });
       throw new InternalServerErrorException(error.message);
     }
 
