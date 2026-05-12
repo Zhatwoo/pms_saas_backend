@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, Query, Req } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Roles } from '../../common/decorators';
 import { Role } from '../../common/enums';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
@@ -94,6 +95,7 @@ export class BranchFinanceController {
   }
 
   @Roles(Role.EMPLOYEE)
+  @SkipThrottle()
   @Get('daily-opening/status')
   getDailyOpeningStatus(@Req() req: { user: AuthenticatedUserProfile }) {
     return this.branchFinanceService.getEmployeeDailyOpeningStatus(req.user);
