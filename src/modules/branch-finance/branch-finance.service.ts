@@ -302,6 +302,14 @@ export class BranchFinanceService {
       };
     }
 
+    if (await this.branchDaySession.requiresStartingBalance(branchId)) {
+      return {
+        openingDate,
+        status: 'none',
+        checklistStep: 'CASH_ON_HAND',
+      };
+    }
+
     const { count, error: countErr } = await client
       .from('pawned_items')
       .select('*', { count: 'exact', head: true })
