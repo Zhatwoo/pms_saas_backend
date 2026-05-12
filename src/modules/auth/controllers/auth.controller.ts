@@ -200,16 +200,36 @@ export class AuthController {
   }
 
   @Post('profile') // Turbopack workaround: using POST for updates
-  async updateProfilePost(@Req() req: any, @Body() dto: UpdateUserDto) {
+  async updateProfilePost(
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      auditLogContext?: Record<string, unknown>;
+    },
+    @Body() dto: UpdateUserDto,
+  ) {
     return this.updateProfile(req, dto);
   }
 
   @Patch('profile')
-  async updateProfile(@Req() req: any, @Body() dto: UpdateUserDto) {
+  async updateProfile(
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      auditLogContext?: Record<string, unknown>;
+    },
+    @Body() dto: UpdateUserDto,
+  ) {
     const sanitized: UpdateUserDto = {};
     if (dto.fullName !== undefined) sanitized.fullName = dto.fullName;
     if (dto.avatarUrl !== undefined) sanitized.avatarUrl = dto.avatarUrl;
 
-    return this.usersService.update(req.user.id, sanitized);
+    const updated = await this.usersService.update(req.user.id, sanitized);
+    req.auditLogContext = {
+      targetUserId: updated.id,
+      targetUserName: updated.fullName ?? updated.email,
+      changedFields: Object.keys(sanitized),
+    };
+    return updated;
   }
 }

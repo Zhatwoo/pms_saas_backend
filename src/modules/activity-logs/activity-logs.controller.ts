@@ -33,6 +33,7 @@ export class ActivityLogsController {
         endDate,
         action,
         pawnedItemId,
+        user.id,
       );
     }
 
