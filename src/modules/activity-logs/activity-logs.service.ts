@@ -13,6 +13,15 @@ export interface CreateActivityLogDto {
   details?: string | Record<string, any> | null;
 }
 
+function toManilaDayBoundary(value: string, endOfDay: boolean): string {
+  const datePart = value.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return value;
+
+  return endOfDay
+    ? `${datePart}T23:59:59.999+08:00`
+    : `${datePart}T00:00:00.000+08:00`;
+}
+
 @Injectable()
 export class ActivityLogsService {
   private readonly logger = new Logger(ActivityLogsService.name);
@@ -49,6 +58,7 @@ export class ActivityLogsService {
     endDate?: string,
     action?: string,
     pawnedItemId?: string,
+    userId?: string,
   ) {
     const client = this.supabaseService.getClient();
     let query = client
@@ -74,18 +84,25 @@ export class ActivityLogsService {
         );
       }
       query = query.eq('branch_id', branchId);
+      if (role === 'employee' || role === 'branch') {
+        if (!userId) {
+          throw new InternalServerErrorException(
+            'User ID is required for employee logs',
+          );
+        }
+        query = query.eq('user_id', userId);
+      }
     } else if (branchId) {
       // Super admin filtering by branch
       query = query.eq('branch_id', branchId);
     }
 
     if (startDate) {
-      // Use ISO format to ensure correct comparison
-      query = query.gte('created_at', `${startDate}T00:00:00.000Z`);
+      query = query.gte('created_at', toManilaDayBoundary(startDate, false));
     }
 
     if (endDate) {
-      query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
+      query = query.lte('created_at', toManilaDayBoundary(endDate, true));
     }
 
     if (action) {
