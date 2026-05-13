@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { CreateBranchDto } from '../dto/create-branch.dto';
 import { UpdateBranchDto } from '../dto/update-branch.dto';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
@@ -20,6 +21,7 @@ import {
 export class BranchesService {
   constructor(
     private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
   ) {}
 
@@ -64,18 +66,11 @@ export class BranchesService {
   }
 
   private async getNextAvailableBranchCode(): Promise<string> {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('branch_code');
+    const rows = await this.prisma.branches.findMany({
+      select: { branch_code: true },
+    });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    const usedCodes = new Set(
-      (data ?? []).map((row: { branch_code: string }) => row.branch_code),
-    );
+    const usedCodes = new Set(rows.map((row) => row.branch_code));
 
     for (let i = 1; i <= 9999; i++) {
       const candidate = String(i).padStart(3, '0');
@@ -134,19 +129,11 @@ export class BranchesService {
   }
 
   async findAll() {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const rows = await this.prisma.branches.findMany({
+      orderBy: { created_at: 'desc' },
+    });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return (data ?? []).map((row: Record<string, unknown>) =>
-      this.mapBranchFromDb(row),
-    );
+    return rows.map((row) => this.mapBranchFromDb(row as Record<string, unknown>));
   }
 
   /** Admin / employee: only their assigned branch. Super admin: all. */
@@ -156,52 +143,34 @@ export class BranchesService {
     }
 
     const branchId = requireUserBranchId(user);
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('*')
-      .eq('id', branchId)
-      .order('created_at', { ascending: false });
+    const rows = await this.prisma.branches.findMany({
+      where: { id: branchId },
+      orderBy: { created_at: 'desc' },
+    });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return (data ?? []).map((row: Record<string, unknown>) =>
-      this.mapBranchFromDb(row),
-    );
+    return rows.map((row) => this.mapBranchFromDb(row as Record<string, unknown>));
   }
 
   /** Public signup: active branches only (id + name). */
   async findActiveSummaries() {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('id, name')
-      .eq('status', 'Active')
-      .order('name', { ascending: true });
+    try {
+      const rows = await this.prisma.branches.findMany({
+        where: { status: 'Active' },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+      return rows;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
     }
-
-    return (data ?? []).map((row: { id: string; name: string }) => ({
-      id: row.id,
-      name: row.name,
-    }));
   }
 
   async findOne(id: string) {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    const data = await this.prisma.branches.findUnique({
+      where: { id },
+    });
 
     if (!data) {
       throw new NotFoundException('Branch not found');
@@ -261,20 +230,26 @@ export class BranchesService {
   }
 
   async getOverviewStats() {
-    const client = this.supabaseService.getClient();
-
     const [branchesMeta, pawnedResult, saleResult] = await Promise.all([
-      client.from('branches').select('id, inventory_valuation_mode'),
-      client
-        .from('pawned_items')
-        .select(
-          'branch_id, amount, status, appraised_value, estimated_resale_value',
-        ),
-      client.from('sale_items').select('branch_id, price, status'),
+      this.prisma.branches.findMany({
+        select: { id: true, inventory_valuation_mode: true },
+      }),
+      this.prisma.pawned_items.findMany({
+        select: {
+          branch_id: true,
+          amount: true,
+          status: true,
+          appraised_value: true,
+          estimated_resale_value: true,
+        },
+      }),
+      this.prisma.sale_items.findMany({
+        select: { branch_id: true, price: true, status: true },
+      }),
     ]);
 
     const modeByBranch = new Map<string, InventoryValuationMode>();
-    for (const b of branchesMeta.data ?? []) {
+    for (const b of branchesMeta) {
       if (!b?.id) continue;
       modeByBranch.set(
         b.id,
@@ -297,7 +272,7 @@ export class BranchesService {
     };
 
     // Pawn book value: Active + Expired (forfeited pipeline) + Inventory; per-branch LOAN_AMOUNT vs APPRAISED_VALUE.
-    for (const item of pawnedResult.data ?? []) {
+    for (const item of pawnedResult) {
       if (!item.branch_id) continue;
       if (!isStatusIncludedInInventoryValuation(item.status as string)) continue;
       const s = ensure(item.branch_id);
@@ -314,7 +289,7 @@ export class BranchesService {
       s.totalValue += Number(line.toFixed(2));
     }
 
-    for (const item of saleResult.data ?? []) {
+    for (const item of saleResult) {
       if (!item.branch_id) continue;
       const s = ensure(item.branch_id);
       if (item.status === 'Available') {

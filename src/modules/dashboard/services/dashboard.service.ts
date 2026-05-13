@@ -10,6 +10,7 @@ import { buildBranchDaySnapshotFromFetched } from '../../../common/utils/daily-b
 import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 
 interface DashboardRelationUser {
@@ -86,6 +87,7 @@ export class DashboardService {
 
   constructor(
     private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
   ) {}
 
@@ -633,10 +635,10 @@ export class DashboardService {
     switch (user?.role) {
       case Role.SUPER_ADMIN: {
         const [
-          branchesCountResult,
-          activeBranchesCountResult,
-          usersCountResult,
-          pendingUsersCountResult,
+          branchesCount,
+          activeBranchesCount,
+          usersCount,
+          pendingUsersCount,
           branchesResult,
           transferredFundsResult,
           fundRowsResult,
@@ -644,20 +646,21 @@ export class DashboardService {
           recentTransfersResult,
           systemExpensesResult,
         ] = await Promise.all([
-          client.from('branches').select('id', { count: 'exact', head: true }),
-          client
-            .from('branches')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'Active'),
-          client.from('users').select('id', { count: 'exact', head: true }),
-          client
-            .from('users')
-            .select('id', { count: 'exact', head: true })
-            .eq('account_status', 'pending'),
-          client
-            .from('branches')
-            .select('id, name, branch_code, location, status, opening_cash_balance')
-            .order('name', { ascending: true }),
+          this.prisma.branches.count(),
+          this.prisma.branches.count({ where: { status: 'Active' } }),
+          this.prisma.users.count(),
+          this.prisma.users.count({ where: { account_status: 'pending' } }),
+          this.prisma.branches.findMany({
+            select: {
+              id: true,
+              name: true,
+              branch_code: true,
+              location: true,
+              status: true,
+              opening_cash_balance: true,
+            },
+            orderBy: { name: 'asc' },
+          }),
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
@@ -714,11 +717,6 @@ export class DashboardService {
         ]);
 
         const errors = [
-          branchesCountResult.error,
-          activeBranchesCountResult.error,
-          usersCountResult.error,
-          pendingUsersCountResult.error,
-          branchesResult.error,
           transferredFundsResult.error,
           fundRowsResult.error,
           recentRequestsResult.error,
@@ -731,7 +729,10 @@ export class DashboardService {
         }
 
         const asOfDateSa = getPhCalendarDateString();
-        const branchListSa = branchesResult.data ?? [];
+        const branchListSa = branchesResult.map((branch) => ({
+          ...branch,
+          opening_cash_balance: Number(branch.opening_cash_balance),
+        }));
         const branchIdsSa = branchListSa.map((b) => b.id);
         const { todayByBranch: todayMapSa, priorByBranch: priorMapSa } =
           await this.loadBalanceSnapshotMapsForBranches(
@@ -744,15 +745,14 @@ export class DashboardService {
           view: 'super_admin',
           summary: {
             branches: {
-              total: branchesCountResult.count ?? 0,
-              active: activeBranchesCountResult.count ?? 0,
+              total: branchesCount,
+              active: activeBranchesCount,
               inactive:
-                (branchesCountResult.count ?? 0) -
-                (activeBranchesCountResult.count ?? 0),
+                branchesCount - activeBranchesCount,
             },
             users: {
-              total: usersCountResult.count ?? 0,
-              pendingApproval: pendingUsersCountResult.count ?? 0,
+              total: usersCount,
+              pendingApproval: pendingUsersCount,
             },
             fundRequests: this.summarizeFundRequests(fundRowsResult.data ?? []),
             systemExpenses: (systemExpensesResult.data ?? []).reduce(
@@ -783,11 +783,17 @@ export class DashboardService {
           transferredFundsResult,
           todayTransactionsResult,
         ] = await Promise.all([
-          client
-            .from('branches')
-            .select('id, name, branch_code, location, status, opening_cash_balance')
-            .eq('id', branchId)
-            .maybeSingle(),
+          this.prisma.branches.findUnique({
+            where: { id: branchId },
+            select: {
+              id: true,
+              name: true,
+              branch_code: true,
+              location: true,
+              status: true,
+              opening_cash_balance: true,
+            },
+          }),
           client
             .from('fund_requests')
             .select(
@@ -821,7 +827,6 @@ export class DashboardService {
         ]);
 
         const errors = [
-          branchResult.error,
           fundRowsResult.error,
           transferredFundsResult.error,
           todayTransactionsResult.error,
@@ -838,9 +843,15 @@ export class DashboardService {
             [branchId],
             todayStrAdmin,
           );
+        const adminBranch = branchResult
+          ? {
+              ...branchResult,
+              opening_cash_balance: Number(branchResult.opening_cash_balance),
+            }
+          : null;
         const adminFinance =
           this.buildBranchFinanceSummaries({
-            branches: branchResult.data ? [branchResult.data] : [],
+            branches: adminBranch ? [adminBranch] : [],
             todayByBranch: admToday,
             priorByBranch: admPrior,
             transferredFunds: transferredFundsResult.data ?? [],
@@ -855,7 +866,7 @@ export class DashboardService {
 
         return {
           view: 'admin',
-          branch: branchResult.data,
+          branch: adminBranch,
           branchFinance: adminFinanceAligned,
           currentBalance: adminFinanceAligned?.currentBalance ?? 0,
           fundRequests: {
@@ -874,11 +885,17 @@ export class DashboardService {
           employeeTransferredFundsResult,
           employeeTodayTransactionsResult,
         ] = await Promise.all([
-          client
-            .from('branches')
-            .select('id, name, branch_code, location, status, opening_cash_balance')
-            .eq('id', employeeBranchId)
-            .maybeSingle(),
+          this.prisma.branches.findUnique({
+            where: { id: employeeBranchId },
+            select: {
+              id: true,
+              name: true,
+              branch_code: true,
+              location: true,
+              status: true,
+              opening_cash_balance: true,
+            },
+          }),
           client
             .from('fund_requests')
             .select(
@@ -912,7 +929,6 @@ export class DashboardService {
         ]);
 
         const employeeErrors = [
-          employeeBranchResult.error,
           employeeFundRowsResult.error,
           employeeTransferredFundsResult.error,
           employeeTodayTransactionsResult.error,
@@ -929,11 +945,17 @@ export class DashboardService {
             [employeeBranchId],
             todayStrEmp,
           );
+        const employeeBranch = employeeBranchResult
+          ? {
+              ...employeeBranchResult,
+              opening_cash_balance: Number(
+                employeeBranchResult.opening_cash_balance,
+              ),
+            }
+          : null;
         const empFinance =
           this.buildBranchFinanceSummaries({
-            branches: employeeBranchResult.data
-              ? [employeeBranchResult.data]
-              : [],
+            branches: employeeBranch ? [employeeBranch] : [],
             todayByBranch: empToday,
             priorByBranch: empPrior,
             transferredFunds: employeeTransferredFundsResult.data ?? [],
@@ -948,7 +970,7 @@ export class DashboardService {
 
         return {
           view: 'employee',
-          branch: employeeBranchResult.data,
+          branch: employeeBranch,
           branchFinance: empFinanceAligned,
           currentBalance: empFinanceAligned?.currentBalance ?? 0,
           fundRequests: {
