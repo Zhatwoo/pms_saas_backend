@@ -11,7 +11,10 @@ import {
   effectiveBranchIdForQuery,
   requireUserBranchId,
 } from '../../common/utils/branch-scope.util';
-import { getPhCalendarDateString } from '../../common/utils/branch-calendar-date.util';
+import {
+  addManilaCalendarDays,
+  getPhCalendarDateString,
+} from '../../common/utils/branch-calendar-date.util';
 import {
   SupabaseService,
   type AuthenticatedUserProfile,
@@ -296,6 +299,14 @@ export class BranchFinanceService {
         status: 'pending',
         checklistStep: 'INVENTORY_AUDIT',
         startingCash: this.toMoney(row.starting_cash),
+      };
+    }
+
+    if (await this.branchDaySession.requiresStartingBalance(branchId)) {
+      return {
+        openingDate,
+        status: 'none',
+        checklistStep: 'CASH_ON_HAND',
       };
     }
 
@@ -586,6 +597,20 @@ export class BranchFinanceService {
 
     const branchIds = (branches as BranchRow[]).map((b) => b.id);
 
+    const todaySessionDateUtc = new Date(`${today}T00:00:00.000Z`);
+    const branchesWithDayClosedToday = new Set(
+      (
+        await this.prisma.branch_day_sessions.findMany({
+          where: {
+            branch_id: { in: branchIds },
+            session_date: todaySessionDateUtc,
+            is_closed: true,
+          },
+          select: { branch_id: true },
+        })
+      ).map((r) => r.branch_id),
+    );
+
     const todayBalancesQuery = client
       .from('daily_balances')
       .select(
@@ -690,8 +715,8 @@ export class BranchFinanceService {
       }
     }
 
-    const summaries: BranchFinanceSummary[] = (branches as BranchRow[]).map(
-      (branch) => {
+    const summaries: BranchFinanceSummary[] = await Promise.all(
+      (branches as BranchRow[]).map(async (branch) => {
         const openingFallback = this.toMoney(branch.opening_cash_balance);
         const snap = buildBranchDaySnapshotFromFetched({
           today,
@@ -727,7 +752,12 @@ export class BranchFinanceService {
           return p !== 'start' && p !== 'end';
         });
 
-        for (const tx of operationalTx) {
+        const operationalForTotals =
+          await this.financeDailyBalance.excludeInboundFundTransfersAwaitingReceiptRows(
+            operationalTx,
+          );
+
+        for (const tx of operationalForTotals) {
           const ci = this.toMoney(tx.cash_in);
           const co = this.toMoney(tx.cash_out);
           todayCashIn += ci;
@@ -763,7 +793,21 @@ export class BranchFinanceService {
 
         breakdown.startBalance = snap.startingBalance;
 
-        const endingBalance = snap.endingBalance;
+        // Book ending from ledger movement (today in − today out), not only daily_balances.ending_balance
+        // which can lag if balance rows were not updated for every posting.
+        const ledgerEnding = Number(
+          (snap.startingBalance + todayCashIn - todayCashOut).toFixed(2),
+        );
+
+        const dayClosedToday = branchesWithDayClosedToday.has(branch.id);
+        const todayDbRow = todayByBranch.get(branch.id);
+        let summaryStartingBalance = snap.startingBalance;
+        let summaryCurrentBalance = ledgerEnding;
+        if (dayClosedToday && todayDbRow) {
+          const atRest = this.toMoney(todayDbRow.ending_balance);
+          summaryStartingBalance = atRest;
+          summaryCurrentBalance = atRest;
+        }
 
         const fundReqSummary = { pending: 0, approved: 0, transferred: 0 };
         for (const fr of branchFundReqs) {
@@ -777,8 +821,8 @@ export class BranchFinanceService {
           branchName: branch.name,
           branchCode: branch.branch_code,
           status: branch.status,
-          currentBalance: endingBalance,
-          startingBalance: snap.startingBalance,
+          currentBalance: summaryCurrentBalance,
+          startingBalance: summaryStartingBalance,
           todayCashIn: Number(todayCashIn.toFixed(2)),
           todayCashOut: Number(todayCashOut.toFixed(2)),
           breakdown: {
@@ -794,7 +838,7 @@ export class BranchFinanceService {
           },
           fundRequests: fundReqSummary,
         };
-      },
+      }),
     );
 
     return summaries;
@@ -848,8 +892,13 @@ export class BranchFinanceService {
       throw new InternalServerErrorException(error.message);
     }
 
-    let entries = (data ?? []).map((row: any) =>
-      this.mapToLedgerEntry(row as TransactionRow),
+    const filteredRows =
+      await this.financeDailyBalance.excludeInboundFundTransfersAwaitingReceiptRows(
+        (data ?? []) as TransactionRow[],
+      );
+
+    let entries = filteredRows.map((row: TransactionRow) =>
+      this.mapToLedgerEntry(row),
     );
 
     if (query.type) {
@@ -889,6 +938,7 @@ export class BranchFinanceService {
     const result = await this.branchDaySession.submitStartingBalance({
       branchId,
       actorUserId: user.id ?? null,
+      actorRole: user.role,
       amount: confirmedAmount,
     });
 
@@ -940,56 +990,95 @@ export class BranchFinanceService {
       return { startingBalance: 0, endingBalance: 0, date: null };
     }
 
-    const client = this.supabaseService.getClient();
     const today = getPhCalendarDateString();
+    const todayDate = new Date(`${today}T00:00:00.000Z`);
 
-    let startingBalance = 0;
-    let endingBalance = 0;
-    let recordDate: string | null = null;
-
-    const { data: todayRow } = await client
-      .from('daily_balances')
-      .select('starting_balance, ending_balance, record_date')
-      .eq('branch_id', branchId)
-      .eq('record_date', today)
-      .maybeSingle();
-
-    if (todayRow) {
-      startingBalance = this.toMoney(todayRow.starting_balance);
-      endingBalance = this.toMoney(todayRow.ending_balance);
-      recordDate = todayRow.record_date;
-    } else {
-      // Carry forward previous day's ending balance
-      const { data: priorRow } = await client
-        .from('daily_balances')
-        .select('ending_balance, record_date')
-        .eq('branch_id', branchId)
-        .lt('record_date', today)
-        .order('record_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (priorRow) {
-        startingBalance = this.toMoney(priorRow.ending_balance);
-        endingBalance = startingBalance;
-        recordDate = priorRow.record_date;
-      } else {
-        const { data: branchRow } = await client
-          .from('branches')
-          .select('opening_cash_balance')
-          .eq('id', branchId)
-          .maybeSingle();
-        const opening = this.toMoney(branchRow?.opening_cash_balance);
-        startingBalance = opening;
-        endingBalance = opening;
-        recordDate = null;
-      }
+    /** Before today's branch day is opened, UI expects prior book ending (last closed day), not today's partial ledger. */
+    const daySession = await this.prisma.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: todayDate,
+        },
+      },
+      select: { is_closed: true },
+    });
+    const needsStartingBalance = !daySession || daySession.is_closed;
+    if (needsStartingBalance) {
+      const basis =
+        await this.financeDailyBalance.suggestedStartingBasisForBusinessDate(
+          branchId,
+          today,
+        );
+      const dateStr =
+        basis.closedSessionRecordDate ?? addManilaCalendarDays(today, -1);
+      return {
+        startingBalance: basis.amount,
+        endingBalance: basis.amount,
+        date: dateStr,
+      };
     }
 
+    const todayRow = await this.prisma.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: {
+          branch_id: branchId,
+          record_date: todayDate,
+        },
+      },
+      select: { starting_balance: true, ending_balance: true },
+    });
+
+    if (todayRow) {
+      const startingBalance = Number(
+        new Prisma.Decimal(String(todayRow.starting_balance ?? 0)).toFixed(2),
+      );
+      const endingBalance =
+        await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
+          branchId,
+          today,
+        );
+      return {
+        startingBalance,
+        endingBalance,
+        date: today,
+      };
+    }
+
+    const priorRow = await this.prisma.daily_balances.findFirst({
+      where: { branch_id: branchId, record_date: { lt: todayDate } },
+      orderBy: { record_date: 'desc' },
+      select: { record_date: true },
+    });
+
+    if (priorRow) {
+      const priorStr = priorRow.record_date.toISOString().slice(0, 10);
+      const bookEnding =
+        await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
+          branchId,
+          priorStr,
+        );
+      return {
+        startingBalance: bookEnding,
+        endingBalance: bookEnding,
+        date: priorStr,
+      };
+    }
+
+    const branchRow = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { opening_cash_balance: true },
+    });
+    const opening = Number(
+      new Prisma.Decimal(String(branchRow?.opening_cash_balance ?? 0)).toFixed(
+        2,
+      ),
+    );
+
     return {
-      startingBalance,
-      endingBalance,
-      date: recordDate,
+      startingBalance: opening,
+      endingBalance: opening,
+      date: null,
     };
   }
 }
