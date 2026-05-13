@@ -1,4 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
@@ -11,6 +12,7 @@ type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export class ReportsService {
   constructor(
     @Inject(SupabaseService) private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private toMoney(val: any): number {

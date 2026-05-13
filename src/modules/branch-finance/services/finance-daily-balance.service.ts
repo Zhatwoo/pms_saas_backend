@@ -231,7 +231,10 @@ export class FinanceDailyBalanceService {
       cash_out?: unknown;
       voided_at?: Date | string | null;
     },
-  >(rows: T[]): Promise<T[]> {
+  >(
+    rows: T[],
+    pendingLinksByBranch?: Map<string, Set<string>>,
+  ): Promise<T[]> {
     const branchIds = [
       ...new Set(
         rows
@@ -243,19 +246,22 @@ export class FinanceDailyBalanceService {
       return rows;
     }
 
-    const pendingLinks = await this.prisma.fund_requests.findMany({
-      where: {
-        branch_id: { in: branchIds },
-        status: { not: 'transferred' },
-      },
-      select: { branch_id: true, request_no: true },
-    });
-    const pendingByBranch = new Map<string, Set<string>>();
-    for (const link of pendingLinks) {
-      if (!pendingByBranch.has(link.branch_id)) {
-        pendingByBranch.set(link.branch_id, new Set());
+    let pendingByBranch = pendingLinksByBranch;
+    if (!pendingByBranch) {
+      const pendingLinks = await this.prisma.fund_requests.findMany({
+        where: {
+          branch_id: { in: branchIds },
+          status: { not: 'transferred' },
+        },
+        select: { branch_id: true, request_no: true },
+      });
+      pendingByBranch = new Map<string, Set<string>>();
+      for (const link of pendingLinks) {
+        if (!pendingByBranch.has(link.branch_id)) {
+          pendingByBranch.set(link.branch_id, new Set());
+        }
+        pendingByBranch.get(link.branch_id)!.add(link.request_no);
       }
-      pendingByBranch.get(link.branch_id)!.add(link.request_no);
     }
     if (pendingByBranch.size === 0) {
       return rows;

@@ -33,11 +33,13 @@ import { QRReplacementRequestsModule } from './modules/qr-replacement-requests/q
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 import { EncryptionModule } from './common/encryption/encryption.module';
+import { CacheModuleConfig } from './infrastructure/cache';
 
 @Module({
   // Triggering reload for new QR replacement routes
   imports: [
     EncryptionModule,
+    CacheModuleConfig,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [appConfig, securityConfig],
