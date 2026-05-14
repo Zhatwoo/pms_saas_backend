@@ -5,7 +5,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
 import { addManilaCalendarDays } from '../../../common/utils/branch-calendar-date.util';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import {
@@ -14,7 +13,7 @@ import {
 } from '../utils/finance-ledger.util';
 import { BranchFinanceSessionGateService } from './branch-finance-session-gate.service';
 
-export type FinanceDailyBalanceTx = Prisma.TransactionClient;
+export type FinanceDailyBalanceTx = any;
 type Tx = FinanceDailyBalanceTx;
 
 /**
@@ -26,6 +25,10 @@ type Tx = FinanceDailyBalanceTx;
 export class FinanceDailyBalanceService {
   private readonly logger = new Logger(FinanceDailyBalanceService.name);
 
+  private get db(): any {
+    return this.prisma as any;
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -36,8 +39,9 @@ export class FinanceDailyBalanceService {
     return new Date(`${dateStr}T00:00:00.000Z`);
   }
 
-  private dec(n: unknown): Prisma.Decimal {
-    return new Prisma.Decimal(String(n ?? 0));
+  private dec(n: unknown): number {
+    const value = Number(String(n ?? 0));
+    return Number.isFinite(value) ? Number(value.toFixed(2)) : 0;
   }
 
   /**
@@ -63,13 +67,13 @@ export class FinanceDailyBalanceService {
     client: Tx,
     branchId: string,
     businessDateStr: string,
-    delta: Prisma.Decimal,
+    delta: number,
     options?: { bypassOperationalSessionGate?: boolean },
   ): Promise<{
-    baseline: Prisma.Decimal;
-    next: Prisma.Decimal;
+    baseline: number;
+    next: number;
     existingRow: { id: string } | null;
-    carriedForCreate: Prisma.Decimal;
+    carriedForCreate: number;
   }> {
     if (!options?.bypassOperationalSessionGate) {
       await this.sessionGate.assertOperationalPostingAllowed(
@@ -98,7 +102,7 @@ export class FinanceDailyBalanceService {
       const baseline = this.dec(current.ending_balance);
       return {
         baseline,
-        next: baseline.plus(delta),
+        next: Number((baseline + delta).toFixed(2)),
         existingRow: { id: current.id },
         carriedForCreate: baseline,
       };
@@ -114,7 +118,7 @@ export class FinanceDailyBalanceService {
       select: { opening_cash_balance: true },
     });
 
-    let carried: Prisma.Decimal;
+    let carried: number;
     if (prior) {
       carried = this.dec(prior.ending_balance);
     } else {
@@ -137,19 +141,19 @@ export class FinanceDailyBalanceService {
     const baseline = carried;
     return {
       baseline,
-      next: baseline.plus(delta),
+      next: Number((baseline + delta).toFixed(2)),
       existingRow: null,
       carriedForCreate: carried,
     };
   }
 
   private throwIfNegativeEnding(
-    next: Prisma.Decimal,
+    next: number,
     ctx: {
       branchId: string;
       businessDateStr: string;
-      baselineBeforeDelta: Prisma.Decimal;
-      netChangeDecimal: Prisma.Decimal;
+      baselineBeforeDelta: number;
+      netChangeDecimal: number;
       /** When set (e.g. reconciliation), overrides gross delta for `required_amount` in the API payload. */
       requiredAmountOverride?: number;
     },
@@ -158,17 +162,16 @@ export class FinanceDailyBalanceService {
     if (opts?.skipInsufficientFundsCheck) {
       return;
     }
-    if (this.allowNegativeEnding() || !next.lt(0)) {
+    if (this.allowNegativeEnding() || !(next < 0)) {
       return;
     }
 
     const available_balance = Number(ctx.baselineBeforeDelta.toFixed(2));
     const required_amount =
-      ctx.requiredAmountOverride ??
-      Number(ctx.netChangeDecimal.abs().toFixed(2));
+      ctx.requiredAmountOverride ?? Math.abs(ctx.netChangeDecimal);
 
     this.logger.warn(
-      `[BranchCash] INSUFFICIENT_FUNDS branchId=${ctx.branchId} businessDate=${ctx.businessDateStr} available_balance=${available_balance} required_amount=${required_amount} netDelta=${ctx.netChangeDecimal.toString()} projectedEnding=${next.toString()} ts=${new Date().toISOString()}`,
+      `[BranchCash] INSUFFICIENT_FUNDS branchId=${ctx.branchId} businessDate=${ctx.businessDateStr} available_balance=${available_balance} required_amount=${required_amount} netDelta=${ctx.netChangeDecimal} projectedEnding=${next} ts=${new Date().toISOString()}`,
     );
 
     throw new HttpException(
@@ -197,7 +200,7 @@ export class FinanceDailyBalanceService {
     if (!branchId || !Number.isFinite(netChange) || netChange === 0) {
       return;
     }
-    const delta = new Prisma.Decimal(netChange.toFixed(2));
+    const delta = Number(netChange.toFixed(2));
     const { baseline, next } = await this.projectEndingAfterDeltaInTx(
       client,
       branchId,
@@ -248,7 +251,7 @@ export class FinanceDailyBalanceService {
 
     let pendingByBranch = pendingLinksByBranch;
     if (!pendingByBranch) {
-      const pendingLinks = await this.prisma.fund_requests.findMany({
+      const pendingLinks = await this.db.fund_requests.findMany({
         where: {
           branch_id: { in: branchIds },
           status: { not: 'transferred' },
@@ -343,7 +346,7 @@ export class FinanceDailyBalanceService {
     opts?: { forStartingPersist?: boolean },
   ): Promise<number> {
     const date = this.toRecordDate(businessDateStr);
-    const rows = await this.prisma.transactions.findMany({
+    const rows = await this.db.transactions.findMany({
       where: { branch_id: branchId, transaction_date: date, voided_at: null },
       select: {
         branch_id: true,
@@ -376,7 +379,7 @@ export class FinanceDailyBalanceService {
     businessDateStr: string,
   ): Promise<number> {
     const date = this.toRecordDate(businessDateStr);
-    const row = await this.prisma.daily_balances.findUnique({
+    const row = await this.db.daily_balances.findUnique({
       where: {
         branch_id_record_date: { branch_id: branchId, record_date: date },
       },
@@ -387,7 +390,7 @@ export class FinanceDailyBalanceService {
     if (row) {
       start = Number(this.dec(row.starting_balance).toFixed(2));
     } else {
-      const b = await this.prisma.branches.findUnique({
+      const b = await this.db.branches.findUnique({
         where: { id: branchId },
         select: { opening_cash_balance: true },
       });
@@ -405,7 +408,7 @@ export class FinanceDailyBalanceService {
   ): Promise<{ amount: number; closedSessionRecordDate: string | null }> {
     const bizDate = this.toRecordDate(businessDateStr);
 
-    const lastClosed = await this.prisma.branch_day_sessions.findFirst({
+    const lastClosed = await this.db.branch_day_sessions.findFirst({
       where: {
         branch_id: branchId,
         is_closed: true,
@@ -422,7 +425,7 @@ export class FinanceDailyBalanceService {
         .slice(0, 10);
       const recordDate = this.toRecordDate(sessionDateStr);
 
-      const bal = await this.prisma.daily_balances.findUnique({
+      const bal = await this.db.daily_balances.findUnique({
         where: {
           branch_id_record_date: {
             branch_id: branchId,
@@ -452,7 +455,7 @@ export class FinanceDailyBalanceService {
       };
     }
 
-    const branchRow = await this.prisma.branches.findUnique({
+    const branchRow = await this.db.branches.findUnique({
       where: { id: branchId },
       select: { opening_cash_balance: true },
     });
@@ -534,7 +537,7 @@ export class FinanceDailyBalanceService {
     if (!branchId || !Number.isFinite(netChange) || netChange === 0) {
       return;
     }
-    const delta = new Prisma.Decimal(netChange.toFixed(2));
+    const delta = Number(netChange.toFixed(2));
     const date = this.toRecordDate(businessDateStr);
 
     const run = async (client: Tx) => {
@@ -581,10 +584,10 @@ export class FinanceDailyBalanceService {
       return;
     }
 
-    await this.prisma.$transaction(run, {
+    await this.db.$transaction(run, {
       maxWait: 10_000,
       timeout: 30_000,
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      isolationLevel: 'ReadCommitted' as any,
     });
   }
 
@@ -622,13 +625,13 @@ export class FinanceDailyBalanceService {
       },
     });
 
-    let starting: Prisma.Decimal;
-    let ending: Prisma.Decimal;
+    let starting: number;
+    let ending: number;
 
     if (mode === 'starting') {
       // Employee physical count is stored verbatim — never added to prior day balances.
-      starting = new Prisma.Decimal(conf);
-      ending = starting.plus(net);
+      starting = conf;
+      ending = Number((starting + net).toFixed(2));
     } else {
       // End-of-day: ledger ending = confirmed opening cash for this Manila date
       // + same-day operational net (Σ cash_in − Σ cash_out, excluding Start/End markers & voided).
@@ -677,14 +680,14 @@ export class FinanceDailyBalanceService {
           ? this.dec(prior.ending_balance)
           : this.dec(branch?.opening_cash_balance);
       }
-      ending = starting.plus(net);
+      ending = Number((starting + net).toFixed(2));
     }
 
     // PostgreSQL `daily_balances_ending_balance_check` (and similar) — persisted row must not violate DB.
-    if (ending.lt(0)) {
-      ending = new Prisma.Decimal(0);
+    if (ending < 0) {
+      ending = 0;
     }
-    if (ending.lt(starting)) {
+    if (ending < starting) {
       ending = starting;
     }
 
@@ -694,7 +697,7 @@ export class FinanceDailyBalanceService {
         branchId,
         businessDateStr,
         baselineBeforeDelta: starting,
-        netChangeDecimal: new Prisma.Decimal(net.toFixed(2)),
+        netChangeDecimal: Number(net.toFixed(2)),
         requiredAmountOverride: Number((-ending).toFixed(2)),
       },
       {
@@ -743,7 +746,7 @@ export class FinanceDailyBalanceService {
     mode: 'starting' | 'ending';
     confirmedAmount: number;
   }): Promise<{ startingBalance: number; endingBalance: number }> {
-    return this.prisma.$transaction(async (client) =>
+    return this.db.$transaction(async (client) =>
       this.persistConfirmationBalancesInTx(client, params),
     );
   }
