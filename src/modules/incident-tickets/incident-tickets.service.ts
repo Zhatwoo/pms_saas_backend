@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Role } from '../../common/enums';
+import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 
@@ -49,7 +50,10 @@ interface IncidentTicketEventPayload {
 export class IncidentTicketsService {
   private readonly logger = new Logger(IncidentTicketsService.name);
 
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   private ensureBranchAccess(user: AuthenticatedUserProfile, branchId: string) {
     if (user.role === Role.SUPER_ADMIN) return;
@@ -377,23 +381,15 @@ export class IncidentTicketsService {
   }
 
   private async resolveManagerId(branchId: string) {
-    const client = this.supabaseService.getClient();
+    const data = await this.prisma.users.findFirst({
+      where: {
+        branch_id: branchId,
+        role: Role.ADMIN,
+      },
+      select: { id: true },
+    });
 
-    const { data, error } = await client
-      .from('users')
-      .select('id, role, branch_id')
-      .eq('branch_id', branchId)
-      .eq('role', Role.ADMIN)
-      .limit(1);
-
-    if (error) {
-      this.logger.warn(
-        `Failed to resolve manager for branch ${branchId}: ${error.message}`,
-      );
-      return null;
-    }
-
-    return data?.[0]?.id ?? null;
+    return data?.id ?? null;
   }
 
   private async ensureAssigneeAccess(
@@ -403,21 +399,14 @@ export class IncidentTicketsService {
   ) {
     if (!assigneeId) return;
 
-    const client = this.supabaseService.getClient();
-    const { data, error } = await client
-      .from('users')
-      .select('id, role, branch_id')
-      .eq('id', assigneeId)
-      .maybeSingle();
-
-    if (error) {
-      this.logger.warn(
-        `Failed to validate incident assignee ${assigneeId}: ${error.message}`,
-      );
-      throw new InternalServerErrorException(
-        'Failed to validate incident assignee',
-      );
-    }
+    const data = await this.prisma.users.findUnique({
+      where: { id: assigneeId },
+      select: {
+        id: true,
+        role: true,
+        branch_id: true,
+      },
+    });
 
     if (!data) {
       throw new BadRequestException('Selected assignee was not found.');

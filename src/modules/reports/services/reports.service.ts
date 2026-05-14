@@ -142,9 +142,14 @@ export class ReportsService {
     );
 
     // Active branches
-    const { data: branches } = await client
-      .from('branches')
-      .select('id, name, status');
+    const branches = await this.prisma.branches.findMany({
+      where: branchId ? { id: branchId } : undefined,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
+    });
 
     const activeBranches = (branches || []).filter(
       (b) => b.status === 'Active',
