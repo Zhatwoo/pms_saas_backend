@@ -1,5 +1,3 @@
-import { Prisma } from '@prisma/client';
-
 /**
  * Start/End rows are journal markers only (zero cash); they must not move operational cash totals.
  */
@@ -36,13 +34,13 @@ export function isInboundBranchCashFundTransferRow(row: {
  */
 export function operationalNetFromRows(
   rows: Array<{
-    purpose: string;
-    cash_in: unknown;
-    cash_out: unknown;
-    voided_at?: Date | null;
+    purpose?: string | null | undefined;
+    cash_in?: unknown;
+    cash_out?: unknown;
+    voided_at?: Date | string | null | undefined;
   }>,
-): Prisma.Decimal {
-  let net = new Prisma.Decimal(0);
+): number {
+  let net = 0;
   for (const r of rows) {
     if (r.voided_at != null) {
       continue;
@@ -50,9 +48,9 @@ export function operationalNetFromRows(
     if (isJournalPurposeStartEnd(r.purpose)) {
       continue;
     }
-    const ci = new Prisma.Decimal(String(r.cash_in ?? 0));
-    const co = new Prisma.Decimal(String(r.cash_out ?? 0));
-    net = net.plus(ci).minus(co);
+    const ci = Number(r.cash_in ?? 0);
+    const co = Number(r.cash_out ?? 0);
+    net += (Number.isFinite(ci) ? ci : 0) - (Number.isFinite(co) ? co : 0);
   }
-  return net;
+  return Number(net.toFixed(2));
 }
