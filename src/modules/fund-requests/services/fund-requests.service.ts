@@ -31,6 +31,7 @@ import {
 import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.dto';
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
 import { UploadFundTransferProofDto } from '../dto/upload-fund-transfer-proof.dto';
+import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 
 interface BranchRow {
   id: string;
@@ -157,6 +158,7 @@ export class FundRequestsService {
 
   constructor(
     private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly activityLogsService: ActivityLogsService,
     private readonly notificationsService: NotificationsService,
     private readonly encryption: EncryptionService,
@@ -363,16 +365,16 @@ export class FundRequestsService {
   }
 
   private async getBranchById(branchId: string): Promise<BranchRow> {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('id, name, branch_code, location, status')
-      .eq('id', branchId)
-      .maybeSingle<BranchRow>();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    const data = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: {
+        id: true,
+        name: true,
+        branch_code: true,
+        location: true,
+        status: true,
+      },
+    });
 
     if (!data) {
       throw new NotFoundException('Branch not found');
@@ -474,17 +476,17 @@ export class FundRequestsService {
       return null;
     }
 
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('id')
-      .ilike('name', `%${branchName}%`);
+    const data = await this.prisma.branches.findMany({
+      where: {
+        name: {
+          contains: branchName,
+          mode: 'insensitive',
+        },
+      },
+      select: { id: true },
+    });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return (data ?? []).map((row: { id: string }) => row.id);
+    return data.map((row) => row.id);
   }
 
   private mapFundRequest(row: FundRequestRow) {

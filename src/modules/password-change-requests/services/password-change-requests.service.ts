@@ -14,6 +14,7 @@ import {
   randomBytes,
 } from 'crypto';
 import { Role } from '../../../common/enums';
+import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { ActivityLogsService } from '../../activity-logs/activity-logs.service';
@@ -90,6 +91,7 @@ const PASSWORD_REQUEST_ACTIVATED = 'PASSWORD_CHANGE_REQUEST_ACTIVATED';
 export class PasswordChangeRequestsService {
   constructor(
     private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly activityLogsService: ActivityLogsService,
     private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
@@ -323,17 +325,20 @@ export class PasswordChangeRequestsService {
     const map = new Map<string, UserRow>();
     if (ids.length === 0) return map;
 
-    const client = this.supabaseService.getClient();
-    const { data, error } = await client
-      .from('users')
-      .select('id, auth_id, email, full_name, role, branch_id, account_status')
-      .in('id', ids);
+    const data = await this.prisma.users.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        auth_id: true,
+        email: true,
+        full_name: true,
+        role: true,
+        branch_id: true,
+        account_status: true,
+      },
+    });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    for (const row of (data ?? []) as UserRow[]) {
+    for (const row of data as UserRow[]) {
       map.set(row.id, {
         ...row,
         full_name: this.encryption.decryptUserFullName(row.full_name),
@@ -377,28 +382,32 @@ export class PasswordChangeRequestsService {
     targetRole: Role.ADMIN | Role.SUPER_ADMIN,
     branchId: string | null,
   ): Promise<UserRow[]> {
-    const client = this.supabaseService.getClient();
-    let query = client
-      .from('users')
-      .select('id, full_name, role, branch_id, account_status')
-      .eq('role', targetRole)
-      .neq('account_status', 'rejected');
+    const data = await this.prisma.users.findMany({
+      where: {
+        role: targetRole,
+        account_status: { not: 'rejected' },
+        ...(targetRole === Role.ADMIN
+          ? {
+              branch_id: branchId,
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        full_name: true,
+        role: true,
+        branch_id: true,
+        account_status: true,
+      },
+    });
 
-    if (targetRole === Role.ADMIN) {
-      if (!branchId) {
-        throw new BadRequestException(
-          'Employee account must be assigned to a branch to request password change',
-        );
-      }
-      query = query.eq('branch_id', branchId);
+    if (targetRole === Role.ADMIN && !branchId) {
+      throw new BadRequestException(
+        'Employee account must be assigned to a branch to request password change',
+      );
     }
 
-    const { data, error } = await query;
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return (data ?? [])
+    return data
       .filter((row) => row.account_status !== 'pending')
       .map((row) => ({
         ...row,
