@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
-import { Prisma } from '@prisma/client';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   assertBranchAccess,
@@ -21,6 +20,7 @@ import { RewardsService } from '../../rewards/services/rewards.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 
 type CustomerGroupMatch = {
   id: string;
@@ -123,8 +123,6 @@ const ALLOWED_TRANSACTION_PURPOSES = new Set([
   'Fund Transfer',
 ]);
 
-type TransactionDbClient = PrismaService | Prisma.TransactionClient;
-
 @Injectable()
 export class TransactionsService {
   constructor(
@@ -132,6 +130,7 @@ export class TransactionsService {
     private readonly notificationsService: NotificationsService,
     private readonly rewardsService: RewardsService,
     private readonly encryption: EncryptionService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
   private toDbDate(value?: string | null): Date {
@@ -295,60 +294,6 @@ export class TransactionsService {
     };
   }
 
-  private async adjustDailyBalance(
-    branchId: string,
-    netChange: number,
-    recordDate = getPhCalendarDateString(),
-    client: TransactionDbClient = this.prisma,
-  ) {
-    const date = this.toDbDate(recordDate);
-    const current = await client.daily_balances.findUnique({
-      where: {
-        branch_id_record_date: { branch_id: branchId, record_date: date },
-      },
-      select: { starting_balance: true, ending_balance: true },
-    });
-
-    if (current) {
-      const nextEndingBalance =
-        this.toNumber(current.ending_balance) + netChange;
-      if (nextEndingBalance < 0) {
-        throw new BadRequestException('Insufficient branch cash balance');
-      }
-
-      await client.daily_balances.update({
-        where: {
-          branch_id_record_date: { branch_id: branchId, record_date: date },
-        },
-        data: {
-          ending_balance: nextEndingBalance,
-          updated_at: new Date(),
-        },
-      });
-      return;
-    }
-
-    const prior = await client.daily_balances.findFirst({
-      where: { branch_id: branchId, record_date: { lt: date } },
-      orderBy: { record_date: 'desc' },
-      select: { ending_balance: true },
-    });
-    const carried = this.toNumber(prior?.ending_balance);
-    const nextEndingBalance = carried + netChange;
-    if (nextEndingBalance < 0) {
-      throw new BadRequestException('Insufficient branch cash balance');
-    }
-
-    await client.daily_balances.create({
-      data: {
-        branch_id: branchId ?? undefined,
-        record_date: date,
-        starting_balance: carried,
-        ending_balance: nextEndingBalance,
-      },
-    });
-  }
-
   private async resolveCustomerTimelineScope(
     user: UserWithBranch,
     customerId: string,
@@ -364,19 +309,23 @@ export class TransactionsService {
 
     if (!customer) return null;
 
+    // Find all customers with matching full name (case-insensitive)
+    // instead of loading all 1000 and filtering in memory
     const candidates = await this.prisma.customers.findMany({
-      where: { deleted_at: null, ...buildBranchFilter(user) },
+      where: {
+        deleted_at: null,
+        ...buildBranchFilter(user),
+        // Database-level case-insensitive match
+        full_name: {
+          equals: customer.full_name,
+          mode: 'insensitive',
+        },
+      },
       select: { id: true, full_name: true, branch_id: true },
       take: 1000,
     });
 
-    const targetName = normalizeCustomerFullName(customer.full_name);
-    const matchingCustomerIds = candidates
-      .filter(
-        (candidate) =>
-          normalizeCustomerFullName(candidate.full_name) === targetName,
-      )
-      .map((candidate) => candidate.id);
+    const matchingCustomerIds = candidates.map((c) => c.id);
 
     if (!matchingCustomerIds.includes(customer.id)) {
       matchingCustomerIds.unshift(customer.id);
@@ -489,11 +438,12 @@ export class TransactionsService {
       });
 
       const netChange = amounts.cashIn - amounts.cashOut;
+      // Single balance writer: same Manila business date as transaction_date above.
       if (branchId && netChange !== 0) {
-        await this.adjustDailyBalance(
+        await this.financeDailyBalance.applyNetChange(
           branchId,
-          netChange,
           getPhCalendarDateString(),
+          netChange,
           tx,
         );
       }
@@ -675,6 +625,7 @@ export class TransactionsService {
         transfer: 0,
         startingBalance: 0,
         endingBalance: 0,
+        sessionOpenedAt: null as string | null,
       },
     };
   }
@@ -697,33 +648,67 @@ export class TransactionsService {
       ).length,
       startingBalance: 0,
       endingBalance: 0,
+      sessionOpenedAt: null as string | null,
     };
+
+    let sessionOpenedAt: string | null = null;
 
     if (scoped) {
       const balanceDate = this.toDbDate(date || getPhCalendarDateString());
-      const balanceData = await this.prisma.daily_balances.findUnique({
-        where: {
-          branch_id_record_date: {
-            branch_id: scoped,
-            record_date: balanceDate,
-          },
-        },
-        select: { starting_balance: true, ending_balance: true },
-      });
+      const balanceDateStr = date || getPhCalendarDateString();
 
+      // Parallelize both queries
+      const [balanceData, sessionRow] = await Promise.all([
+        this.prisma.daily_balances.findUnique({
+          where: {
+            branch_id_record_date: {
+              branch_id: scoped,
+              record_date: balanceDate,
+            },
+          },
+          select: { starting_balance: true, ending_balance: true },
+        }),
+        this.prisma.branch_day_sessions.findUnique({
+          where: {
+            branch_id_session_date: {
+              branch_id: scoped,
+              session_date: balanceDate,
+            },
+          },
+          select: { opened_at: true, is_closed: true },
+        }),
+      ]);
+
+      sessionOpenedAt = sessionRow?.opened_at?.toISOString() ?? null;
+      stats.sessionOpenedAt = sessionOpenedAt;
+
+      if (balanceData && sessionRow?.is_closed) {
+        const bookAtClose = this.toNumber(balanceData.ending_balance);
+        stats.startingBalance = bookAtClose;
+        stats.endingBalance = bookAtClose;
+        return stats;
+      }
+
+      let startingBalanceCalc = 0;
       if (balanceData) {
-        stats.startingBalance = this.toNumber(balanceData.starting_balance);
-        stats.endingBalance = this.toNumber(balanceData.ending_balance);
+        startingBalanceCalc = this.toNumber(balanceData.starting_balance);
       } else {
         const priorRow = await this.prisma.daily_balances.findFirst({
           where: { branch_id: scoped, record_date: { lt: balanceDate } },
           orderBy: { record_date: 'desc' },
           select: { ending_balance: true },
         });
-        const carried = this.toNumber(priorRow?.ending_balance);
-        stats.startingBalance = carried;
-        stats.endingBalance = carried;
+        startingBalanceCalc = this.toNumber(priorRow?.ending_balance);
       }
+
+      stats.startingBalance = startingBalanceCalc;
+      const net = await this.financeDailyBalance.sumOperationalNetCash(
+        scoped,
+        balanceDateStr,
+      );
+      stats.endingBalance = Number(
+        (startingBalanceCalc + net).toFixed(2),
+      );
     }
 
     return stats;

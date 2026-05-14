@@ -18,6 +18,10 @@ import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 
+function getAuditChangedFields(dto: UpdateUserDto) {
+  return Object.keys(dto).filter((key) => key !== 'currentPassword');
+}
+
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -70,6 +74,7 @@ export class UsersController {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,
       targetBranchName: updated.branchName ?? null,
+      changedFields: getAuditChangedFields(updateUserDto),
     };
     return updated;
   }
@@ -93,6 +98,7 @@ export class UsersController {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,
       targetBranchName: updated.branchName ?? null,
+      changedFields: ['branchId'],
     };
     return updated;
   }
@@ -114,6 +120,7 @@ export class UsersController {
       targetUserId: updated.id,
       targetUserName: updated.fullName ?? updated.email,
       targetBranchName: updated.branchName ?? null,
+      changedFields: getAuditChangedFields(updateUserDto),
     };
     return updated;
   }

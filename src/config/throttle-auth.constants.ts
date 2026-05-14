@@ -10,7 +10,7 @@ function pi(raw: string | undefined, fb: number) {
 
 export const AUTH_STRICT_THROTTLE = {
   global: {
-    limit: pi(process.env.THROTTLE_AUTH_LIMIT, 5),
+    limit: pi(process.env.THROTTLE_AUTH_LIMIT, 50),
     ttl: pi(process.env.THROTTLE_AUTH_TTL_MS, 900_000),
   },
   burst: {

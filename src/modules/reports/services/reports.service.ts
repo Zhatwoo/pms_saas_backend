@@ -1,8 +1,10 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
 import { isNonRevenuePurpose } from '../../../common/enums';
+import { Role } from '../../../common/enums';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -10,6 +12,7 @@ type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export class ReportsService {
   constructor(
     @Inject(SupabaseService) private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private toMoney(val: any): number {
@@ -71,11 +74,32 @@ export class ReportsService {
     endDate?: string,
   ) {
     const client = this.supabaseService.getClient();
-    const { fromDate, toDate, trendDays } = this.resolveDateRange(
+    let { fromDate, toDate, trendDays } = this.resolveDateRange(
       period,
       startDate,
       endDate,
     );
+
+    // When super-admin requests the system report for ALL branches and requests
+    // a weekly period, align the range to the calendar week (Monday - Sunday)
+    // instead of the last 7 days. This ensures consistent weekly reporting
+    // across branches.
+    if (
+      (period ?? '').toLowerCase() === 'weekly' &&
+      !branchQuery &&
+      user?.role === Role.SUPER_ADMIN
+    ) {
+      const today = new Date();
+      const day = today.getDay(); // 0 (Sun) .. 6 (Sat)
+      const diffToMonday = (day + 6) % 7; // 0 for Mon, 6 for Sun
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - diffToMonday);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      fromDate = monday.toISOString().split('T')[0];
+      toDate = sunday.toISOString().split('T')[0];
+      trendDays = 7;
+    }
 
     const branchId = effectiveBranchIdForQuery(user, branchQuery);
 
@@ -97,18 +121,35 @@ export class ReportsService {
     if (branchId) salesQuery = salesQuery.eq('branch_id', branchId);
     const { data: salesData } = await salesQuery;
 
-    const totalSales = (salesData || []).reduce(
+    // Sum sales for the requested period
+    const periodTotalSales = (salesData || []).reduce(
       (sum, row) =>
-        isNonRevenuePurpose(row.purpose)
-          ? sum
-          : sum + this.toMoney(row.cash_in),
+        isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in),
+      0,
+    );
+
+    // Also compute today's sales (useful for the dashboard stat "Total Sales Today")
+    const todayStr = new Date().toISOString().split('T')[0];
+    let todaySalesQuery = client
+      .from('transactions')
+      .select('cash_in, purpose')
+      .eq('transaction_date', todayStr);
+    if (branchId) todaySalesQuery = todaySalesQuery.eq('branch_id', branchId);
+    const { data: todaySalesData } = await todaySalesQuery;
+    const totalSalesToday = (todaySalesData || []).reduce(
+      (sum, row) => (isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in)),
       0,
     );
 
     // Active branches
-    const { data: branches } = await client
-      .from('branches')
-      .select('id, name, status');
+    const branches = await this.prisma.branches.findMany({
+      where: branchId ? { id: branchId } : undefined,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
+    });
 
     const activeBranches = (branches || []).filter(
       (b) => b.status === 'Active',
@@ -147,14 +188,14 @@ export class ReportsService {
       .map((b) => ({
         ...b,
         share:
-          totalSales > 0
-            ? Number(((b.sales / totalSales) * 100).toFixed(1))
+          periodTotalSales > 0
+            ? Number(((b.sales / periodTotalSales) * 100).toFixed(1))
             : 0,
       }))
       .sort((a, b) => b.sales - a.sales);
 
     const scopedBranchCount = branchSalesMap.size || 1;
-    const avgPerBranch = Math.round(totalSales / scopedBranchCount);
+    const avgPerBranch = Math.round(periodTotalSales / scopedBranchCount);
 
     // Sales trend — use the actual date range from the request
     const trendStart = fromDate;
@@ -265,7 +306,7 @@ export class ReportsService {
 
     return {
       stats: {
-        totalSalesToday: totalSales,
+        totalSalesToday: totalSalesToday,
         totalTransactions: txnCount ?? 0,
         avgPerBranch,
         activeBranches,
@@ -281,9 +322,9 @@ export class ReportsService {
       dailyReport: {
         date: fromDate === toDate ? fromDate : `${fromDate} – ${toDate}`,
         openingBalance,
-        totalSales,
+        totalSales: periodTotalSales,
         totalExpenses,
-        netTotal: totalSales - totalExpenses,
+        netTotal: periodTotalSales - totalExpenses,
       },
     };
   }

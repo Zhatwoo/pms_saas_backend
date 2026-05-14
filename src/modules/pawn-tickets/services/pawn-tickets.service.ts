@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { Role } from '../../../common/enums';
@@ -17,6 +18,7 @@ import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-d
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 
 type PawnTicketDbClient = any;
 
@@ -27,6 +29,7 @@ export class PawnTicketsService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly encryption: EncryptionService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
   private getVerificationMode(idPresented?: string | null) {
@@ -105,22 +108,18 @@ export class PawnTicketsService {
 
   private async generateNextItemIdForBranch(
     branchId: string,
+    branchCode: string,
     client: PawnTicketDbClient = this.prisma,
   ) {
-    const branch = await client.branches.findUnique({
-      where: { id: branchId },
-      select: { branch_code: true },
-    });
-
-    const branchCode = branch?.branch_code?.toUpperCase();
-    if (!branchCode) {
+    const normalizedCode = branchCode?.toUpperCase();
+    if (!normalizedCode) {
       throw new InternalServerErrorException('Branch code not found');
     }
 
     const items = await client.pawned_items.findMany({
       where: {
         branch_id: branchId,
-        item_id: { startsWith: `${branchCode}-JCLB-`, mode: 'insensitive' },
+        item_id: { startsWith: `${normalizedCode}-JCLB-`, mode: 'insensitive' },
       },
       select: { item_id: true },
       take: 1000,
@@ -129,21 +128,25 @@ export class PawnTicketsService {
     const used = new Set(items.map((item) => item.item_id.toUpperCase()));
     const maxNumber = items.reduce(
       (max, item) =>
-        Math.max(max, this.parseUnitCodeSequence(item.item_id, branchCode)),
+        Math.max(max, this.parseUnitCodeSequence(item.item_id, normalizedCode)),
       0,
     );
 
     for (let next = maxNumber + 1; next < maxNumber + 1000; next += 1) {
-      const candidate = `${branchCode}-JCLB-${String(next).padStart(5, '0')}`;
+      const candidate = `${normalizedCode}-JCLB-${String(next).padStart(5, '0')}`;
       if (!used.has(candidate)) {
         return candidate;
       }
     }
 
-    return `${branchCode}-JCLB-${Date.now()}`;
+    return `${normalizedCode}-JCLB-${Date.now()}`;
   }
 
-  private async resolveItemId(branchId: string, unitCode?: string) {
+  private async resolveItemId(
+    branchId: string,
+    branchCode: string,
+    unitCode?: string,
+  ) {
     const provided = this.normalizeProvidedItemId(unitCode);
     if (provided) {
       const existing = await this.prisma.pawned_items.findUnique({
@@ -156,7 +159,7 @@ export class PawnTicketsService {
       }
     }
 
-    return this.generateNextItemIdForBranch(branchId);
+    return this.generateNextItemIdForBranch(branchId, branchCode);
   }
 
   private isItemIdUniqueError(error: unknown) {
@@ -198,67 +201,6 @@ export class PawnTicketsService {
     return Number(value);
   }
 
-  private async adjustDailyBalance(
-    branchId: string,
-    netChange: number,
-    client: PawnTicketDbClient = this.prisma,
-  ) {
-    const recordDate = this.toDbDate(getPhCalendarDateString());
-    const current = await client.daily_balances.findUnique({
-      where: {
-        branch_id_record_date: { branch_id: branchId, record_date: recordDate },
-      },
-      select: { ending_balance: true },
-    });
-
-    if (current) {
-      const nextEndingBalance =
-        this.toNumber(current.ending_balance) + netChange;
-      if (nextEndingBalance < 0) {
-        throw new BadRequestException(
-          `Insufficient branch cash balance. Available balance is ${this.toNumber(current.ending_balance).toFixed(2)}, pawn cash out is ${Math.abs(netChange).toFixed(2)}.`,
-        );
-      }
-
-      await client.daily_balances.update({
-        where: {
-          branch_id_record_date: {
-            branch_id: branchId,
-            record_date: recordDate,
-          },
-        },
-        data: {
-          ending_balance: nextEndingBalance,
-          updated_at: new Date(),
-        },
-      });
-      return;
-    }
-
-    const prior = await client.daily_balances.findFirst({
-      where: { branch_id: branchId, record_date: { lt: recordDate } },
-      orderBy: { record_date: 'desc' },
-      select: { ending_balance: true },
-    });
-    const carried = this.toNumber(prior?.ending_balance);
-    const nextEndingBalance = carried + netChange;
-
-    if (nextEndingBalance < 0) {
-      throw new BadRequestException(
-        `Insufficient branch cash balance. Available balance is ${carried.toFixed(2)}, pawn cash out is ${Math.abs(netChange).toFixed(2)}.`,
-      );
-    }
-
-    await client.daily_balances.create({
-      data: {
-        branch_id: branchId,
-        record_date: recordDate,
-        starting_balance: carried,
-        ending_balance: nextEndingBalance,
-      },
-    });
-  }
-
   private formatSupabaseError(error: unknown): string {
     if (error == null) {
       return 'Unknown database error';
@@ -287,14 +229,10 @@ export class PawnTicketsService {
     return `${branchCode}-SN-${this.getTodayDateKey().replaceAll('-', '')}-`;
   }
 
-  private async generateNextSerialNumberForBranch(branchId: string) {
-    const branch = await this.prisma.branches.findUnique({
-      where: { id: branchId },
-      select: { branch_code: true },
-    });
-
-    const branchCode = branch?.branch_code;
-
+  private async generateNextSerialNumberForBranch(
+    branchId: string,
+    branchCode: string,
+  ) {
     if (!branchCode) {
       throw new InternalServerErrorException('Branch code not found');
     }
@@ -401,7 +339,7 @@ export class PawnTicketsService {
 
     const branch = await this.prisma.branches.findUnique({
       where: { id: branchId },
-      select: { name: true, status: true },
+      select: { name: true, status: true, branch_code: true },
     });
     if (!branch || branch.status?.trim().toLowerCase() !== 'active') {
       throw new BadRequestException('Invalid or inactive branch');
@@ -430,7 +368,12 @@ export class PawnTicketsService {
     const serialNumber =
       providedSerialNumber && !providedSerialNumber.startsWith('PENDING')
         ? providedSerialNumber
-        : await this.generateNextSerialNumberForBranch(branchId);
+        : await this.generateNextSerialNumberForBranch(
+            branchId,
+            branch.branch_code,
+          );
+    const selectedCustomerId = dto.customerId?.trim() || null;
+    const customerIdForUpload = selectedCustomerId || randomUUID();
 
     // 1. Process Photos if present
     const verificationMode = this.getVerificationMode(dto.customer.idPresented);
@@ -460,7 +403,11 @@ export class PawnTicketsService {
 
       idPhotoUrl = await this.uploadPhoto(
         dto.item.idPhoto,
-        this.buildUploadPath('id-front'),
+        this.buildCustomerIdUploadPath(
+          branchId,
+          customerIdForUpload,
+          'id-front',
+        ),
         'id_pictures',
       );
     } else {
@@ -472,13 +419,21 @@ export class PawnTicketsService {
 
       idPhotoUrl = await this.uploadPhoto(
         dto.item.idPhoto,
-        this.buildUploadPath('id-front'),
+        this.buildCustomerIdUploadPath(
+          branchId,
+          customerIdForUpload,
+          'id-front',
+        ),
         'id_pictures',
       );
 
       idBackPhotoUrl = await this.uploadPhoto(
         dto.item.idBackPhoto,
-        this.buildUploadPath('id-back'),
+        this.buildCustomerIdUploadPath(
+          branchId,
+          customerIdForUpload,
+          'id-back',
+        ),
         'id_pictures',
       );
     }
@@ -545,7 +500,11 @@ export class PawnTicketsService {
       item_photos: true,
     } as any;
 
-    let itemId = await this.resolveItemId(branchId, dto.item.unitCode);
+    let itemId = await this.resolveItemId(
+      branchId,
+      branch.branch_code,
+      dto.item.unitCode,
+    );
     let result: {
       customer: { id: string; [key: string]: unknown };
       pawnedItem: any;
@@ -556,12 +515,20 @@ export class PawnTicketsService {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         result = await this.prisma.$transaction(async (tx) => {
+          const manilaDate = getPhCalendarDateString();
+          await this.financeDailyBalance.assertNetChangePermittedInTx(
+            tx,
+            branchId,
+            manilaDate,
+            -pawnAmount,
+          );
+
           let customer: { id: string; [key: string]: unknown } | null = null;
 
-          if (dto.customerId) {
+          if (selectedCustomerId) {
             const existingCustomer = await tx.customers.findFirst({
               where: {
-                id: dto.customerId,
+                id: selectedCustomerId,
                 branch_id: branchId,
                 deleted_at: null,
               },
@@ -579,6 +546,7 @@ export class PawnTicketsService {
               string,
               unknown
             >;
+            customerWrite.id = customerIdForUpload;
             this.encryption.applyCustomerFieldsForWrite(customerWrite);
             customer = await tx.customers.create({
               data: customerWrite as typeof customerPayload,
@@ -653,7 +621,12 @@ export class PawnTicketsService {
             Number(transactionPayload.cash_in ?? 0) -
             Number(transactionPayload.cash_out ?? 0);
           if (netChange !== 0) {
-            await this.adjustDailyBalance(branchId, netChange, tx);
+            await this.financeDailyBalance.applyNetChange(
+              branchId,
+              getPhCalendarDateString(),
+              netChange,
+              tx,
+            );
           }
 
           await tx.activity_logs.create({
@@ -683,7 +656,10 @@ export class PawnTicketsService {
         break;
       } catch (e) {
         if (this.isItemIdUniqueError(e) && attempt === 0) {
-          itemId = await this.generateNextItemIdForBranch(branchId);
+          itemId = await this.generateNextItemIdForBranch(
+            branchId,
+            branch.branch_code,
+          );
           continue;
         }
 
@@ -721,15 +697,38 @@ export class PawnTicketsService {
 
   async generateNextUnitCode(user: AuthenticatedUserProfile) {
     const branchId = requireUserBranchId(user);
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { branch_code: true },
+    });
+
+    if (!branch?.branch_code) {
+      throw new InternalServerErrorException('Branch code not found');
+    }
 
     return {
-      unitCode: await this.generateNextItemIdForBranch(branchId),
+      unitCode: await this.generateNextItemIdForBranch(
+        branchId,
+        branch.branch_code,
+      ),
     };
   }
 
   async generateNextSerialNumber(user: AuthenticatedUserProfile) {
     const branchId = requireUserBranchId(user);
-    const serialNumber = await this.generateNextSerialNumberForBranch(branchId);
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { branch_code: true },
+    });
+
+    if (!branch?.branch_code) {
+      throw new InternalServerErrorException('Branch code not found');
+    }
+
+    const serialNumber = await this.generateNextSerialNumberForBranch(
+      branchId,
+      branch.branch_code,
+    );
 
     return {
       serialNumber,
@@ -776,6 +775,14 @@ export class PawnTicketsService {
 
   private buildBranchScopedUploadPath(branchId: string, prefix: string) {
     return `${branchId}/${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+  }
+
+  private buildCustomerIdUploadPath(
+    branchId: string,
+    customerId: string,
+    filename: 'id-front' | 'id-back',
+  ) {
+    return `${branchId}/${customerId}/${filename}.jpg`;
   }
 
   async findByUnitCode(unitCode: string) {

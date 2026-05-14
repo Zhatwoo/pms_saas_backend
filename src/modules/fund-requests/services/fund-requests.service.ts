@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Role } from '../../../common/enums';
@@ -13,8 +14,9 @@ import {
   requireUserBranchId,
   superAdminBranchNameFilter,
 } from '../../../common/utils/branch-scope.util';
-import { adjustDailyBalance as sharedAdjustDailyBalance } from '../../../common/utils/daily-balance.util';
+import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
@@ -29,6 +31,7 @@ import {
 import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.dto';
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
 import { UploadFundTransferProofDto } from '../dto/upload-fund-transfer-proof.dto';
+import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 
 interface BranchRow {
   id: string;
@@ -151,19 +154,20 @@ const FUND_REQUEST_SELECT = `
 
 @Injectable()
 export class FundRequestsService {
+  private readonly logger = new Logger(FundRequestsService.name);
+
   constructor(
     private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly activityLogsService: ActivityLogsService,
     private readonly notificationsService: NotificationsService,
     private readonly encryption: EncryptionService,
+    private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
-  private toDatePart(date: Date): string {
-    return date.toISOString().split('T')[0];
-  }
-
-  private toTimePart(date: Date): string {
-    return date.toISOString().split('T')[1]?.slice(0, 8) ?? '00:00:00';
+  /** Manila calendar date key YYYYMMDD for request/transfer numbering. */
+  private phDateKey(d = new Date()): string {
+    return getPhCalendarDateString(d).replace(/-/g, '');
   }
 
   private compactText(value?: string | null): string | null {
@@ -361,16 +365,16 @@ export class FundRequestsService {
   }
 
   private async getBranchById(branchId: string): Promise<BranchRow> {
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('id, name, branch_code, location, status')
-      .eq('id', branchId)
-      .maybeSingle<BranchRow>();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    const data = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: {
+        id: true,
+        name: true,
+        branch_code: true,
+        location: true,
+        status: true,
+      },
+    });
 
     if (!data) {
       throw new NotFoundException('Branch not found');
@@ -472,17 +476,17 @@ export class FundRequestsService {
       return null;
     }
 
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .from('branches')
-      .select('id')
-      .ilike('name', `%${branchName}%`);
+    const data = await this.prisma.branches.findMany({
+      where: {
+        name: {
+          contains: branchName,
+          mode: 'insensitive',
+        },
+      },
+      select: { id: true },
+    });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return (data ?? []).map((row: { id: string }) => row.id);
+    return data.map((row) => row.id);
   }
 
   private mapFundRequest(row: FundRequestRow) {
@@ -631,17 +635,6 @@ export class FundRequestsService {
     };
   }
 
-  private async adjustDailyBalance(
-    branchId: string,
-    delta: number,
-  ): Promise<void> {
-    await sharedAdjustDailyBalance(
-      this.supabaseService.getClient(),
-      branchId,
-      delta,
-    );
-  }
-
   private async createTransferTransaction(params: {
     branch: BranchRow;
     request: FundRequestRow;
@@ -653,7 +646,7 @@ export class FundRequestsService {
     counterpartBranchName?: string | null;
   }): Promise<{ id: string }> {
     const now = new Date();
-    const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+    const prefix = `FT-${this.phDateKey(now)}-`;
     const transactionNo = await this.getNextCode(
       'transactions',
       'transaction_no',
@@ -689,8 +682,9 @@ export class FundRequestsService {
         branch_id: params.branch.id,
         branch: params.branch.name,
         purpose: 'Fund Transfer',
-        transaction_date: this.toDatePart(now),
-        transaction_time: this.toTimePart(now),
+        // Align with Prisma/daily_balances: Asia/Manila business date (not UTC).
+        transaction_date: getPhCalendarDateString(now),
+        transaction_time: now.toTimeString().slice(0, 8),
         cash_in: isInbound ? params.amount : 0,
         cash_out: isInbound ? 0 : params.amount,
         return_amount: 0,
@@ -721,7 +715,7 @@ export class FundRequestsService {
     destinationBranchName: string;
   }): Promise<{ id: string }> {
     const now = new Date();
-    const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+    const prefix = `FT-${this.phDateKey(now)}-`;
     const transactionNo = await this.getNextCode(
       'transactions',
       'transaction_no',
@@ -746,8 +740,8 @@ export class FundRequestsService {
         branch_id: null,
         branch: 'System / Head Office',
         purpose: 'Fund Transfer',
-        transaction_date: this.toDatePart(now),
-        transaction_time: this.toTimePart(now),
+        transaction_date: getPhCalendarDateString(now),
+        transaction_time: now.toTimeString().slice(0, 8),
         cash_in: 0,
         cash_out: params.amount,
         return_amount: 0,
@@ -781,7 +775,7 @@ export class FundRequestsService {
     let outboundId: string | null = null;
     if (params.sourceBranch) {
       const now = new Date();
-      const prefix = `FT-${this.toDatePart(now).replace(/-/g, '')}-`;
+      const prefix = `FT-${this.phDateKey(now)}-`;
       const transactionNo = await this.getNextCode(
         'transactions',
         'transaction_no',
@@ -795,8 +789,8 @@ export class FundRequestsService {
           branch_id: params.sourceBranch.id,
           branch: params.sourceBranch.name,
           purpose: 'Fund Transfer',
-          transaction_date: this.toDatePart(now),
-          transaction_time: this.toTimePart(now),
+          transaction_date: getPhCalendarDateString(now),
+          transaction_time: now.toTimeString().slice(0, 8),
           cash_in: 0,
           cash_out: params.amount,
           return_amount: 0,
@@ -921,7 +915,7 @@ export class FundRequestsService {
     const requestNo = await this.getNextCode(
       'fund_requests',
       'request_no',
-      `FR-${this.toDatePart(now).replace(/-/g, '')}-`,
+      `FR-${this.phDateKey(now)}-`,
     );
 
     const { data, error } = await this.supabaseService
@@ -1012,7 +1006,7 @@ export class FundRequestsService {
     const requestNo = await this.getNextCode(
       'fund_requests',
       'request_no',
-      `DF-${this.toDatePart(now).replace(/-/g, '')}-`,
+      `DF-${this.phDateKey(now)}-`,
     );
     const amount = this.normalizeMoney(dto.amount);
     const transferMode = dto.transferMode ?? 'cash';
@@ -1552,12 +1546,24 @@ export class FundRequestsService {
         counterpartBranchName: destinationBranch.name,
       });
       outboundTransactionId = outboundTransaction.id;
-      await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+      await this.financeDailyBalance.applyNetChange(
+        sourceBranch.id,
+        getPhCalendarDateString(),
+        -sentAmount,
+        undefined,
+        { bypassOperationalSessionGate: true },
+      );
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
-        await this.adjustDailyBalance(sourceBranch.id, -sentAmount);
+        await this.financeDailyBalance.applyNetChange(
+          sourceBranch.id,
+          getPhCalendarDateString(),
+          -sentAmount,
+          undefined,
+          { bypassOperationalSessionGate: true },
+        );
       } else {
         throw err;
       }
@@ -1617,6 +1623,55 @@ export class FundRequestsService {
     return mapped;
   }
 
+  /**
+   * If destination confirm fails after journal rows or applyNetChange, undo so the branch
+   * can retry without stuck inbound lines or double-counted daily_balances.
+   */
+  private async rollbackDestinationFundConfirmArtifacts(params: {
+    branchId: string | null | undefined;
+    businessDateStr: string;
+    inboundTransactionId: string | null;
+    ownerOutTransactionId: string | null;
+    balanceDeltaApplied: number;
+  }): Promise<void> {
+    const bid = params.branchId;
+    if (bid && params.balanceDeltaApplied !== 0) {
+      try {
+        await this.financeDailyBalance.applyNetChange(
+          bid,
+          params.businessDateStr,
+          -params.balanceDeltaApplied,
+          undefined,
+          { bypassOperationalSessionGate: true },
+        );
+      } catch (e) {
+        this.logger.warn(
+          `rollbackDestinationFundConfirmArtifacts: reverse applyNetChange failed: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+
+    const client = this.supabaseService.getClient();
+    const nowIso = new Date().toISOString();
+    for (const id of [
+      params.inboundTransactionId,
+      params.ownerOutTransactionId,
+    ]) {
+      if (!id) continue;
+      const { error } = await client
+        .from('transactions')
+        .update({ voided_at: nowIso })
+        .eq('id', id);
+      if (error) {
+        this.logger.warn(
+          `rollbackDestinationFundConfirmArtifacts: void transaction ${id} failed: ${error.message}`,
+        );
+      }
+    }
+  }
+
   async confirm(
     user: AuthenticatedUserProfile,
     id: string,
@@ -1631,24 +1686,39 @@ export class FundRequestsService {
     const existing = await this.getFundRequestById(id);
     assertResourceBranch(user, existing.branch_id);
 
+    if (existing.status === 'transferred') {
+      return this.mapFundRequest(existing);
+    }
+
     if (!this.isPendingConfirmationRow(existing)) {
-      if (existing.receiver_user_id && existing.receiver_user_id !== user.id) {
-        throw new ForbiddenException(
-          'This transfer is assigned to another receiver',
-        );
-      }
+      throw new BadRequestException(
+        'Only pending confirmation requests can be confirmed',
+      );
+    }
+
+    if (existing.receiver_user_id && existing.receiver_user_id !== user.id) {
+      throw new ForbiddenException(
+        'This transfer is assigned to another receiver',
+      );
+    }
+
+    if (
+      !existing.receiver_user_id &&
+      existing.receiver_role &&
+      existing.receiver_role !== this.toReceiverRole(user.role)
+    ) {
+      const employeeMayConfirmAdminReceiverHint =
+        user.role === Role.EMPLOYEE && existing.receiver_role === 'admin';
+      const adminMayConfirmEmployeeReceiverHint =
+        user.role === Role.ADMIN && existing.receiver_role === 'employee';
       if (
-        existing.receiver_role &&
-        existing.receiver_role !== this.toReceiverRole(user.role)
+        !employeeMayConfirmAdminReceiverHint &&
+        !adminMayConfirmEmployeeReceiverHint
       ) {
         throw new ForbiddenException(
           'Your role is not allowed to confirm this transfer',
         );
       }
-
-      throw new BadRequestException(
-        'Only pending confirmation requests can be confirmed',
-      );
     }
 
     const destinationBranch = Array.isArray(existing.branches)
@@ -1670,8 +1740,11 @@ export class FundRequestsService {
       );
     }
 
+    const businessDateStr = getPhCalendarDateString();
     let inboundTransactionId: string | null = null;
     let ownerOutTransactionId: string | null = null;
+    let balanceDeltaApplied = 0;
+
     try {
       const referenceId =
         this.compactText(existing.transfer_reference_no) ??
@@ -1715,20 +1788,40 @@ export class FundRequestsService {
       const balanceDelta = isExpenseTransfer
         ? -confirmedAmount
         : confirmedAmount;
-      await this.adjustDailyBalance(existing.branch_id, balanceDelta);
+
+      await this.financeDailyBalance.applyNetChange(
+        existing.branch_id,
+        businessDateStr,
+        balanceDelta,
+        undefined,
+        { bypassOperationalSessionGate: true },
+      );
+      balanceDeltaApplied = balanceDelta;
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : String(err ?? '');
       if (this.isTransactionsPurposeConstraintError(errorMessage)) {
-        // Allow confirmation to proceed even if legacy transactions purpose
-        // constraint rejects fund-transfer journal entries.
         const balanceDeltaFallback = existing.purpose
           ?.toLowerCase()
           .includes('expense')
           ? -confirmedAmount
           : confirmedAmount;
-        await this.adjustDailyBalance(existing.branch_id, balanceDeltaFallback);
+        await this.financeDailyBalance.applyNetChange(
+          existing.branch_id,
+          businessDateStr,
+          balanceDeltaFallback,
+          undefined,
+          { bypassOperationalSessionGate: true },
+        );
+        balanceDeltaApplied = balanceDeltaFallback;
       } else {
+        await this.rollbackDestinationFundConfirmArtifacts({
+          branchId: existing.branch_id,
+          businessDateStr,
+          inboundTransactionId,
+          ownerOutTransactionId,
+          balanceDeltaApplied,
+        });
         throw err;
       }
     }
@@ -1756,6 +1849,13 @@ export class FundRequestsService {
       .single<FundRequestRow>();
 
     if (error) {
+      await this.rollbackDestinationFundConfirmArtifacts({
+        branchId: existing.branch_id,
+        businessDateStr,
+        inboundTransactionId,
+        ownerOutTransactionId,
+        balanceDeltaApplied,
+      });
       throw new InternalServerErrorException(error.message);
     }
 

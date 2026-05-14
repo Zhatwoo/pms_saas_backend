@@ -43,6 +43,8 @@ type ProcessedCustomerLogTarget = {
 const CUSTOMER_SAFE_SELECT = {
   id: true,
   full_name: true,
+  /** Needed for pawn forms / Philippine address line (street); already scoped to employee branch. */
+  address: true,
   contact_number: true,
   email: true,
   id_presented: true,
@@ -678,7 +680,8 @@ export class CustomersService {
         data: { customer_id: canonicalCustomer.id },
       });
 
-      let activityLogsUpdated = 0;
+      // Collect matching activity log updates and apply them in concurrent chunks
+      const pendingLogUpdates: Array<{ id: string; details: string }> = [];
       for (const log of activityLogs) {
         const parsedDetails = this.parseLogDetails(log.details);
         const detailsCustomerId =
@@ -688,20 +691,31 @@ export class CustomersService {
               ? parsedDetails.customer_id
               : null;
 
-        if (!detailsCustomerId || !duplicateIdSet.has(detailsCustomerId))
-          continue;
+        if (!detailsCustomerId || !duplicateIdSet.has(detailsCustomerId)) continue;
 
-        await this.prisma.activity_logs.update({
-          where: { id: log.id },
-          data: {
-            details: JSON.stringify({
-              ...parsedDetails,
-              customerId: canonicalCustomer.id,
-              customer_id: canonicalCustomer.id,
-            }),
-          },
+        pendingLogUpdates.push({
+          id: log.id,
+          details: JSON.stringify({
+            ...parsedDetails,
+            customerId: canonicalCustomer.id,
+            customer_id: canonicalCustomer.id,
+          }),
         });
-        activityLogsUpdated += 1;
+      }
+
+      let activityLogsUpdated = 0;
+      const CHUNK = 50;
+      for (let i = 0; i < pendingLogUpdates.length; i += CHUNK) {
+        const batch = pendingLogUpdates.slice(i, i + CHUNK);
+        const results = await Promise.all(
+          batch.map((u) =>
+            this.prisma.activity_logs
+              .update({ where: { id: u.id }, data: { details: u.details } })
+              .then(() => true)
+              .catch(() => false),
+          ),
+        );
+        activityLogsUpdated += results.filter(Boolean).length;
       }
 
       await this.prisma.customers.updateMany({
