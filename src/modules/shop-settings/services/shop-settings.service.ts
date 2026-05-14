@@ -3,23 +3,21 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 @Injectable()
 export class ShopSettingsService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async getSetting(key: string) {
-    const client = this.supabase.getClient();
-    const { data, error } = await client
-      .from('shop_settings')
-      .select('setting_value')
-      .eq('setting_key', key)
-      .maybeSingle();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    const data = await this.prisma.shop_settings.findUnique({
+      where: { setting_key: key },
+      select: { setting_value: true },
+    });
 
     if (!data) {
       throw new NotFoundException(`Setting ${key} not found`);
@@ -29,20 +27,22 @@ export class ShopSettingsService {
   }
 
   async setSetting(key: string, value: any) {
-    const client = this.supabase.getClient();
-    const { data, error } = await client
-      .from('shop_settings')
-      .upsert(
-        { setting_key: key, setting_value: value, updated_at: new Date() },
-        { onConflict: 'setting_key' },
-      )
-      .select()
-      .single();
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    try {
+      return await this.prisma.shop_settings.upsert({
+        where: { setting_key: key },
+        create: {
+          setting_key: key,
+          setting_value: value,
+          updated_at: new Date(),
+        },
+        update: {
+          setting_value: value,
+          updated_at: new Date(),
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
     }
-
-    return data;
   }
 }

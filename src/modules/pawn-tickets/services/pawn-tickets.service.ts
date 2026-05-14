@@ -108,22 +108,18 @@ export class PawnTicketsService {
 
   private async generateNextItemIdForBranch(
     branchId: string,
+    branchCode: string,
     client: PawnTicketDbClient = this.prisma,
   ) {
-    const branch = await client.branches.findUnique({
-      where: { id: branchId },
-      select: { branch_code: true },
-    });
-
-    const branchCode = branch?.branch_code?.toUpperCase();
-    if (!branchCode) {
+    const normalizedCode = branchCode?.toUpperCase();
+    if (!normalizedCode) {
       throw new InternalServerErrorException('Branch code not found');
     }
 
     const items = await client.pawned_items.findMany({
       where: {
         branch_id: branchId,
-        item_id: { startsWith: `${branchCode}-JCLB-`, mode: 'insensitive' },
+        item_id: { startsWith: `${normalizedCode}-JCLB-`, mode: 'insensitive' },
       },
       select: { item_id: true },
       take: 1000,
@@ -132,21 +128,25 @@ export class PawnTicketsService {
     const used = new Set(items.map((item) => item.item_id.toUpperCase()));
     const maxNumber = items.reduce(
       (max, item) =>
-        Math.max(max, this.parseUnitCodeSequence(item.item_id, branchCode)),
+        Math.max(max, this.parseUnitCodeSequence(item.item_id, normalizedCode)),
       0,
     );
 
     for (let next = maxNumber + 1; next < maxNumber + 1000; next += 1) {
-      const candidate = `${branchCode}-JCLB-${String(next).padStart(5, '0')}`;
+      const candidate = `${normalizedCode}-JCLB-${String(next).padStart(5, '0')}`;
       if (!used.has(candidate)) {
         return candidate;
       }
     }
 
-    return `${branchCode}-JCLB-${Date.now()}`;
+    return `${normalizedCode}-JCLB-${Date.now()}`;
   }
 
-  private async resolveItemId(branchId: string, unitCode?: string) {
+  private async resolveItemId(
+    branchId: string,
+    branchCode: string,
+    unitCode?: string,
+  ) {
     const provided = this.normalizeProvidedItemId(unitCode);
     if (provided) {
       const existing = await this.prisma.pawned_items.findUnique({
@@ -159,7 +159,7 @@ export class PawnTicketsService {
       }
     }
 
-    return this.generateNextItemIdForBranch(branchId);
+    return this.generateNextItemIdForBranch(branchId, branchCode);
   }
 
   private isItemIdUniqueError(error: unknown) {
@@ -229,14 +229,10 @@ export class PawnTicketsService {
     return `${branchCode}-SN-${this.getTodayDateKey().replaceAll('-', '')}-`;
   }
 
-  private async generateNextSerialNumberForBranch(branchId: string) {
-    const branch = await this.prisma.branches.findUnique({
-      where: { id: branchId },
-      select: { branch_code: true },
-    });
-
-    const branchCode = branch?.branch_code;
-
+  private async generateNextSerialNumberForBranch(
+    branchId: string,
+    branchCode: string,
+  ) {
     if (!branchCode) {
       throw new InternalServerErrorException('Branch code not found');
     }
@@ -343,7 +339,7 @@ export class PawnTicketsService {
 
     const branch = await this.prisma.branches.findUnique({
       where: { id: branchId },
-      select: { name: true, status: true },
+      select: { name: true, status: true, branch_code: true },
     });
     if (!branch || branch.status?.trim().toLowerCase() !== 'active') {
       throw new BadRequestException('Invalid or inactive branch');
@@ -372,7 +368,10 @@ export class PawnTicketsService {
     const serialNumber =
       providedSerialNumber && !providedSerialNumber.startsWith('PENDING')
         ? providedSerialNumber
-        : await this.generateNextSerialNumberForBranch(branchId);
+        : await this.generateNextSerialNumberForBranch(
+            branchId,
+            branch.branch_code,
+          );
     const selectedCustomerId = dto.customerId?.trim() || null;
     const customerIdForUpload = selectedCustomerId || randomUUID();
 
@@ -501,7 +500,11 @@ export class PawnTicketsService {
       item_photos: true,
     } as any;
 
-    let itemId = await this.resolveItemId(branchId, dto.item.unitCode);
+    let itemId = await this.resolveItemId(
+      branchId,
+      branch.branch_code,
+      dto.item.unitCode,
+    );
     let result: {
       customer: { id: string; [key: string]: unknown };
       pawnedItem: any;
@@ -653,7 +656,10 @@ export class PawnTicketsService {
         break;
       } catch (e) {
         if (this.isItemIdUniqueError(e) && attempt === 0) {
-          itemId = await this.generateNextItemIdForBranch(branchId);
+          itemId = await this.generateNextItemIdForBranch(
+            branchId,
+            branch.branch_code,
+          );
           continue;
         }
 
@@ -691,15 +697,38 @@ export class PawnTicketsService {
 
   async generateNextUnitCode(user: AuthenticatedUserProfile) {
     const branchId = requireUserBranchId(user);
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { branch_code: true },
+    });
+
+    if (!branch?.branch_code) {
+      throw new InternalServerErrorException('Branch code not found');
+    }
 
     return {
-      unitCode: await this.generateNextItemIdForBranch(branchId),
+      unitCode: await this.generateNextItemIdForBranch(
+        branchId,
+        branch.branch_code,
+      ),
     };
   }
 
   async generateNextSerialNumber(user: AuthenticatedUserProfile) {
     const branchId = requireUserBranchId(user);
-    const serialNumber = await this.generateNextSerialNumberForBranch(branchId);
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { branch_code: true },
+    });
+
+    if (!branch?.branch_code) {
+      throw new InternalServerErrorException('Branch code not found');
+    }
+
+    const serialNumber = await this.generateNextSerialNumberForBranch(
+      branchId,
+      branch.branch_code,
+    );
 
     return {
       serialNumber,

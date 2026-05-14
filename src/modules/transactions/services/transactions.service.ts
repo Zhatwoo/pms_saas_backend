@@ -309,19 +309,23 @@ export class TransactionsService {
 
     if (!customer) return null;
 
+    // Find all customers with matching full name (case-insensitive)
+    // instead of loading all 1000 and filtering in memory
     const candidates = await this.prisma.customers.findMany({
-      where: { deleted_at: null, ...buildBranchFilter(user) },
+      where: {
+        deleted_at: null,
+        ...buildBranchFilter(user),
+        // Database-level case-insensitive match
+        full_name: {
+          equals: customer.full_name,
+          mode: 'insensitive',
+        },
+      },
       select: { id: true, full_name: true, branch_id: true },
       take: 1000,
     });
 
-    const targetName = normalizeCustomerFullName(customer.full_name);
-    const matchingCustomerIds = candidates
-      .filter(
-        (candidate) =>
-          normalizeCustomerFullName(candidate.full_name) === targetName,
-      )
-      .map((candidate) => candidate.id);
+    const matchingCustomerIds = candidates.map((c) => c.id);
 
     if (!matchingCustomerIds.includes(customer.id)) {
       matchingCustomerIds.unshift(customer.id);
@@ -652,25 +656,29 @@ export class TransactionsService {
     if (scoped) {
       const balanceDate = this.toDbDate(date || getPhCalendarDateString());
       const balanceDateStr = date || getPhCalendarDateString();
-      const balanceData = await this.prisma.daily_balances.findUnique({
-        where: {
-          branch_id_record_date: {
-            branch_id: scoped,
-            record_date: balanceDate,
-          },
-        },
-        select: { starting_balance: true, ending_balance: true },
-      });
 
-      const sessionRow = await this.prisma.branch_day_sessions.findUnique({
-        where: {
-          branch_id_session_date: {
-            branch_id: scoped,
-            session_date: balanceDate,
+      // Parallelize both queries
+      const [balanceData, sessionRow] = await Promise.all([
+        this.prisma.daily_balances.findUnique({
+          where: {
+            branch_id_record_date: {
+              branch_id: scoped,
+              record_date: balanceDate,
+            },
           },
-        },
-        select: { opened_at: true, is_closed: true },
-      });
+          select: { starting_balance: true, ending_balance: true },
+        }),
+        this.prisma.branch_day_sessions.findUnique({
+          where: {
+            branch_id_session_date: {
+              branch_id: scoped,
+              session_date: balanceDate,
+            },
+          },
+          select: { opened_at: true, is_closed: true },
+        }),
+      ]);
+
       sessionOpenedAt = sessionRow?.opened_at?.toISOString() ?? null;
       stats.sessionOpenedAt = sessionOpenedAt;
 

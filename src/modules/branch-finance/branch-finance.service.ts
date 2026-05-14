@@ -597,6 +597,21 @@ export class BranchFinanceService {
 
     const branchIds = (branches as BranchRow[]).map((b) => b.id);
 
+    const pendingFundTransferLinks = await this.prisma.fund_requests.findMany({
+      where: {
+        branch_id: { in: branchIds },
+        status: { not: 'transferred' },
+      },
+      select: { branch_id: true, request_no: true },
+    });
+    const pendingFundTransfersByBranch = new Map<string, Set<string>>();
+    for (const link of pendingFundTransferLinks) {
+      if (!pendingFundTransfersByBranch.has(link.branch_id)) {
+        pendingFundTransfersByBranch.set(link.branch_id, new Set());
+      }
+      pendingFundTransfersByBranch.get(link.branch_id)!.add(link.request_no);
+    }
+
     const todaySessionDateUtc = new Date(`${today}T00:00:00.000Z`);
     const branchesWithDayClosedToday = new Set(
       (
@@ -755,6 +770,7 @@ export class BranchFinanceService {
         const operationalForTotals =
           await this.financeDailyBalance.excludeInboundFundTransfersAwaitingReceiptRows(
             operationalTx,
+            pendingFundTransfersByBranch,
           );
 
         for (const tx of operationalForTotals) {

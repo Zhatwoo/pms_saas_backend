@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { PrismaService } from '../../infrastructure/prisma';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { EncryptionService } from '../../common/encryption/encryption.service';
 
@@ -28,6 +29,7 @@ export class ActivityLogsService {
 
   constructor(
     private readonly supabaseService: SupabaseService,
+    private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
   ) {}
 
@@ -60,84 +62,75 @@ export class ActivityLogsService {
     pawnedItemId?: string,
     userId?: string,
   ) {
-    const client = this.supabaseService.getClient();
-    let query = client
-      .from('activity_logs')
-      .select(
-        `
-        id,
-        user_id,
-        branch_id,
-        action,
-        details,
-        created_at,
-        users ( full_name, email, role ),
-        branches ( name )
-      `,
-      )
-      .order('created_at', { ascending: false });
+    try {
+      const where: any = {};
 
-    if (role === 'admin' || role === 'employee' || role === 'branch') {
-      if (!branchId) {
-        throw new InternalServerErrorException(
-          'Branch ID is required for non-superadmin logs',
-        );
-      }
-      query = query.eq('branch_id', branchId);
-      if (role === 'employee' || role === 'branch') {
-        if (!userId) {
+      if (role === 'admin' || role === 'employee' || role === 'branch') {
+        if (!branchId) {
           throw new InternalServerErrorException(
-            'User ID is required for employee logs',
+            'Branch ID is required for non-superadmin logs',
           );
         }
-        query = query.eq('user_id', userId);
+        where.branch_id = branchId;
+        if (role === 'employee' || role === 'branch') {
+          if (!userId) {
+            throw new InternalServerErrorException(
+              'User ID is required for employee logs',
+            );
+          }
+          where.user_id = userId;
+        }
+      } else if (branchId) {
+        where.branch_id = branchId;
       }
-    } else if (branchId) {
-      // Super admin filtering by branch
-      query = query.eq('branch_id', branchId);
-    }
 
-    if (startDate) {
-      query = query.gte('created_at', toManilaDayBoundary(startDate, false));
-    }
-
-    if (endDate) {
-      query = query.lte('created_at', toManilaDayBoundary(endDate, true));
-    }
-
-    if (action) {
-      if (action.includes(',')) {
-        query = query.in('action', action.split(','));
-      } else {
-        query = query.eq('action', action);
+      if (startDate) {
+        where.created_at = { ...(where.created_at || {}), gte: toManilaDayBoundary(startDate, false) };
       }
-    }
 
-    if (pawnedItemId) {
-      query = query.ilike('details', `%${pawnedItemId}%`);
-    }
+      if (endDate) {
+        where.created_at = { ...(where.created_at || {}), lte: toManilaDayBoundary(endDate, true) };
+      }
 
-    const { data, error } = await query;
+      if (action) {
+        where.action = action.includes(',') ? { in: action.split(',') } : action;
+      }
 
-    if (error) {
-      this.logger.error(`Failed to fetch logs: ${error.message}`);
+      if (pawnedItemId) {
+        where.details = { contains: pawnedItemId, mode: 'insensitive' };
+      }
+
+      const logs = await this.prisma.activity_logs.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        include: {
+          users: { select: { full_name: true, email: true, role: true } },
+          branches: { select: { name: true } },
+        },
+      });
+
+      return logs.map((log) => {
+        const usersJoin = this.encryption.decryptUsersJoin(log.users);
+        return {
+          id: log.id,
+          userId: log.user_id,
+          branchId: log.branch_id,
+          action: log.action,
+          details: log.details,
+          createdAt: log.created_at,
+          userFullName:
+            usersJoin?.full_name || usersJoin?.email || 'Unknown User',
+          userRole: log.users?.role || 'Unknown Role',
+          branchName: log.branches?.name || 'All Branches',
+        };
+      });
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to fetch logs: ${message}`);
       throw new InternalServerErrorException('Failed to fetch activity logs');
     }
-
-    return (data || []).map((log: any) => {
-      const usersJoin = this.encryption.decryptUsersJoin(log.users);
-      return {
-        id: log.id,
-        userId: log.user_id,
-        branchId: log.branch_id,
-        action: log.action,
-        details: log.details,
-        createdAt: log.created_at,
-        userFullName:
-          usersJoin?.full_name || usersJoin?.email || 'Unknown User',
-        userRole: log.users?.role || 'Unknown Role',
-        branchName: log.branches?.name || 'All Branches',
-      };
-    });
   }
 }

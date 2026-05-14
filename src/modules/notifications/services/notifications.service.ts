@@ -1,81 +1,71 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import { PrismaService } from '../../../infrastructure/prisma';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 
 @Injectable()
 export class NotificationsService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findAll(user: AuthenticatedUserProfile) {
-    const client = this.supabase.getClient();
-
     // Notifications can be:
     // 1. Specifically for this user
     // 2. For this branch (broadcast)
     // 3. For all (broadcast) - branch_id is null
 
-    let query = client
-      .from('notifications')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50);
+    try {
+      const where =
+        user.role === Role.SUPER_ADMIN
+          ? {}
+          : user.branchId
+            ? {
+                OR: [
+                  { branch_id: user.branchId },
+                  { user_id: user.id },
+                  { branch_id: null },
+                ],
+              }
+            : { OR: [{ user_id: user.id }, { branch_id: null }] };
 
-    if (user.role !== Role.SUPER_ADMIN) {
-      if (user.branchId) {
-        query = query.or(
-          `branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`,
-        );
-      } else {
-        query = query.or(`user_id.eq.${user.id},branch_id.is.null`);
-      }
+      return await this.prisma.notifications.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: 50,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
     }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('[NotificationsService] findAll error:', error);
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return data || [];
   }
 
   async markAsRead(user: AuthenticatedUserProfile, id: string) {
-    const client = this.supabase.getClient();
-    const { error } = await client
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', id);
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    await this.prisma.notifications.updateMany({
+      where: { id },
+      data: { is_read: true },
+    });
 
     return { success: true };
   }
 
   async markAllAsRead(user: AuthenticatedUserProfile) {
-    const client = this.supabase.getClient();
-    let query = client
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('is_read', false);
+    const where =
+      user.role === Role.SUPER_ADMIN
+        ? { is_read: false }
+        : user.branchId
+          ? {
+              is_read: false,
+              OR: [
+                { branch_id: user.branchId },
+                { user_id: user.id },
+                { branch_id: null },
+              ],
+            }
+          : { is_read: false, OR: [{ user_id: user.id }, { branch_id: null }] };
 
-    if (user.role !== Role.SUPER_ADMIN) {
-      if (user.branchId) {
-        query = query.or(
-          `branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`,
-        );
-      } else {
-        query = query.or(`user_id.eq.${user.id},branch_id.is.null`);
-      }
-    }
-
-    const { error } = await query;
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
+    await this.prisma.notifications.updateMany({
+      where,
+      data: { is_read: true },
+    });
 
     return { success: true };
   }
@@ -92,21 +82,12 @@ export class NotificationsService {
     customer_id?: string;
     log_id?: string;
   }) {
-    const client = this.supabase.getClient();
-    const { data, error } = await client
-      .from('notifications')
-      .insert([payload])
-      .select()
-      .single();
-
-    if (error) {
-      console.error(
-        '[NotificationsService] Failed to create notification:',
-        error,
-      );
+    try {
+      return await this.prisma.notifications.create({ data: payload });
+    } catch (error) {
+      console.error('[NotificationsService] Failed to create notification:', error);
       // We don't throw here to avoid failing the main transaction
+      return null;
     }
-
-    return data;
   }
 }
