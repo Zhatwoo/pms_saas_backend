@@ -251,7 +251,13 @@ export class BranchDaySessionService {
         todayStr,
       );
       const expected = Number(Number(expectedRaw).toFixed(2));
+      this.logger.debug(
+        `[StartingBalance] check branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
+      );
       if (Math.abs(expected - confirmedAmount) > 0.009) {
+        this.logger.warn(
+          `[StartingBalance] MISMATCH branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
+        );
         throw new UnprocessableEntityException({
           statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
           code: 'STARTING_BALANCE_MISMATCH',
@@ -301,6 +307,10 @@ export class BranchDaySessionService {
           mode: 'starting',
           confirmedAmount,
         },
+      );
+
+      this.logger.log(
+        `[StartingBalance] persisted branch=${params.branchId} businessDate=${todayStr} starting=${balances.startingBalance} ending=${balances.endingBalance}`,
       );
 
       await tx.branch_day_sessions.upsert({
