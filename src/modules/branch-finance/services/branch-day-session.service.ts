@@ -136,7 +136,32 @@ export class BranchDaySessionService {
     }
 
     let systemEndingBalanceToday: number | null = null;
+    let operationalCutoffAt: string | null = null;
+    let sealedTransactionIds: string[] = [];
     if (operationalCashAllowed && dayRow) {
+      await this.financeDailyBalance.reconcileOpenSessionDailyBalance(
+        branchId,
+        manilaCalendarDate,
+      );
+      const refreshed = await this.prisma.branch_day_sessions.findUnique({
+        where: {
+          branch_id_session_date: {
+            branch_id: branchId,
+            session_date: todayDate,
+          },
+        },
+        select: {
+          operational_cutoff_at: true,
+          sealed_transaction_ids: true,
+        },
+      });
+      sealedTransactionIds = refreshed?.sealed_transaction_ids ?? [];
+      operationalCutoffAt =
+        refreshed?.operational_cutoff_at?.toISOString() ??
+        (await this.financeDailyBalance.resolveOperationalCutoffIso(
+          branchId,
+          manilaCalendarDate,
+        ));
       // Confirmed physical count lives on branch_day_sessions; use it for projections
       // so we never show a stale daily_balances.starting_balance (e.g. carry-forward) after opening.
       const startNum = Number(this.dec(dayRow.starting_balance).toFixed(2));
@@ -161,6 +186,8 @@ export class BranchDaySessionService {
       todaySession,
       pendingStartingSession,
       operationalCashAllowed,
+      operationalCutoffAt,
+      sealedTransactionIds,
       systemEndingBalanceToday,
       lastEnd: lastEnd
         ? {
@@ -246,10 +273,36 @@ export class BranchDaySessionService {
 
     const todayStr = getPhCalendarDateString();
     if (params.actorRole !== Role.SUPER_ADMIN) {
-      const expectedRaw = await this.computeSuggestedStartingBalance(
-        params.branchId,
-        todayStr,
-      );
+      const todayDate = this.toRecordDate(todayStr);
+      const todayDayRow = await this.prisma.branch_day_sessions.findUnique({
+        where: {
+          branch_id_session_date: {
+            branch_id: params.branchId,
+            session_date: todayDate,
+          },
+        },
+        select: { is_closed: true },
+      });
+      const todayDbBal = todayDayRow
+        ? await this.prisma.daily_balances.findUnique({
+            where: {
+              branch_id_record_date: {
+                branch_id: params.branchId,
+                record_date: todayDate,
+              },
+            },
+            select: { ending_balance: true },
+          })
+        : null;
+      let expectedRaw: number;
+      if (todayDayRow?.is_closed && todayDbBal?.ending_balance != null) {
+        expectedRaw = Number(this.dec(todayDbBal.ending_balance).toFixed(2));
+      } else {
+        expectedRaw = await this.computeSuggestedStartingBalance(
+          params.branchId,
+          todayStr,
+        );
+      }
       const expected = Number(Number(expectedRaw).toFixed(2));
       this.logger.debug(
         `[StartingBalance] check branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
@@ -262,7 +315,7 @@ export class BranchDaySessionService {
           statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
           code: 'STARTING_BALANCE_MISMATCH',
           message:
-            'Ang tinayp na starting cash ay hindi tumugma sa inaasahang halaga mula sa huling natapos na araw ng branch (ledger book ending). Mag-file ng incident report para sa variance; hindi na-save ang starting balance.',
+            'The entered starting cash does not match the expected amount from the branch\'s last recorded ending balance. File an incident report for the variance; the starting balance was not saved.',
           expectedAmount: expected,
           enteredAmount: confirmedAmount,
           businessDate: todayStr,
@@ -299,6 +352,15 @@ export class BranchDaySessionService {
         select: { name: true },
       });
 
+      const shiftCutoff = new Date();
+      const sealedTransactionIds =
+        await this.financeDailyBalance.listOperationalTransactionIdsSealedBeforeCutoffInTx(
+          tx,
+          params.branchId,
+          todayDate,
+          shiftCutoff,
+        );
+
       const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
         tx,
         {
@@ -310,7 +372,7 @@ export class BranchDaySessionService {
       );
 
       this.logger.log(
-        `[StartingBalance] persisted branch=${params.branchId} businessDate=${todayStr} starting=${balances.startingBalance} ending=${balances.endingBalance}`,
+        `[StartingBalance] persisted branch=${params.branchId} businessDate=${todayStr} starting=${balances.startingBalance} ending=${balances.endingBalance} operationalCutoff=${shiftCutoff.toISOString()}`,
       );
 
       await tx.branch_day_sessions.upsert({
@@ -326,7 +388,9 @@ export class BranchDaySessionService {
           starting_balance: new Prisma.Decimal(confirmedAmount),
           is_closed: false,
           started_by_user_id: params.actorUserId,
-          opened_at: new Date(),
+          opened_at: shiftCutoff,
+          operational_cutoff_at: shiftCutoff,
+          sealed_transaction_ids: sealedTransactionIds,
           updated_at: new Date(),
         },
         update: {
@@ -335,7 +399,9 @@ export class BranchDaySessionService {
           closed_at: null,
           closed_by_user_id: null,
           started_by_user_id: params.actorUserId,
-          opened_at: new Date(),
+          opened_at: shiftCutoff,
+          operational_cutoff_at: shiftCutoff,
+          sealed_transaction_ids: sealedTransactionIds,
           updated_at: new Date(),
         },
       });
@@ -348,6 +414,12 @@ export class BranchDaySessionService {
         details: `Opening balance confirmed: ₱${confirmedAmount.toLocaleString('en-PH')}`,
         createdByUserId: params.actorUserId,
       });
+
+      await this.financeDailyBalance.reconcileOpenSessionDailyBalance(
+        params.branchId,
+        todayStr,
+        tx,
+      );
 
       const openingDate = this.toRecordDate(todayStr);
       await tx.daily_opening.upsert({

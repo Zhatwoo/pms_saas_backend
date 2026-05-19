@@ -675,11 +675,22 @@ export class TransactionsService {
               session_date: balanceDate,
             },
           },
-          select: { opened_at: true, is_closed: true },
+          select: {
+            opened_at: true,
+            is_closed: true,
+            starting_balance: true,
+            operational_cutoff_at: true,
+          },
         }),
       ]);
 
-      sessionOpenedAt = sessionRow?.opened_at?.toISOString() ?? null;
+      const cutoffIso =
+        sessionRow?.operational_cutoff_at?.toISOString() ??
+        (await this.financeDailyBalance.resolveOperationalCutoffIso(
+          scoped,
+          balanceDateStr,
+        ));
+      sessionOpenedAt = cutoffIso;
       stats.sessionOpenedAt = sessionOpenedAt;
 
       if (balanceData && sessionRow?.is_closed) {
@@ -690,7 +701,13 @@ export class TransactionsService {
       }
 
       let startingBalanceCalc = 0;
-      if (balanceData) {
+      if (
+        sessionRow &&
+        !sessionRow.is_closed &&
+        sessionRow.starting_balance != null
+      ) {
+        startingBalanceCalc = this.toNumber(sessionRow.starting_balance);
+      } else if (balanceData) {
         startingBalanceCalc = this.toNumber(balanceData.starting_balance);
       } else {
         const priorRow = await this.prisma.daily_balances.findFirst({

@@ -38,6 +38,10 @@ export interface BranchBusinessSessionSnapshot {
     suggestedStartingBalance: number;
   } | null;
   operationalCashAllowed: boolean;
+  /** ISO timestamp — operational cash counts only for txs at or after this instant. */
+  operationalCutoffAt: string | null;
+  /** Transaction ids sealed before the current shift (excluded from operational net). */
+  sealedTransactionIds: string[];
   systemEndingBalanceToday: number | null;
   lastEnd: {
     businessDate: string;
@@ -274,7 +278,14 @@ export class BranchBusinessSessionService {
     }
 
     let systemEndingBalanceToday: number | null = null;
+    let operationalCutoffAt: string | null = null;
+    const sealedTransactionIds: string[] = [];
     if (todaySessionRow?.status === BranchSessionStatus.OPEN) {
+      operationalCutoffAt =
+        await this.financeDailyBalance.resolveOperationalCutoffIso(
+          branchId,
+          manilaCalendarDate,
+        );
       let startNum = 0;
       if (todaySessionRow.starting_balance != null) {
         startNum = Number(
@@ -336,6 +347,8 @@ export class BranchBusinessSessionService {
           }
         : null,
       operationalCashAllowed,
+      operationalCutoffAt,
+      sealedTransactionIds,
       systemEndingBalanceToday,
       lastEnd: lastEnd
         ? {
