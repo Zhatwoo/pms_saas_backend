@@ -63,7 +63,7 @@ interface BranchRow {
   name: string;
   branch_code: string | null;
   status: string | null;
-  opening_cash_balance?: number | string | null;
+  opening_cash_balance?: Prisma.Decimal | number | string | null;
 }
 
 export type LedgerEntryType =
@@ -444,7 +444,9 @@ export class BranchFinanceService {
     }
   }
 
-  private toMoney(value: number | string | null | undefined): number {
+  private toMoney(
+    value: Prisma.Decimal | number | string | null | undefined,
+  ): number {
     const parsed = Number(value ?? 0);
     return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
   }
@@ -569,7 +571,6 @@ export class BranchFinanceService {
     user: UserWithBranch,
     branchQuery?: string,
   ): Promise<BranchFinanceSummary[]> {
-    const client = this.supabaseService.getClient();
     const today = getPhCalendarDateString();
 
     const branchId =
@@ -577,25 +578,25 @@ export class BranchFinanceService {
         ? effectiveBranchIdForQuery(user, branchQuery)
         : requireUserBranchId(user);
 
-    let branchesQuery = client
-      .from('branches')
-      .select('id, name, branch_code, status, opening_cash_balance')
-      .order('name', { ascending: true });
+    const branches = await this.prisma.branches.findMany({
+      where: branchId ? { id: branchId } : undefined,
+      select: {
+        id: true,
+        name: true,
+        branch_code: true,
+        status: true,
+        opening_cash_balance: true,
+      },
+      orderBy: { name: 'asc' },
+    });
 
-    if (branchId) {
-      branchesQuery = branchesQuery.eq('id', branchId);
-    }
-
-    const { data: branches, error: branchesErr } = await branchesQuery;
-    if (branchesErr) {
-      throw new InternalServerErrorException(branchesErr.message);
-    }
-
-    if (!branches || branches.length === 0) {
+    if (branches.length === 0) {
       return [];
     }
 
-    const branchIds = (branches as BranchRow[]).map((b) => b.id);
+    const branchIds = branches.map((b) => b.id);
+
+    const client = this.supabaseService.getClient();
 
     const pendingFundTransferLinks = await this.prisma.fund_requests.findMany({
       where: {
@@ -731,7 +732,7 @@ export class BranchFinanceService {
     }
 
     const summaries: BranchFinanceSummary[] = await Promise.all(
-      (branches as BranchRow[]).map(async (branch) => {
+      branches.map(async (branch) => {
         const openingFallback = this.toMoney(branch.opening_cash_balance);
         const snap = buildBranchDaySnapshotFromFetched({
           today,
