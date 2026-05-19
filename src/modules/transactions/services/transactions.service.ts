@@ -626,6 +626,7 @@ export class TransactionsService {
         startingBalance: 0,
         endingBalance: 0,
         sessionOpenedAt: null as string | null,
+        sealedTransactionIds: [] as string[],
       },
     };
   }
@@ -649,6 +650,7 @@ export class TransactionsService {
       startingBalance: 0,
       endingBalance: 0,
       sessionOpenedAt: null as string | null,
+      sealedTransactionIds: [] as string[],
     };
 
     let sessionOpenedAt: string | null = null;
@@ -680,6 +682,7 @@ export class TransactionsService {
             is_closed: true,
             starting_balance: true,
             operational_cutoff_at: true,
+            sealed_transaction_ids: true,
           },
         }),
       ]);
@@ -692,6 +695,7 @@ export class TransactionsService {
         ));
       sessionOpenedAt = cutoffIso;
       stats.sessionOpenedAt = sessionOpenedAt;
+      stats.sealedTransactionIds = sessionRow?.sealed_transaction_ids ?? [];
 
       if (balanceData && sessionRow?.is_closed) {
         const bookAtClose = this.toNumber(balanceData.ending_balance);

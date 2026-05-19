@@ -516,7 +516,41 @@ export class FinanceDailyBalanceService {
       this.prisma,
       opts,
     );
-    return Number(operationalNetFromRows(filtered).toFixed(2));
+    const net = Number(operationalNetFromRows(filtered).toFixed(2));
+    this.logger.warn(
+      `[SumOpNet] branch=${branchId} date=${businessDateStr} allRows=${rows.length} filteredRows=${filtered.length} net=${net} filtered=${JSON.stringify(filtered.map((r) => ({ id: r.id, purpose: r.purpose, ci: r.cash_in, co: r.cash_out, created_at: r.created_at })))}`,
+    );
+    return net;
+  }
+
+  /**
+   * Operational net for a Manila business date counting EVERY non-void operational row —
+   * no session cutoff and no sealing applied (awaiting-receipt fund transfers are still
+   * excluded). Used for the suggested next-session starting balance so a confirmed inbound
+   * fund transfer received before the session opened is still reflected in the book; the
+   * session-cutoff net would otherwise drop it and the cash would be lost.
+   */
+  async fullDayOperationalNetCash(
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<number> {
+    const date = this.toRecordDate(businessDateStr);
+    const rows = await this.db.transactions.findMany({
+      where: { branch_id: branchId, transaction_date: date, voided_at: null },
+      select: {
+        purpose: true,
+        cash_in: true,
+        cash_out: true,
+      },
+    });
+    const net = Number(operationalNetFromRows(rows).toFixed(2));
+    this.logger.warn(
+      `[FullDayNet] branch=${branchId} date=${businessDateStr} rowCount=${rows.length} net=${net} rows=${JSON.stringify(rows)}`,
+    );
+    // No receipt-status filter here: the employee physically counts all cash on hand,
+    // including fund transfers that arrived before their session opened. The suggestion
+    // is informational; the employee's confirmed count is always authoritative.
+    return net;
   }
 
   /**
@@ -547,11 +581,7 @@ export class FinanceDailyBalanceService {
     });
     const net = await this.sumOperationalNetCash(branchId, businessDateStr);
     let start: number;
-    if (
-      daySession &&
-      !daySession.is_closed &&
-      daySession.starting_balance != null
-    ) {
+    if (daySession?.starting_balance != null) {
       start = Number(this.dec(daySession.starting_balance).toFixed(2));
     } else if (row) {
       start = Number(this.dec(row.starting_balance).toFixed(2));
@@ -591,21 +621,15 @@ export class FinanceDailyBalanceService {
         .slice(0, 10);
       const recordDate = this.toRecordDate(sessionDateStr);
 
-      const bal = await this.db.daily_balances.findUnique({
+      const closedSession = await this.db.branch_day_sessions.findUnique({
         where: {
-          branch_id_record_date: {
+          branch_id_session_date: {
             branch_id: branchId,
-            record_date: recordDate,
+            session_date: recordDate,
           },
         },
-        select: { ending_balance: true },
+        select: { starting_balance: true, is_closed: true },
       });
-      if (bal?.ending_balance != null) {
-        return {
-          amount: Number(this.dec(bal.ending_balance).toFixed(2)),
-          closedSessionRecordDate: sessionDateStr,
-        };
-      }
 
       const ledgerOnCloseDay = Number(
         (
@@ -615,6 +639,25 @@ export class FinanceDailyBalanceService {
           )
         ).toFixed(2),
       );
+
+      const netStillCounted = await this.sumOperationalNetCash(
+        branchId,
+        sessionDateStr,
+      );
+
+      if (
+        closedSession?.is_closed &&
+        closedSession.starting_balance != null &&
+        Math.abs(netStillCounted) > 0.009
+      ) {
+        return {
+          amount: Number(
+            this.dec(closedSession.starting_balance).toFixed(2),
+          ),
+          closedSessionRecordDate: sessionDateStr,
+        };
+      }
+
       return {
         amount: ledgerOnCloseDay,
         closedSessionRecordDate: sessionDateStr,
@@ -901,22 +944,10 @@ export class FinanceDailyBalanceService {
         select: { starting_balance: true },
       });
 
-      const bizSession = await client.branch_business_sessions.findUnique({
-        where: {
-          branch_id_business_date: {
-            branch_id: branchId,
-            business_date: date,
-          },
-        },
-        select: { starting_balance: true },
-      });
-
       const sessionConfirmedStart =
         daySession?.starting_balance != null
           ? this.dec(daySession.starting_balance)
-          : bizSession?.starting_balance != null
-            ? this.dec(bizSession.starting_balance)
-            : null;
+          : null;
 
       if (sessionConfirmedStart != null) {
         starting = sessionConfirmedStart;
@@ -936,14 +967,18 @@ export class FinanceDailyBalanceService {
           ? this.dec(prior.ending_balance)
           : this.dec(branch?.opening_cash_balance);
       }
-      ending = Number((starting + net).toFixed(2));
+      if (conf > 0) {
+        ending = conf;
+      } else {
+        ending = Number((starting + net).toFixed(2));
+      }
     }
 
     // PostgreSQL `daily_balances_ending_balance_check` (and similar) — persisted row must not violate DB.
     if (ending < 0) {
       ending = 0;
     }
-    if (ending < starting) {
+    if (mode !== 'ending' && ending < starting) {
       ending = starting;
     }
 

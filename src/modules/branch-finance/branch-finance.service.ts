@@ -109,6 +109,8 @@ export interface EmployeeDailyOpeningStatus {
   status: 'none' | 'pending' | 'completed';
   checklistStep: DailyOpeningChecklistStep;
   startingCash?: number;
+  /** Book expected count for CASH_ON_HAND (matches submit validation). */
+  expectedStartingCash?: number;
 }
 
 export interface BranchFinanceSummary {
@@ -290,10 +292,16 @@ export class BranchFinanceService {
     }
 
     if (await this.branchDaySession.requiresStartingBalance(branchId)) {
+      const expectedStartingCash =
+        await this.financeDailyBalance.suggestedStartingCashForBusinessDate(
+          branchId,
+          openingDate,
+        );
       return {
         openingDate,
         status: 'none',
         checklistStep: 'CASH_ON_HAND',
+        expectedStartingCash,
       };
     }
 
