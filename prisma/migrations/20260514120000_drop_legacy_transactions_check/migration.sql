@@ -1,0 +1,1 @@
+-- placeholder: migration directory was created without SQL content

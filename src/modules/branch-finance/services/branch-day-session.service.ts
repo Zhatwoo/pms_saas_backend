@@ -1,14 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpStatus,
   Injectable,
   Logger,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Role, TransactionPurpose } from '../../../common/enums';
-import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
+import { addManilaCalendarDays, getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import type { BranchBusinessSessionSnapshot } from './branch-business-session.service';
 import { FinanceDailyBalanceService } from './finance-daily-balance.service';
@@ -40,6 +38,72 @@ export class BranchDaySessionService {
     return new Prisma.Decimal(String(n ?? 0));
   }
 
+  /** `daily_opening` may be absent on older DBs; end-day must still close the session. */
+  private async safeClearDailyOpeningInTx(
+    tx: Tx,
+    branchId: string,
+    openingDate: Date,
+  ): Promise<void> {
+    try {
+      await tx.daily_opening.deleteMany({
+        where: { branch_id: branchId, opening_date: openingDate },
+      });
+    } catch (e: unknown) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        (e.code === 'P2021' || e.code === 'P2022')
+      ) {
+        this.logger.warn(
+          `[EndDay] daily_opening unavailable (${e.code}); skipping checklist clear`,
+        );
+        return;
+      }
+      throw e;
+    }
+  }
+
+  private async closeBranchDaySessionInTx(
+    tx: Tx,
+    sessionId: string,
+    params: {
+      actorUserId: string | null;
+      closeCutoff: Date;
+      sealedAtClose: string[];
+    },
+  ): Promise<void> {
+    const base = {
+      is_closed: true,
+      closed_at: params.closeCutoff,
+      closed_by_user_id: params.actorUserId,
+      updated_at: new Date(),
+    };
+    try {
+      await tx.branch_day_sessions.update({
+        where: { id: sessionId },
+        data: {
+          ...base,
+          operational_cutoff_at: params.closeCutoff,
+          sealed_transaction_ids: params.sealedAtClose,
+        },
+      });
+    } catch (e: unknown) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        (e.code === 'P2021' || e.code === 'P2022')
+      ) {
+        this.logger.warn(
+          `[EndDay] shift columns unavailable (${e.code}); closing without seal metadata`,
+        );
+        await tx.branch_day_sessions.update({
+          where: { id: sessionId },
+          data: base,
+        });
+        return;
+      }
+      throw e;
+    }
+  }
+
   /**
    * Login flag: no Manila-day row yet, or same calendar day was explicitly ended.
    */
@@ -66,6 +130,64 @@ export class BranchDaySessionService {
       branchId,
       businessDateStr,
     );
+  }
+
+  /**
+   * Suggested starting cash for the next shift on businessDateStr.
+   *
+   * When today's session is already closed (same-day multi-shift scenario):
+   *   suggestion = priorDayEnding + fullDayNet(today)
+   *
+   * This is non-compounding: priorDayEnding is yesterday's fixed book closing.
+   * No matter how many End→Start cycles happen today, the same priorDayEnding
+   * is used each time, so todayÛs transactions (including pre-session fund
+   * transfers) are counted exactly once in fullDayNet.
+   *
+   * When no session exists yet (normal next-day start), falls back to the
+   * standard suggestion (prior day's book ending).
+   */
+  private async resolveSuggestedStartingBalance(
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<number> {
+    const date = this.toRecordDate(businessDateStr);
+    const dayRow = await this.prisma.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: date,
+        },
+      },
+      select: { is_closed: true },
+    });
+    this.logger.warn(
+      `[ResolveSuggestedStart] branch=${branchId} date=${businessDateStr} isClosed=${dayRow?.is_closed ?? null}`,
+    );
+    if (dayRow?.is_closed) {
+      const yesterdayStr = addManilaCalendarDays(businessDateStr, -1);
+      const priorDayEnding =
+        await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
+          branchId,
+          yesterdayStr,
+        );
+      const fullNet = await this.financeDailyBalance.fullDayOperationalNetCash(
+        branchId,
+        businessDateStr,
+      );
+      const result = Math.max(0, Number((priorDayEnding + fullNet).toFixed(2)));
+      this.logger.warn(
+        `[ResolveSuggestedStart] isClosed=true priorDayEnding=${priorDayEnding} fullNet=${fullNet} result=${result}`,
+      );
+      return result;
+    }
+    const fallback = await this.computeSuggestedStartingBalance(
+      branchId,
+      businessDateStr,
+    );
+    this.logger.warn(
+      `[ResolveSuggestedStart] isClosed=false fallback=${fallback}`,
+    );
+    return Number(Number(fallback).toFixed(2));
   }
 
   async getSnapshot(branchId: string): Promise<BranchBusinessSessionSnapshot> {
@@ -101,7 +223,7 @@ export class BranchDaySessionService {
       null;
     if (needsStarting) {
       const suggestedStartingBalance =
-        await this.computeSuggestedStartingBalance(
+        await this.resolveSuggestedStartingBalance(
           branchId,
           manilaCalendarDate,
         );
@@ -265,27 +387,21 @@ export class BranchDaySessionService {
 
     const todayStr = getPhCalendarDateString();
     if (params.actorRole !== Role.SUPER_ADMIN) {
-      const expectedRaw = await this.computeSuggestedStartingBalance(
+      const expected = await this.resolveSuggestedStartingBalance(
         params.branchId,
         todayStr,
       );
-      const expected = Number(Number(expectedRaw).toFixed(2));
       this.logger.debug(
         `[StartingBalance] check branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
       );
+      // The employee's physical cash count is authoritative — they must count all
+      // cash on hand, including fund transfers received before the session opened.
+      // A variance from the system's suggested amount is recorded for audit but must
+      // never block the count; blocking it would leave the branch book at zero.
       if (Math.abs(expected - confirmedAmount) > 0.009) {
         this.logger.warn(
-          `[StartingBalance] MISMATCH branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
+          `[StartingBalance] VARIANCE branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
         );
-        throw new UnprocessableEntityException({
-          statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
-          code: 'STARTING_BALANCE_MISMATCH',
-          message:
-            'The entered starting cash does not match the expected amount from the branch\'s last recorded ending balance. File an incident report for the variance; the starting balance was not saved.',
-          expectedAmount: expected,
-          enteredAmount: confirmedAmount,
-          businessDate: todayStr,
-        });
       }
     }
 
@@ -509,24 +625,13 @@ export class BranchDaySessionService {
         },
       );
 
-      await tx.branch_day_sessions.update({
-        where: { id: row.id },
-        data: {
-          is_closed: true,
-          closed_at: closeCutoff,
-          closed_by_user_id: params.actorUserId,
-          operational_cutoff_at: closeCutoff,
-          sealed_transaction_ids: sealedAtClose,
-          updated_at: new Date(),
-        },
+      await this.closeBranchDaySessionInTx(tx, row.id, {
+        actorUserId: params.actorUserId,
+        closeCutoff,
+        sealedAtClose,
       });
 
-      await tx.daily_opening.deleteMany({
-        where: {
-          branch_id: params.branchId,
-          opening_date: closeDate,
-        },
-      });
+      await this.safeClearDailyOpeningInTx(tx, params.branchId, closeDate);
 
       const detailAmt =
         params.physicalEndingAmount != null
@@ -620,12 +725,11 @@ export class BranchDaySessionService {
             },
           });
 
-          await tx.daily_opening.deleteMany({
-            where: {
-              branch_id: locked.branch_id,
-              opening_date: closeDate,
-            },
-          });
+          await this.safeClearDailyOpeningInTx(
+            tx,
+            locked.branch_id,
+            closeDate,
+          );
 
           await this.upsertJournalMarker(tx, {
             branchId: locked.branch_id,
