@@ -100,19 +100,11 @@ export class BranchDaySessionService {
     let pendingStartingSession: BranchBusinessSessionSnapshot['pendingStartingSession'] =
       null;
     if (needsStarting) {
-      let suggestedStartingBalance =
+      const suggestedStartingBalance =
         await this.computeSuggestedStartingBalance(
           branchId,
           manilaCalendarDate,
         );
-      if (
-        dayRow?.is_closed &&
-        dbBalToday?.ending_balance != null
-      ) {
-        suggestedStartingBalance = Number(
-          this.dec(dbBalToday.ending_balance).toFixed(2),
-        );
-      }
       pendingStartingSession = {
         businessDate: manilaCalendarDate,
         suggestedStartingBalance,
@@ -273,36 +265,10 @@ export class BranchDaySessionService {
 
     const todayStr = getPhCalendarDateString();
     if (params.actorRole !== Role.SUPER_ADMIN) {
-      const todayDate = this.toRecordDate(todayStr);
-      const todayDayRow = await this.prisma.branch_day_sessions.findUnique({
-        where: {
-          branch_id_session_date: {
-            branch_id: params.branchId,
-            session_date: todayDate,
-          },
-        },
-        select: { is_closed: true },
-      });
-      const todayDbBal = todayDayRow
-        ? await this.prisma.daily_balances.findUnique({
-            where: {
-              branch_id_record_date: {
-                branch_id: params.branchId,
-                record_date: todayDate,
-              },
-            },
-            select: { ending_balance: true },
-          })
-        : null;
-      let expectedRaw: number;
-      if (todayDayRow?.is_closed && todayDbBal?.ending_balance != null) {
-        expectedRaw = Number(this.dec(todayDbBal.ending_balance).toFixed(2));
-      } else {
-        expectedRaw = await this.computeSuggestedStartingBalance(
-          params.branchId,
-          todayStr,
-        );
-      }
+      const expectedRaw = await this.computeSuggestedStartingBalance(
+        params.branchId,
+        todayStr,
+      );
       const expected = Number(Number(expectedRaw).toFixed(2));
       this.logger.debug(
         `[StartingBalance] check branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
@@ -519,6 +485,15 @@ export class BranchDaySessionService {
         select: { name: true },
       });
 
+      const closeCutoff = new Date();
+      const sealedAtClose =
+        await this.financeDailyBalance.listOperationalTransactionIdsSealedBeforeCutoffInTx(
+          tx,
+          params.branchId,
+          closeDate,
+          closeCutoff,
+        );
+
       const persistConfirmed =
         params.physicalEndingAmount != null
           ? Number(params.physicalEndingAmount.toFixed(2))
@@ -538,8 +513,10 @@ export class BranchDaySessionService {
         where: { id: row.id },
         data: {
           is_closed: true,
-          closed_at: new Date(),
+          closed_at: closeCutoff,
           closed_by_user_id: params.actorUserId,
+          operational_cutoff_at: closeCutoff,
+          sealed_transaction_ids: sealedAtClose,
           updated_at: new Date(),
         },
       });
