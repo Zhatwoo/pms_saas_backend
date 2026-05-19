@@ -281,26 +281,6 @@ export class BranchFinanceService {
     }
 
     if (row?.status === 'pending') {
-      const nowIso = new Date().toISOString();
-      const { error: migrateErr } = await client
-        .from('daily_opening')
-        .update({
-          status: 'completed',
-          updated_at: nowIso,
-          last_updated_by_user_id: user.id ?? null,
-        })
-        .eq('branch_id', branchId)
-        .eq('opening_date', openingDate);
-
-      if (!migrateErr) {
-        return {
-          openingDate,
-          status: 'completed',
-          checklistStep: 'COMPLETED',
-          startingCash: this.toMoney(row.starting_cash),
-        };
-      }
-
       return {
         openingDate,
         status: 'pending',
