@@ -372,7 +372,7 @@ export class InventoryController {
   }
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
-  @Put('for-sale/:id')
+  @Patch('for-sale/:id')
   updateForSale(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
