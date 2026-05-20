@@ -57,6 +57,13 @@ const TX_SELECT = {
   id_back_photo: true,
   created_by_user_id: true,
   created_at: true,
+  users: {
+    select: {
+      id: true,
+      full_name: true,
+      role: true,
+    },
+  },
   pawned_items: {
     select: {
       id: true,
@@ -288,8 +295,16 @@ export class TransactionsService {
           }
         : null,
       customer: customersDecrypted ?? null,
+      created_by_user: row.users
+        ? {
+            id: row.users.id,
+            full_name: row.users.full_name,
+            role: row.users.role,
+          }
+        : null,
       pawned_items: undefined,
       customers: undefined,
+      users: undefined,
       sale_item: null,
     };
   }

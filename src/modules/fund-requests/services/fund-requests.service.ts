@@ -644,6 +644,7 @@ export class FundRequestsService {
     referenceId?: string | null;
     direction: 'in' | 'out';
     counterpartBranchName?: string | null;
+    createdByUserId?: string | null;
   }): Promise<{ id: string }> {
     const now = new Date();
     const prefix = `FT-${this.phDateKey(now)}-`;
@@ -692,6 +693,7 @@ export class FundRequestsService {
         unit_code: params.referenceId ?? params.request.request_no,
         pawn_amount: 0,
         storage_fee: 0,
+        created_by_user_id: params.createdByUserId ?? null,
         details: this.encryption.encryptTransactionDetails(
           detailsParts.join(' | '),
         ),
@@ -713,6 +715,7 @@ export class FundRequestsService {
     transferNotes: string | null;
     referenceId: string;
     destinationBranchName: string;
+    createdByUserId?: string | null;
   }): Promise<{ id: string }> {
     const now = new Date();
     const prefix = `FT-${this.phDateKey(now)}-`;
@@ -749,6 +752,7 @@ export class FundRequestsService {
         unit_code: params.referenceId,
         pawn_amount: 0,
         storage_fee: 0,
+        created_by_user_id: params.createdByUserId ?? null,
         details: this.encryption.encryptTransactionDetails(details),
       })
       .select('id')
@@ -1544,6 +1548,7 @@ export class FundRequestsService {
           existing.request_no,
         direction: 'out',
         counterpartBranchName: destinationBranch.name,
+        createdByUserId: user.id ?? null,
       });
       outboundTransactionId = outboundTransaction.id;
       await this.financeDailyBalance.applyNetChange(
@@ -1767,6 +1772,7 @@ export class FundRequestsService {
               this.compactText(existing.transfer_notes),
             referenceId,
             destinationBranchName: resolvedDestinationBranch.name,
+            createdByUserId: user.id ?? null,
           });
         ownerOutTransactionId = ownerOutTransaction.id;
       }
@@ -1783,6 +1789,7 @@ export class FundRequestsService {
           this.compactText(existing.transfer_notes),
         referenceId,
         direction: isExpenseTransfer ? 'out' : 'in',
+        createdByUserId: user.id ?? null,
       });
       inboundTransactionId = inboundTransaction.id;
       const balanceDelta = isExpenseTransfer
