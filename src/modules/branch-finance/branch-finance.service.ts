@@ -1003,6 +1003,15 @@ export class BranchFinanceService {
       amount: confirmedAmount,
     });
 
+    const client = this.supabaseService.getClient();
+    await this.upsertBranchDailyOpeningPending({
+      client,
+      actorUserId: user.id ?? null,
+      branchId,
+      openingDate: result.businessDate,
+      startingCash: confirmedAmount,
+    });
+
     await this.financeAudit.log({
       branchId,
       userId: user.id ?? null,

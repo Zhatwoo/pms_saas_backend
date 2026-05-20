@@ -619,17 +619,20 @@ export class FinanceDailyBalanceService {
       const sessionDateStr = lastClosed.session_date
         .toISOString()
         .slice(0, 10);
-      const recordDate = this.toRecordDate(sessionDateStr);
 
-      const closedSession = await this.db.branch_day_sessions.findUnique({
-        where: {
-          branch_id_session_date: {
-            branch_id: branchId,
-            session_date: recordDate,
-          },
-        },
-        select: { starting_balance: true, is_closed: true },
-      });
+      // If the closed session is today (same-day multi-shift), use priorDayEnding + fullDayNet
+      // so the suggestion is non-compounding and counts all today's transactions exactly once.
+      if (sessionDateStr === businessDateStr) {
+        const priorStr = addManilaCalendarDays(businessDateStr, -1);
+        const priorDayEnding = Number(
+          (await this.ledgerBookEndingForBusinessDate(branchId, priorStr)).toFixed(2),
+        );
+        const fullNet = await this.fullDayOperationalNetCash(branchId, businessDateStr);
+        return {
+          amount: Math.max(0, Number((priorDayEnding + fullNet).toFixed(2))),
+          closedSessionRecordDate: sessionDateStr,
+        };
+      }
 
       const ledgerOnCloseDay = Number(
         (
@@ -639,24 +642,6 @@ export class FinanceDailyBalanceService {
           )
         ).toFixed(2),
       );
-
-      const netStillCounted = await this.sumOperationalNetCash(
-        branchId,
-        sessionDateStr,
-      );
-
-      if (
-        closedSession?.is_closed &&
-        closedSession.starting_balance != null &&
-        Math.abs(netStillCounted) > 0.009
-      ) {
-        return {
-          amount: Number(
-            this.dec(closedSession.starting_balance).toFixed(2),
-          ),
-          closedSessionRecordDate: sessionDateStr,
-        };
-      }
 
       return {
         amount: ledgerOnCloseDay,
