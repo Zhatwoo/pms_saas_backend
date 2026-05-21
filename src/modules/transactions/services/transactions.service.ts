@@ -163,6 +163,18 @@ export class TransactionsService {
     return Number(value);
   }
 
+  private decryptUserDisplayName(value: string | null | undefined) {
+    let current = value ?? null;
+
+    for (let i = 0; i < 5 && this.encryption.isEncrypted(current); i += 1) {
+      const next = this.encryption.decrypt(current as string);
+      if (next === current) break;
+      current = next;
+    }
+
+    return current;
+  }
+
   private normalizeMoney(value: unknown, field: string): number {
     const parsed = Number(value ?? 0);
     if (!Number.isFinite(parsed) || parsed < 0) {
@@ -278,6 +290,8 @@ export class TransactionsService {
         )
       : null;
 
+    const createdByUser = this.encryption.decryptUsersJoin(row.users);
+
     return {
       ...row,
       transaction_date: this.formatDate(row.transaction_date),
@@ -295,10 +309,10 @@ export class TransactionsService {
           }
         : null,
       customer: customersDecrypted ?? null,
-      created_by_user: row.users
+      created_by_user: createdByUser
         ? {
             id: row.users.id,
-            full_name: row.users.full_name,
+            full_name: this.decryptUserDisplayName(createdByUser.full_name),
             role: row.users.role,
           }
         : null,
