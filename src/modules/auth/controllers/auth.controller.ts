@@ -82,8 +82,15 @@ export class AuthController {
   async login(
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: any,
   ) {
-    const session = await this.authService.login(loginDto);
+    const clientIp: string =
+      (req.headers?.['x-forwarded-for'] as string | undefined)
+        ?.split(',')[0]
+        ?.trim() ||
+      req.socket?.remoteAddress ||
+      '';
+    const session = await this.authService.login(loginDto, clientIp);
 
     res.cookie(
       ACCESS_TOKEN_COOKIE,
