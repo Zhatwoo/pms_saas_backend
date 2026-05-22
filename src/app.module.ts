@@ -30,6 +30,7 @@ import { PasswordChangeRequestsModule } from './modules/password-change-requests
 import { IncidentTicketsModule } from './modules/incident-tickets/incident-tickets.module';
 import { RewardsModule } from './modules/rewards/rewards.module';
 import { QRReplacementRequestsModule } from './modules/qr-replacement-requests/qr-replacement-requests.module';
+import { DevicesModule } from './modules/devices/devices.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 import { EncryptionModule } from './common/encryption/encryption.module';
@@ -86,6 +87,7 @@ import { CacheModuleConfig } from './infrastructure/cache';
     IncidentTicketsModule,
     RewardsModule,
     QRReplacementRequestsModule,
+    DevicesModule,
   ],
   providers: [
     {

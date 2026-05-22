@@ -17,6 +17,7 @@ model branches {
   created_at                                             DateTime                   @default(now()) @db.Timestamptz(6)
   updated_at                                             DateTime                   @default(now()) @db.Timestamptz(6)
   contact_number                                         String?
+  allowed_ip                                             String?
   /// Configured opening cash when no prior daily_balances row exists (initial capital).
   opening_cash_balance                                   Decimal                    @default(0) @db.Decimal(12, 2)
   /// LOAN_AMOUNT: sum pawn loan amounts; APPRAISED_VALUE: sum appraised_value with fallback to amount.
@@ -39,6 +40,7 @@ model branches {
   sale_items                                             sale_items[]
   transactions                                           transactions[]
   users                                                  users[]
+  authorized_devices                                     authorized_devices[] @relation("device_branch")
 
   @@schema("public")
 }
@@ -82,6 +84,8 @@ model users {
   transactions_voided                                                  transactions[]             @relation("transactions_voided_by_user_idTousers")
   users                                                                auth_users                 @relation(fields: [auth_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   branches                                                             branches?                  @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  authorized_devices                                                   authorized_devices[]      @relation("device_employee")
+  login_logs                                                           login_logs[]               @relation("login_log_employee")
 
   @@index([auth_id])
   @@schema("public")
@@ -1215,5 +1219,46 @@ enum user_status {
   Active
   Inactive
 
+  @@schema("public")
+}
+
+// ─── Device Security System ───────────────────────────────────────────────────
+
+model authorized_devices {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id        String?   @db.Uuid
+  branch_id          String?   @db.Uuid
+  device_name        String
+  device_type        String    @default("DESKTOP")
+  device_fingerprint String    @unique
+  ip_address         String?
+  status             String    @default("PENDING")
+  last_login         DateTime?
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+
+  employee users?    @relation("device_employee", fields: [employee_id], references: [id], onDelete: SetNull)
+  branch   branches? @relation("device_branch", fields: [branch_id], references: [id], onDelete: SetNull)
+
+  @@index([employee_id])
+  @@index([branch_id])
+  @@index([status])
+  @@schema("public")
+}
+
+model login_logs {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id        String?  @db.Uuid
+  device_fingerprint String?
+  ip_address         String?
+  login_status       String
+  failure_reason     String?
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  employee users? @relation("login_log_employee", fields: [employee_id], references: [id], onDelete: SetNull)
+
+  @@index([employee_id])
+  @@index([login_status])
+  @@index([created_at])
   @@schema("public")
 }
