@@ -57,6 +57,13 @@ const TX_SELECT = {
   id_back_photo: true,
   created_by_user_id: true,
   created_at: true,
+  users: {
+    select: {
+      id: true,
+      full_name: true,
+      role: true,
+    },
+  },
   pawned_items: {
     select: {
       id: true,
@@ -154,6 +161,18 @@ export class TransactionsService {
   private toNumber(value: any | number | string | null | undefined) {
     if (value == null) return 0;
     return Number(value);
+  }
+
+  private decryptUserDisplayName(value: string | null | undefined) {
+    let current = value ?? null;
+
+    for (let i = 0; i < 5 && this.encryption.isEncrypted(current); i += 1) {
+      const next = this.encryption.decrypt(current as string);
+      if (next === current) break;
+      current = next;
+    }
+
+    return current;
   }
 
   private normalizeMoney(value: unknown, field: string): number {
@@ -271,6 +290,8 @@ export class TransactionsService {
         )
       : null;
 
+    const createdByUser = this.encryption.decryptUsersJoin(row.users);
+
     return {
       ...row,
       transaction_date: this.formatDate(row.transaction_date),
@@ -288,8 +309,16 @@ export class TransactionsService {
           }
         : null,
       customer: customersDecrypted ?? null,
+      created_by_user: createdByUser
+        ? {
+            id: row.users.id,
+            full_name: this.decryptUserDisplayName(createdByUser.full_name),
+            role: row.users.role,
+          }
+        : null,
       pawned_items: undefined,
       customers: undefined,
+      users: undefined,
       sale_item: null,
     };
   }
@@ -626,6 +655,7 @@ export class TransactionsService {
         startingBalance: 0,
         endingBalance: 0,
         sessionOpenedAt: null as string | null,
+        sealedTransactionIds: [] as string[],
       },
     };
   }
@@ -649,6 +679,7 @@ export class TransactionsService {
       startingBalance: 0,
       endingBalance: 0,
       sessionOpenedAt: null as string | null,
+      sealedTransactionIds: [] as string[],
     };
 
     let sessionOpenedAt: string | null = null;
@@ -675,12 +706,25 @@ export class TransactionsService {
               session_date: balanceDate,
             },
           },
-          select: { opened_at: true, is_closed: true },
+          select: {
+            opened_at: true,
+            is_closed: true,
+            starting_balance: true,
+            operational_cutoff_at: true,
+            sealed_transaction_ids: true,
+          },
         }),
       ]);
 
-      sessionOpenedAt = sessionRow?.opened_at?.toISOString() ?? null;
+      const cutoffIso =
+        sessionRow?.operational_cutoff_at?.toISOString() ??
+        (await this.financeDailyBalance.resolveOperationalCutoffIso(
+          scoped,
+          balanceDateStr,
+        ));
+      sessionOpenedAt = cutoffIso;
       stats.sessionOpenedAt = sessionOpenedAt;
+      stats.sealedTransactionIds = sessionRow?.sealed_transaction_ids ?? [];
 
       if (balanceData && sessionRow?.is_closed) {
         const bookAtClose = this.toNumber(balanceData.ending_balance);
@@ -690,7 +734,13 @@ export class TransactionsService {
       }
 
       let startingBalanceCalc = 0;
-      if (balanceData) {
+      if (
+        sessionRow &&
+        !sessionRow.is_closed &&
+        sessionRow.starting_balance != null
+      ) {
+        startingBalanceCalc = this.toNumber(sessionRow.starting_balance);
+      } else if (balanceData) {
         startingBalanceCalc = this.toNumber(balanceData.starting_balance);
       } else {
         const priorRow = await this.prisma.daily_balances.findFirst({
