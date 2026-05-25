@@ -876,7 +876,10 @@ export class BranchFinanceService {
           (t) => t.branch_id === branch.id,
         );
         const branchFundReqs = (
-          (fundReqResult.data ?? []) as { branch_id?: string | null }[]
+          (fundReqResult.data ?? []) as {
+            branch_id?: string | null;
+            status?: string | null;
+          }[]
         ).filter((f) => f.branch_id === branch.id);
 
         const breakdown = {
