@@ -96,10 +96,10 @@ export class UsersService {
     };
   }
 
-  async findAll(scope?: { branchId: string; forBranchAdmin: true }) {
+  async findAll(scope?: { branchId: string; scopedToBranch: true }) {
     const where: Prisma.usersWhereInput = {};
 
-    if (scope?.forBranchAdmin && scope.branchId) {
+    if (scope?.scopedToBranch && scope.branchId) {
       Object.assign(where, {
         branch_id: scope.branchId,
         role: { in: ['admin', 'employee', 'branch'] },

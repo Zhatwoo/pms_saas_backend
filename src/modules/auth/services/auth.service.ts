@@ -211,7 +211,6 @@ export class AuthService {
           UNKNOWN_DEVICE: 'Unauthorized Device. Please request authorization from your admin.',
           DEVICE_BLOCKED: 'This device has been blocked. Contact your admin.',
           DEVICE_PENDING: 'Device authorization is pending admin approval.',
-          DEVICE_EMPLOYEE_MISMATCH: 'This device is registered to a different employee.',
         };
 
         throw new UnauthorizedException(
