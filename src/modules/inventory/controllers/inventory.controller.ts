@@ -175,7 +175,7 @@ export class InventoryController {
     );
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Roles(Role.SUPER_ADMIN)
   @Post('pawned/:id/qr-replacement-request')
   requestQrReplacement(
     @Req() req: { user: AuthenticatedUserProfile },

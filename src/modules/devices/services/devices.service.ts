@@ -11,11 +11,8 @@ import { AuthorizeDeviceDto } from '../dto/authorize-device.dto';
 import { UpdateDeviceDto } from '../dto/update-device.dto';
 import { RequestAuthorizationDto } from '../dto/request-authorization.dto';
 
-const DEVICE_LIMITS: Record<string, number> = {
-  [Role.SUPER_ADMIN]: Infinity,
-  [Role.ADMIN]: Infinity,
-  [Role.EMPLOYEE]: 2,
-};
+// Device limits removed — any authorized device can be used by any number of employees,
+// and any employee can use any number of authorized devices.
 
 @Injectable()
 export class DevicesService {
@@ -102,8 +99,6 @@ export class DevicesService {
       select: { id: true, role: true },
     });
     if (!employee) throw new NotFoundException('Employee not found');
-
-    await this.enforceDeviceLimit(dto.employeeId, employee.role);
 
     return this.prisma.authorized_devices.upsert({
       where: { device_fingerprint: dto.deviceFingerprint },
@@ -222,25 +217,57 @@ export class DevicesService {
     });
   }
 
-  /** Validate device fingerprint during login and update last_login timestamp. */
+  /** Validate device fingerprint during login and update last_login timestamp.
+   *
+   *  Strategy:
+   *  1. Look up the device by the fingerprint sent from the browser.
+   *  2. If not found by fingerprint, check whether the employee already has an
+   *     AUTHORIZED device record.  If they do, it means the browser computed a
+   *     slightly different fingerprint this session (FingerprintJS drift).
+   *     In that case, update the stored fingerprint to the new value so future
+   *     logins match again — this is the "self-healing" step.
+   *  3. If neither fingerprint nor employee has an authorized device → UNKNOWN.
+   */
   async validateAndUpdateLastLogin(
     deviceFingerprint: string,
     employeeId: string,
   ): Promise<{ authorized: boolean; reason?: string }> {
-    const device = await this.prisma.authorized_devices.findUnique({
+    // ── Primary lookup: by fingerprint ───────────────────────────────────────
+    const deviceByFp = await this.prisma.authorized_devices.findUnique({
       where: { device_fingerprint: deviceFingerprint },
     });
 
-    if (!device) return { authorized: false, reason: 'UNKNOWN_DEVICE' };
-    if (device.status === 'BLOCKED') return { authorized: false, reason: 'DEVICE_BLOCKED' };
-    if (device.status === 'PENDING') return { authorized: false, reason: 'DEVICE_PENDING' };
+    if (deviceByFp) {
+      if (deviceByFp.status === 'BLOCKED') return { authorized: false, reason: 'DEVICE_BLOCKED' };
+      if (deviceByFp.status === 'PENDING') return { authorized: false, reason: 'DEVICE_PENDING' };
 
-    await this.prisma.authorized_devices.update({
-      where: { id: device.id },
-      data: { last_login: new Date(), updated_at: new Date() },
+      await this.prisma.authorized_devices.update({
+        where: { id: deviceByFp.id },
+        data: { last_login: new Date(), updated_at: new Date() },
+      });
+      return { authorized: true };
+    }
+
+    // ── Fallback: fingerprint drifted — look up by employee ──────────────────
+    const deviceByEmployee = await this.prisma.authorized_devices.findFirst({
+      where: { employee_id: employeeId, status: 'AUTHORIZED' },
+      orderBy: { last_login: 'desc' },
     });
 
-    return { authorized: true };
+    if (deviceByEmployee) {
+      // Heal: update the stored fingerprint to match what the browser sends now
+      await this.prisma.authorized_devices.update({
+        where: { id: deviceByEmployee.id },
+        data: {
+          device_fingerprint: deviceFingerprint,
+          last_login: new Date(),
+          updated_at: new Date(),
+        },
+      });
+      return { authorized: true };
+    }
+
+    return { authorized: false, reason: 'UNKNOWN_DEVICE' };
   }
 
   /** Write a login log entry. */
@@ -267,18 +294,4 @@ export class DevicesService {
     }
   }
 
-  private async enforceDeviceLimit(employeeId: string, role: string) {
-    const limit = DEVICE_LIMITS[role] ?? 2;
-    if (!isFinite(limit)) return;
-
-    const count = await this.prisma.authorized_devices.count({
-      where: { employee_id: employeeId, status: 'AUTHORIZED' },
-    });
-
-    if (count >= limit) {
-      throw new BadRequestException(
-        `Device limit reached (max ${limit} for role ${role})`,
-      );
-    }
-  }
 }
