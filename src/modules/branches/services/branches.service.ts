@@ -1,6 +1,8 @@
 import {
   Injectable,
+  HttpException,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
@@ -19,22 +21,66 @@ import {
 
 @Injectable()
 export class BranchesService {
+  private readonly logger = new Logger(BranchesService.name);
+
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
   ) {}
 
+  /**
+   * Fields needed by the branch picker and actor-scoped list route.
+   * Narrow select avoids unrelated columns and keeps JSON payloads predictable.
+   */
+  private readonly branchCardSelect = {
+    id: true,
+    branch_code: true,
+    name: true,
+    location: true,
+    contact_number: true,
+    status: true,
+  } as const;
+
+  /** Narrow Supabase error shape — keeps eslint strict mode happy vs `single()` payloads. */
+  private static unwrapSupabaseRow(resp: unknown): {
+    data: Record<string, unknown> | null;
+    error: { message: string; code?: string } | null;
+  } {
+    if (!resp || typeof resp !== 'object') {
+      return { data: null, error: { message: 'Invalid Supabase response' } };
+    }
+    const r = resp as {
+      data?: unknown;
+      error?: { message: string; code?: string } | null;
+    };
+    return {
+      data:
+        r.data != null && typeof r.data === 'object' && !Array.isArray(r.data)
+          ? (r.data as Record<string, unknown>)
+          : null,
+      error: r.error ?? null,
+    };
+  }
+
   /** Restore plaintext contact_number after read; keeps API shape unchanged. */
   private mapBranchFromDb(row: Record<string, unknown> | null) {
     if (!row || typeof row !== 'object') return row;
-    const contact = row.contact_number;
+    const raw = row.contact_number;
+
+    let contact_number: unknown = raw;
+    if (typeof raw === 'string') {
+      contact_number =
+        raw.trim() !== ''
+          ? this.encryption.decryptBranchContactNumber(raw)
+          : raw;
+    } else if (raw === undefined) {
+      contact_number = null;
+    }
+
     return {
       ...row,
-      contact_number:
-        contact != null && contact !== ''
-          ? this.encryption.decryptBranchContactNumber(String(contact))
-          : contact,
+      contact_number,
     };
   }
 
@@ -96,12 +142,13 @@ export class BranchesService {
       status: createBranchDto.status,
     };
 
-    let { data, error } = await this.supabaseService
+    const firstResp = await this.supabaseService
       .getClient()
       .from('branches')
       .insert([payload])
       .select()
       .single();
+    let { data, error } = BranchesService.unwrapSupabaseRow(firstResp);
 
     // If client-side generated code is stale, retry once using the next free code.
     if (error?.code === '23505' || /branch_code/i.test(error?.message ?? '')) {
@@ -110,45 +157,90 @@ export class BranchesService {
         branch_code: await this.getNextAvailableBranchCode(),
       };
 
-      const retryResult = await this.supabaseService
+      const retryResp = await this.supabaseService
         .getClient()
         .from('branches')
         .insert([payload])
         .select()
         .single();
 
-      data = retryResult.data;
-      error = retryResult.error;
+      ({ data, error } = BranchesService.unwrapSupabaseRow(retryResp));
     }
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return this.mapBranchFromDb(data as Record<string, unknown>);
+    if (!data) {
+      throw new InternalServerErrorException('Branch insert returned no row');
+    }
+
+    return this.mapBranchFromDb(data);
   }
 
   async findAll() {
-    const rows = await this.prisma.branches.findMany({
-      orderBy: { created_at: 'desc' },
-    });
+    try {
+      const rows = await this.prisma.branches.findMany({
+        select: this.branchCardSelect,
+        orderBy: { created_at: 'desc' },
+      });
 
-    return rows.map((row) => this.mapBranchFromDb(row as Record<string, unknown>));
+      return rows.map((row) =>
+        this.mapBranchFromDb(row as unknown as Record<string, unknown>),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Could not load branches';
+      this.logger.error(
+        `findAll branches failed: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        process.env.NODE_ENV !== 'production'
+          ? message
+          : 'Could not load branches',
+      );
+    }
   }
 
   /** Admin / employee: only their assigned branch. Super admin: all. */
   async findAllForActor(user: UserWithBranch) {
-    if (user.role === Role.SUPER_ADMIN) {
-      return this.findAll();
+    try {
+      if (user.role === Role.SUPER_ADMIN) {
+        return await this.findAll();
+      }
+
+      const branchId = requireUserBranchId(user);
+      const rows = await this.prisma.branches.findMany({
+        where: { id: branchId },
+        select: this.branchCardSelect,
+        orderBy: { created_at: 'desc' },
+      });
+
+      return rows.map((row) =>
+        this.mapBranchFromDb(row as unknown as Record<string, unknown>),
+      );
+    } catch (error) {
+      if (
+        error instanceof InternalServerErrorException ||
+        error instanceof HttpException
+      ) {
+        throw error;
+      }
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Could not load branches for user';
+      this.logger.error(
+        `findAllForActor branches failed: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        process.env.NODE_ENV !== 'production'
+          ? message
+          : 'Could not load branches',
+      );
     }
-
-    const branchId = requireUserBranchId(user);
-    const rows = await this.prisma.branches.findMany({
-      where: { id: branchId },
-      orderBy: { created_at: 'desc' },
-    });
-
-    return rows.map((row) => this.mapBranchFromDb(row as Record<string, unknown>));
   }
 
   /** Public signup: active branches only (id + name). */
@@ -176,7 +268,7 @@ export class BranchesService {
       throw new NotFoundException('Branch not found');
     }
 
-    return this.mapBranchFromDb(data as Record<string, unknown>);
+    return this.mapBranchFromDb(data);
   }
 
   async update(id: string, updateBranchDto: UpdateBranchDto) {
@@ -200,7 +292,7 @@ export class BranchesService {
       ...(updateBranchDto.status ? { status: updateBranchDto.status } : {}),
     };
 
-    const { data, error } = await this.supabaseService
+    const patchResp = await this.supabaseService
       .getClient()
       .from('branches')
       .update(payload)
@@ -208,19 +300,27 @@ export class BranchesService {
       .select()
       .single();
 
+    const { data, error } = BranchesService.unwrapSupabaseRow(patchResp);
+
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return this.mapBranchFromDb(data as Record<string, unknown>);
+    if (!data) {
+      throw new InternalServerErrorException('Branch update returned no row');
+    }
+
+    return this.mapBranchFromDb(data);
   }
 
   async remove(id: string) {
-    const { error } = await this.supabaseService
+    const rmResp = await this.supabaseService
       .getClient()
       .from('branches')
       .delete()
       .eq('id', id);
+
+    const { error } = BranchesService.unwrapSupabaseRow(rmResp);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -274,7 +374,7 @@ export class BranchesService {
     // Pawn book value: Active + Expired (forfeited pipeline) + Inventory; per-branch LOAN_AMOUNT vs APPRAISED_VALUE.
     for (const item of pawnedResult) {
       if (!item.branch_id) continue;
-      if (!isStatusIncludedInInventoryValuation(item.status as string)) continue;
+      if (!isStatusIncludedInInventoryValuation(item.status)) continue;
       const s = ensure(item.branch_id);
       const mode = modeByBranch.get(item.branch_id) ?? 'LOAN_AMOUNT';
       const line = inventoryLineValue(

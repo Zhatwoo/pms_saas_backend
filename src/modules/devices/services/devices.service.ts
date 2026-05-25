@@ -23,7 +23,7 @@ export class DevicesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** List all devices with employee + branch info. Super admin sees all; admin sees own branch only. */
+  /** List all devices with employee + branch info + recent users. Super admin sees all; admin sees own branch only. */
   async findAll(actorRole: string, actorBranchId: string | null) {
     const where =
       actorRole === Role.SUPER_ADMIN || actorRole === Role.ADMIN
@@ -34,7 +34,7 @@ export class DevicesService {
 
     if (where === undefined) throw new ForbiddenException('Access denied');
 
-    return this.prisma.authorized_devices.findMany({
+    const devices = await this.prisma.authorized_devices.findMany({
       where,
       include: {
         employee: { select: { id: true, full_name: true, email: true, role: true } },
@@ -42,6 +42,45 @@ export class DevicesService {
       },
       orderBy: { created_at: 'desc' },
     });
+
+    // For each device, fetch distinct recent users who successfully logged in
+    const enriched = await Promise.all(
+      devices.map(async (device) => {
+        const recentLogs = await this.prisma.login_logs.findMany({
+          where: {
+            device_fingerprint: device.device_fingerprint,
+            login_status: 'SUCCESS',
+            employee_id: { not: null },
+          },
+          include: {
+            employee: { select: { id: true, full_name: true, email: true, role: true } },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 20,
+        });
+
+        // Deduplicate by employee id, keep most recent per employee
+        const seen = new Set<string>();
+        const recentUsers = recentLogs
+          .filter((log) => {
+            if (!log.employee_id || seen.has(log.employee_id)) return false;
+            seen.add(log.employee_id);
+            return true;
+          })
+          .slice(0, 5)
+          .map((log) => ({
+            id: log.employee?.id,
+            full_name: log.employee?.full_name,
+            email: log.employee?.email,
+            role: log.employee?.role,
+            last_login: log.created_at,
+          }));
+
+        return { ...device, recent_users: recentUsers };
+      }),
+    );
+
+    return enriched;
   }
 
   async findOne(id: string) {
@@ -195,8 +234,6 @@ export class DevicesService {
     if (!device) return { authorized: false, reason: 'UNKNOWN_DEVICE' };
     if (device.status === 'BLOCKED') return { authorized: false, reason: 'DEVICE_BLOCKED' };
     if (device.status === 'PENDING') return { authorized: false, reason: 'DEVICE_PENDING' };
-    if (device.employee_id !== employeeId)
-      return { authorized: false, reason: 'DEVICE_EMPLOYEE_MISMATCH' };
 
     await this.prisma.authorized_devices.update({
       where: { id: device.id },
