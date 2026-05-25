@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Role, TransactionPurpose } from '../../../common/enums';
-import { addManilaCalendarDays, getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
+import {
+  addManilaCalendarDays,
+  getPhCalendarDateString,
+  getPhWallClockTimeString,
+} from '../../../common/utils/branch-calendar-date.util';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import type { BranchBusinessSessionSnapshot } from './branch-business-session.service';
 import { FinanceDailyBalanceService } from './finance-daily-balance.service';
@@ -327,7 +331,7 @@ export class BranchDaySessionService {
   ): Promise<void> {
     const date = this.toRecordDate(params.businessDateStr);
     const now = new Date();
-    const timeStr = now.toTimeString().slice(0, 8);
+    const timeStr = getPhWallClockTimeString(now);
 
     const existing = await tx.transactions.findFirst({
       where: {
