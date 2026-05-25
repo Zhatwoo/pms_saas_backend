@@ -7,6 +7,7 @@ import {
   Patch,
   Delete,
   Req,
+  Query,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AUTH_STRICT_THROTTLE } from '../../../config/throttle-auth.constants';
@@ -36,8 +37,18 @@ export class UsersController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get()
-  findAll(@Req() req: { user: AuthenticatedUserProfile }) {
+  findAll(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branchId') branchId?: string,
+  ) {
     if (req.user.role === Role.SUPER_ADMIN) {
+      if (branchId?.trim()) {
+        return this.usersService.findAll({
+          branchId: branchId.trim(),
+          scopedToBranch: true,
+        });
+      }
+
       return this.usersService.findAll();
     }
     if (!req.user.branchId) {
@@ -45,7 +56,7 @@ export class UsersController {
     }
     return this.usersService.findAll({
       branchId: req.user.branchId,
-      forBranchAdmin: true,
+      scopedToBranch: true,
     });
   }
 
