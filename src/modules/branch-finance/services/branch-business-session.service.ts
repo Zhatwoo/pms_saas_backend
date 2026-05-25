@@ -9,6 +9,7 @@ import { TransactionPurpose } from '../../../common/enums';
 import {
   addManilaCalendarDays,
   getPhCalendarDateString,
+  getPhWallClockTimeString,
 } from '../../../common/utils/branch-calendar-date.util';
 import {
   inventoryLineValue,
@@ -146,7 +147,7 @@ export class BranchBusinessSessionService {
   ): Promise<void> {
     const date = this.toRecordDate(params.businessDateStr);
     const now = new Date();
-    const timeStr = now.toTimeString().slice(0, 8);
+    const timeStr = getPhWallClockTimeString(now);
 
     const existing = await tx.transactions.findFirst({
       where: {
