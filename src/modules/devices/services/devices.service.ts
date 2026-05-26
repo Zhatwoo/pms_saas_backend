@@ -1,0 +1,297 @@
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { PrismaService } from '../../../infrastructure/prisma';
+import { Role } from '../../../common/enums';
+import { AuthorizeDeviceDto } from '../dto/authorize-device.dto';
+import { UpdateDeviceDto } from '../dto/update-device.dto';
+import { RequestAuthorizationDto } from '../dto/request-authorization.dto';
+
+// Device limits removed — any authorized device can be used by any number of employees,
+// and any employee can use any number of authorized devices.
+
+@Injectable()
+export class DevicesService {
+  private readonly logger = new Logger(DevicesService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  /** List all devices with employee + branch info + recent users. Super admin sees all; admin sees own branch only. */
+  async findAll(actorRole: string, actorBranchId: string | null) {
+    const where =
+      actorRole === Role.SUPER_ADMIN || actorRole === Role.ADMIN
+        ? actorRole === Role.SUPER_ADMIN
+          ? {}
+          : { branch_id: actorBranchId ?? undefined }
+        : undefined;
+
+    if (where === undefined) throw new ForbiddenException('Access denied');
+
+    const devices = await this.prisma.authorized_devices.findMany({
+      where,
+      include: {
+        employee: { select: { id: true, full_name: true, email: true, role: true } },
+        branch: { select: { id: true, name: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    // For each device, fetch distinct recent users who successfully logged in
+    const enriched = await Promise.all(
+      devices.map(async (device) => {
+        const recentLogs = await this.prisma.login_logs.findMany({
+          where: {
+            device_fingerprint: device.device_fingerprint,
+            login_status: 'SUCCESS',
+            employee_id: { not: null },
+          },
+          include: {
+            employee: { select: { id: true, full_name: true, email: true, role: true } },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 20,
+        });
+
+        // Deduplicate by employee id, keep most recent per employee
+        const seen = new Set<string>();
+        const recentUsers = recentLogs
+          .filter((log) => {
+            if (!log.employee_id || seen.has(log.employee_id)) return false;
+            seen.add(log.employee_id);
+            return true;
+          })
+          .slice(0, 5)
+          .map((log) => ({
+            id: log.employee?.id,
+            full_name: log.employee?.full_name,
+            email: log.employee?.email,
+            role: log.employee?.role,
+            last_login: log.created_at,
+          }));
+
+        return { ...device, recent_users: recentUsers };
+      }),
+    );
+
+    return enriched;
+  }
+
+  async findOne(id: string) {
+    const device = await this.prisma.authorized_devices.findUnique({
+      where: { id },
+      include: {
+        employee: { select: { id: true, full_name: true, email: true, role: true } },
+        branch: { select: { id: true, name: true } },
+      },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+    return device;
+  }
+
+  /** Called by super admin to authorize a pending/unknown device. */
+  async authorize(dto: AuthorizeDeviceDto) {
+    const employee = await this.prisma.users.findUnique({
+      where: { id: dto.employeeId },
+      select: { id: true, role: true },
+    });
+    if (!employee) throw new NotFoundException('Employee not found');
+
+    return this.prisma.authorized_devices.upsert({
+      where: { device_fingerprint: dto.deviceFingerprint },
+      create: {
+        employee_id: dto.employeeId,
+        branch_id: dto.branchId ?? null,
+        device_name: dto.deviceName,
+        device_type: dto.deviceType ?? 'DESKTOP',
+        device_fingerprint: dto.deviceFingerprint,
+        ip_address: dto.ipAddress ?? null,
+        status: 'AUTHORIZED',
+      },
+      update: {
+        status: 'AUTHORIZED',
+        device_name: dto.deviceName,
+        device_type: dto.deviceType ?? 'DESKTOP',
+        branch_id: dto.branchId ?? null,
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  /** Employee self-requests authorization for their unknown device. Creates PENDING record.
+   *  Can be called unauthenticated (employeeId = null) — employee email used to resolve their DB id. */
+  async requestAuthorization(
+    employeeId: string | null,
+    dto: RequestAuthorizationDto,
+    clientIp: string,
+  ) {
+    // Resolve employee id from email when called from the unauthenticated login screen
+    let resolvedEmployeeId = employeeId;
+    if (!resolvedEmployeeId && dto.email) {
+      const user = await this.prisma.users.findUnique({
+        where: { email: dto.email.trim().toLowerCase() },
+        select: { id: true },
+      });
+      resolvedEmployeeId = user?.id ?? null;
+    }
+
+    const existing = await this.prisma.authorized_devices.findUnique({
+      where: { device_fingerprint: dto.deviceFingerprint },
+    });
+
+    if (existing) {
+      if (existing.status === 'AUTHORIZED')
+        throw new BadRequestException('Device is already authorized');
+      if (existing.status === 'BLOCKED')
+        throw new ForbiddenException('Device is blocked');
+      // Already pending — idempotent
+      return existing;
+    }
+
+    return this.prisma.authorized_devices.create({
+      data: {
+        employee_id: resolvedEmployeeId ?? undefined,
+        device_name: dto.deviceName ?? 'Unknown Device',
+        device_type: dto.deviceType ?? 'DESKTOP',
+        device_fingerprint: dto.deviceFingerprint,
+        ip_address: dto.ipAddress ?? clientIp,
+        status: 'PENDING',
+      },
+    });
+  }
+
+  async update(id: string, dto: UpdateDeviceDto) {
+    await this.findOne(id);
+    return this.prisma.authorized_devices.update({
+      where: { id },
+      data: {
+        ...dto,
+        branch_id: dto.branchId,
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  async remove(id: string) {
+    await this.findOne(id);
+    await this.prisma.authorized_devices.delete({ where: { id } });
+    return { success: true };
+  }
+
+  /** Block a device instantly (e.g. stolen). */
+  async block(id: string) {
+    await this.findOne(id);
+    return this.prisma.authorized_devices.update({
+      where: { id },
+      data: { status: 'BLOCKED', updated_at: new Date() },
+    });
+  }
+
+  /** All login log entries. Super admin sees all; admin sees own branch. */
+  async findLogs(
+    actorRole: string,
+    actorBranchId: string | null,
+    limit = 200,
+  ) {
+    if (actorRole !== Role.SUPER_ADMIN && actorRole !== Role.ADMIN) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    const branchFilter =
+      actorRole === Role.ADMIN && actorBranchId
+        ? { employee: { branch_id: actorBranchId } }
+        : {};
+
+    return this.prisma.login_logs.findMany({
+      where: branchFilter,
+      include: {
+        employee: {
+          select: { id: true, full_name: true, email: true, role: true },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      take: limit,
+    });
+  }
+
+  /** Validate device fingerprint during login and update last_login timestamp.
+   *
+   *  Strategy:
+   *  1. Look up the device by the fingerprint sent from the browser.
+   *  2. If not found by fingerprint, check whether the employee already has an
+   *     AUTHORIZED device record.  If they do, it means the browser computed a
+   *     slightly different fingerprint this session (FingerprintJS drift).
+   *     In that case, update the stored fingerprint to the new value so future
+   *     logins match again — this is the "self-healing" step.
+   *  3. If neither fingerprint nor employee has an authorized device → UNKNOWN.
+   */
+  async validateAndUpdateLastLogin(
+    deviceFingerprint: string,
+    employeeId: string,
+  ): Promise<{ authorized: boolean; reason?: string }> {
+    // ── Primary lookup: by fingerprint ───────────────────────────────────────
+    const deviceByFp = await this.prisma.authorized_devices.findUnique({
+      where: { device_fingerprint: deviceFingerprint },
+    });
+
+    if (deviceByFp) {
+      if (deviceByFp.status === 'BLOCKED') return { authorized: false, reason: 'DEVICE_BLOCKED' };
+      if (deviceByFp.status === 'PENDING') return { authorized: false, reason: 'DEVICE_PENDING' };
+
+      await this.prisma.authorized_devices.update({
+        where: { id: deviceByFp.id },
+        data: { last_login: new Date(), updated_at: new Date() },
+      });
+      return { authorized: true };
+    }
+
+    // ── Fallback: fingerprint drifted — look up by employee ──────────────────
+    const deviceByEmployee = await this.prisma.authorized_devices.findFirst({
+      where: { employee_id: employeeId, status: 'AUTHORIZED' },
+      orderBy: { last_login: 'desc' },
+    });
+
+    if (deviceByEmployee) {
+      // Heal: update the stored fingerprint to match what the browser sends now
+      await this.prisma.authorized_devices.update({
+        where: { id: deviceByEmployee.id },
+        data: {
+          device_fingerprint: deviceFingerprint,
+          last_login: new Date(),
+          updated_at: new Date(),
+        },
+      });
+      return { authorized: true };
+    }
+
+    return { authorized: false, reason: 'UNKNOWN_DEVICE' };
+  }
+
+  /** Write a login log entry. */
+  async writeLoginLog(data: {
+    employeeId?: string;
+    deviceFingerprint?: string;
+    ipAddress?: string;
+    loginStatus: string;
+    failureReason?: string;
+  }) {
+    try {
+      await this.prisma.login_logs.create({
+        data: {
+          employee_id: data.employeeId ?? null,
+          device_fingerprint: data.deviceFingerprint ?? null,
+          ip_address: data.ipAddress ?? null,
+          login_status: data.loginStatus,
+          failure_reason: data.failureReason ?? null,
+        },
+      });
+    } catch (err) {
+      // Never let logging kill the main request
+      this.logger.error('Failed to write login log', err);
+    }
+  }
+
+}

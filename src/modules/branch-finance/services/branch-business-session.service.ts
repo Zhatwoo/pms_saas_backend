@@ -9,6 +9,7 @@ import { TransactionPurpose } from '../../../common/enums';
 import {
   addManilaCalendarDays,
   getPhCalendarDateString,
+  getPhWallClockTimeString,
 } from '../../../common/utils/branch-calendar-date.util';
 import {
   inventoryLineValue,
@@ -38,6 +39,10 @@ export interface BranchBusinessSessionSnapshot {
     suggestedStartingBalance: number;
   } | null;
   operationalCashAllowed: boolean;
+  /** ISO timestamp — operational cash counts only for txs at or after this instant. */
+  operationalCutoffAt: string | null;
+  /** Transaction ids sealed before the current shift (excluded from operational net). */
+  sealedTransactionIds: string[];
   systemEndingBalanceToday: number | null;
   lastEnd: {
     businessDate: string;
@@ -142,7 +147,7 @@ export class BranchBusinessSessionService {
   ): Promise<void> {
     const date = this.toRecordDate(params.businessDateStr);
     const now = new Date();
-    const timeStr = now.toTimeString().slice(0, 8);
+    const timeStr = getPhWallClockTimeString(now);
 
     const existing = await tx.transactions.findFirst({
       where: {
@@ -274,7 +279,14 @@ export class BranchBusinessSessionService {
     }
 
     let systemEndingBalanceToday: number | null = null;
+    let operationalCutoffAt: string | null = null;
+    const sealedTransactionIds: string[] = [];
     if (todaySessionRow?.status === BranchSessionStatus.OPEN) {
+      operationalCutoffAt =
+        await this.financeDailyBalance.resolveOperationalCutoffIso(
+          branchId,
+          manilaCalendarDate,
+        );
       let startNum = 0;
       if (todaySessionRow.starting_balance != null) {
         startNum = Number(
@@ -336,6 +348,8 @@ export class BranchBusinessSessionService {
           }
         : null,
       operationalCashAllowed,
+      operationalCutoffAt,
+      sealedTransactionIds,
       systemEndingBalanceToday,
       lastEnd: lastEnd
         ? {
@@ -463,13 +477,13 @@ export class BranchBusinessSessionService {
           branch_id: params.branchId,
           opening_date: openingDate,
           starting_cash: new Prisma.Decimal(confirmedAmount),
-          status: 'completed',
+          status: 'pending',
           employee_id: params.actorUserId,
           last_updated_by_user_id: params.actorUserId,
         },
         update: {
           starting_cash: new Prisma.Decimal(confirmedAmount),
-          status: 'completed',
+          status: 'pending',
           employee_id: params.actorUserId,
           last_updated_by_user_id: params.actorUserId,
           updated_at: new Date(),

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -47,7 +48,15 @@ interface TransactionRow {
 /** Subset for getSummary aggregation + shared classify/description helpers. */
 type SummaryTxRow = Pick<
   TransactionRow,
-  'purpose' | 'unit' | 'cash_in' | 'cash_out' | 'unit_code' | 'details'
+  | 'id'
+  | 'branch_id'
+  | 'purpose'
+  | 'unit'
+  | 'cash_in'
+  | 'cash_out'
+  | 'unit_code'
+  | 'details'
+  | 'created_at'
 > & { voided_at?: string | null };
 
 interface DailyBalanceRow {
@@ -56,14 +65,6 @@ interface DailyBalanceRow {
   starting_balance: number | string | null;
   ending_balance: number | string | null;
   updated_at?: string | null;
-}
-
-interface BranchRow {
-  id: string;
-  name: string;
-  branch_code: string | null;
-  status: string | null;
-  opening_cash_balance?: Prisma.Decimal | number | string | null;
 }
 
 export type LedgerEntryType =
@@ -102,7 +103,20 @@ export interface EmployeeDailyOpeningStatus {
   status: 'none' | 'pending' | 'completed';
   checklistStep: DailyOpeningChecklistStep;
   startingCash?: number;
+  /** Book expected count for CASH_ON_HAND (matches submit validation). */
+  expectedStartingCash?: number;
 }
+
+/** Shape of Supabase `daily_opening` rows used in checklist APIs. */
+type DailyOpeningSelectionRow = {
+  status?: string | null;
+  starting_cash?: Prisma.Decimal | number | string | null;
+  employee_id?: string | null;
+};
+
+type DailyOpeningWithIdRow = DailyOpeningSelectionRow & {
+  id?: string | null;
+};
 
 export interface BranchFinanceSummary {
   branchId: string;
@@ -253,9 +267,9 @@ export class BranchFinanceService {
 
     const client = this.supabaseService.getClient();
 
-    const { data: row, error } = await client
+    const { data: rawOpening, error } = await client
       .from('daily_opening')
-      .select('status, starting_cash')
+      .select('status, starting_cash, employee_id')
       .eq('branch_id', branchId)
       .eq('opening_date', openingDate)
       .maybeSingle();
@@ -263,6 +277,8 @@ export class BranchFinanceService {
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
+
+    const row = rawOpening as DailyOpeningSelectionRow | null;
 
     if (row?.status === 'completed') {
       return {
@@ -274,18 +290,16 @@ export class BranchFinanceService {
     }
 
     if (row?.status === 'pending') {
-      const nowIso = new Date().toISOString();
-      const { error: migrateErr } = await client
-        .from('daily_opening')
-        .update({
-          status: 'completed',
-          updated_at: nowIso,
-          last_updated_by_user_id: user.id ?? null,
-        })
-        .eq('branch_id', branchId)
-        .eq('opening_date', openingDate);
-
-      if (!migrateErr) {
+      const session = await this.fetchTodayBranchDaySession(branchId);
+      const openerFromRow =
+        typeof row.employee_id === 'string' ? row.employee_id : null;
+      const starterId = openerFromRow ?? session?.started_by_user_id ?? null;
+      if (
+        starterId == null ||
+        user.id === null ||
+        user.id === undefined ||
+        user.id !== starterId
+      ) {
         return {
           openingDate,
           status: 'completed',
@@ -293,7 +307,6 @@ export class BranchFinanceService {
           startingCash: this.toMoney(row.starting_cash),
         };
       }
-
       return {
         openingDate,
         status: 'pending',
@@ -302,11 +315,61 @@ export class BranchFinanceService {
       };
     }
 
-    if (await this.branchDaySession.requiresStartingBalance(branchId)) {
+    const needsOpeningBalance =
+      await this.branchDaySession.requiresStartingBalance(branchId);
+    if (needsOpeningBalance) {
+      const expectedStartingCash =
+        await this.financeDailyBalance.suggestedStartingCashForBusinessDate(
+          branchId,
+          openingDate,
+        );
       return {
         openingDate,
         status: 'none',
         checklistStep: 'CASH_ON_HAND',
+        expectedStartingCash,
+      };
+    }
+
+    const sessionOpen = await this.fetchTodayBranchDaySession(branchId);
+
+    /** Open session missing daily_opening (legacy / skipped upsert): heal checklist row once. */
+    if (sessionOpen && !sessionOpen.is_closed && row == null) {
+      const startingCashNum = this.toMoney(sessionOpen.starting_balance);
+      const starterId = sessionOpen.started_by_user_id ?? null;
+
+      if (starterId == null) {
+        this.logger.warn(
+          `[DailyOpeningStatus] Open session missing started_by_user_id branch=${branchId} date=${openingDate}`,
+        );
+        return {
+          openingDate,
+          status: 'completed',
+          checklistStep: 'COMPLETED',
+          startingCash: startingCashNum,
+        };
+      }
+
+      await this.upsertBranchDailyOpeningPending({
+        client,
+        actorUserId: starterId,
+        branchId,
+        openingDate,
+        startingCash: startingCashNum,
+      });
+      if (user.id !== null && user.id !== undefined && user.id === starterId) {
+        return {
+          openingDate,
+          status: 'pending',
+          checklistStep: 'INVENTORY_AUDIT',
+          startingCash: startingCashNum,
+        };
+      }
+      return {
+        openingDate,
+        status: 'completed',
+        checklistStep: 'COMPLETED',
+        startingCash: startingCashNum,
       };
     }
 
@@ -357,7 +420,8 @@ export class BranchFinanceService {
   }
 
   /**
-   * Marks branch inventory step complete for today's Manila session (any employee may submit).
+   * Marks branch inventory step complete for today's Manila session.
+   * Only the employee who submitted starting cash (`employee_id`) may submit this step.
    */
   async completeEmployeeDailyOpening(user: AuthenticatedUserProfile) {
     if (user.role !== Role.EMPLOYEE) {
@@ -369,9 +433,9 @@ export class BranchFinanceService {
     const client = this.supabaseService.getClient();
     const nowIso = new Date().toISOString();
 
-    const { data: existing, error: selErr } = await client
+    const { data: rawExisting, error: selErr } = await client
       .from('daily_opening')
-      .select('id, status')
+      .select('id, status, employee_id')
       .eq('branch_id', branchId)
       .eq('opening_date', openingDate)
       .maybeSingle();
@@ -379,6 +443,8 @@ export class BranchFinanceService {
     if (selErr) {
       throw new InternalServerErrorException(selErr.message);
     }
+
+    const existing = rawExisting as DailyOpeningWithIdRow | null;
 
     if (!existing) {
       throw new BadRequestException(
@@ -388,6 +454,18 @@ export class BranchFinanceService {
 
     if (existing.status === 'completed') {
       return { success: true, alreadyCompleted: true as const };
+    }
+
+    if (existing.status === 'pending') {
+      const session = await this.fetchTodayBranchDaySession(branchId);
+      const openerFromRow =
+        typeof existing.employee_id === 'string' ? existing.employee_id : null;
+      const starterId = openerFromRow ?? session?.started_by_user_id ?? null;
+      if (starterId != null && user.id != null && user.id !== starterId) {
+        throw new ForbiddenException(
+          'Only the employee who confirmed starting cash may complete inventory for this branch day.',
+        );
+      }
     }
 
     const { error: updErr } = await client
@@ -412,6 +490,24 @@ export class BranchFinanceService {
     });
 
     return { success: true };
+  }
+
+  private fetchTodayBranchDaySession(branchId: string) {
+    const openingDate = getPhCalendarDateString();
+    const todayDate = new Date(`${openingDate}T00:00:00.000Z`);
+    return this.prisma.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: todayDate,
+        },
+      },
+      select: {
+        started_by_user_id: true,
+        starting_balance: true,
+        is_closed: true,
+      },
+    });
   }
 
   /** Upsert pending branch opening after starting cash is confirmed (single session per branch/day). */
@@ -614,17 +710,42 @@ export class BranchFinanceService {
     }
 
     const todaySessionDateUtc = new Date(`${today}T00:00:00.000Z`);
+    const [closedSessionsToday, openSessionsToday] = await Promise.all([
+      this.prisma.branch_day_sessions.findMany({
+        where: {
+          branch_id: { in: branchIds },
+          session_date: todaySessionDateUtc,
+          is_closed: true,
+        },
+        select: { branch_id: true },
+      }),
+      this.prisma.branch_day_sessions.findMany({
+        where: {
+          branch_id: { in: branchIds },
+          session_date: todaySessionDateUtc,
+          is_closed: false,
+        },
+        select: {
+          branch_id: true,
+          starting_balance: true,
+          sealed_transaction_ids: true,
+        },
+      }),
+    ]);
     const branchesWithDayClosedToday = new Set(
-      (
-        await this.prisma.branch_day_sessions.findMany({
-          where: {
-            branch_id: { in: branchIds },
-            session_date: todaySessionDateUtc,
-            is_closed: true,
-          },
-          select: { branch_id: true },
-        })
-      ).map((r) => r.branch_id),
+      closedSessionsToday.map((r) => r.branch_id),
+    );
+    const openSessionStartingByBranch = new Map(
+      openSessionsToday.map((r) => [
+        r.branch_id,
+        this.toMoney(r.starting_balance),
+      ]),
+    );
+    const sealedTxIdsByBranch = new Map(
+      openSessionsToday.map((r) => [
+        r.branch_id,
+        new Set(r.sealed_transaction_ids ?? []),
+      ]),
     );
 
     const todayBalancesQuery = client
@@ -638,7 +759,7 @@ export class BranchFinanceService {
     const todayTxQuery = client
       .from('transactions')
       .select(
-        'branch_id, purpose, unit, unit_code, details, cash_in, cash_out, pawn_amount, storage_fee, voided_at',
+        'id, branch_id, purpose, unit, unit_code, details, cash_in, cash_out, pawn_amount, storage_fee, voided_at, created_at',
       )
       .in('branch_id', branchIds)
       .eq('transaction_date', today)
@@ -731,6 +852,17 @@ export class BranchFinanceService {
       }
     }
 
+    const operationalCutoffByBranch = new Map<string, number>();
+    await Promise.all(
+      branchIds.map(async (branchId) => {
+        const ms = await this.financeDailyBalance.resolveOperationalCutoffMs(
+          branchId,
+          todaySessionDateUtc,
+        );
+        operationalCutoffByBranch.set(branchId, ms);
+      }),
+    );
+
     const summaries: BranchFinanceSummary[] = await Promise.all(
       branches.map(async (branch) => {
         const openingFallback = this.toMoney(branch.opening_cash_balance);
@@ -740,12 +872,15 @@ export class BranchFinanceService {
           priorRow: priorByBranch.get(branch.id),
           openingCashFallback: openingFallback,
         });
-        const branchTx = (todayTxResult.data ?? []).filter(
-          (t: any) => t.branch_id === branch.id,
+        const branchTx = ((todayTxResult.data ?? []) as SummaryTxRow[]).filter(
+          (t) => t.branch_id === branch.id,
         );
-        const branchFundReqs = (fundReqResult.data ?? []).filter(
-          (f: any) => f.branch_id === branch.id,
-        );
+        const branchFundReqs = (
+          (fundReqResult.data ?? []) as {
+            branch_id?: string | null;
+            status?: string | null;
+          }[]
+        ).filter((f) => f.branch_id === branch.id);
 
         const breakdown = {
           pawnOut: 0,
@@ -762,10 +897,19 @@ export class BranchFinanceService {
         let todayCashIn = 0;
         let todayCashOut = 0;
 
+        const cutoffMs = operationalCutoffByBranch.get(branch.id) ?? 0;
+        const sealedIds = sealedTxIdsByBranch.get(branch.id);
+
         const operationalTx = branchTx.filter((tx: SummaryTxRow) => {
           if (tx.voided_at != null && tx.voided_at !== '') return false;
           const p = (tx.purpose ?? '').toLowerCase().trim();
-          return p !== 'start' && p !== 'end';
+          if (p === 'start' || p === 'end') return false;
+          if (sealedIds?.size && tx.id && sealedIds.has(tx.id)) return false;
+          if (cutoffMs > 0 && tx.created_at) {
+            const t = new Date(String(tx.created_at)).getTime();
+            if (!Number.isFinite(t) || t < cutoffMs) return false;
+          }
+          return true;
         });
 
         const operationalForTotals =
@@ -808,23 +952,23 @@ export class BranchFinanceService {
           }
         }
 
-        breakdown.startBalance = snap.startingBalance;
-
-        // Book ending from ledger movement (today in − today out), not only daily_balances.ending_balance
-        // which can lag if balance rows were not updated for every posting.
-        const ledgerEnding = Number(
-          (snap.startingBalance + todayCashIn - todayCashOut).toFixed(2),
-        );
-
         const dayClosedToday = branchesWithDayClosedToday.has(branch.id);
         const todayDbRow = todayByBranch.get(branch.id);
-        let summaryStartingBalance = snap.startingBalance;
-        let summaryCurrentBalance = ledgerEnding;
+        const sessionStartToday = openSessionStartingByBranch.get(branch.id);
+        let summaryStartingBalance =
+          sessionStartToday != null && !dayClosedToday
+            ? sessionStartToday
+            : snap.startingBalance;
+        let summaryCurrentBalance = Number(
+          (summaryStartingBalance + todayCashIn - todayCashOut).toFixed(2),
+        );
         if (dayClosedToday && todayDbRow) {
           const atRest = this.toMoney(todayDbRow.ending_balance);
           summaryStartingBalance = atRest;
           summaryCurrentBalance = atRest;
         }
+
+        breakdown.startBalance = summaryStartingBalance;
 
         const fundReqSummary = { pending: 0, approved: 0, transferred: 0 };
         for (const fr of branchFundReqs) {
@@ -957,6 +1101,15 @@ export class BranchFinanceService {
       actorUserId: user.id ?? null,
       actorRole: user.role,
       amount: confirmedAmount,
+    });
+
+    const client = this.supabaseService.getClient();
+    await this.upsertBranchDailyOpeningPending({
+      client,
+      actorUserId: user.id ?? null,
+      branchId,
+      openingDate: result.businessDate,
+      startingCash: confirmedAmount,
     });
 
     await this.financeAudit.log({

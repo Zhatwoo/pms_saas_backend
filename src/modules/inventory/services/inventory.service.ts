@@ -303,11 +303,21 @@ export class InventoryService {
     return data;
   }
 
+  private decryptUserDisplayName(value: string | null | undefined) {
+    let current = value ?? null;
+    for (let i = 0; i < 5 && this.encryption.isEncrypted(current); i += 1) {
+      const next = this.encryption.decrypt(current as string);
+      if (next === current) break;
+      current = next;
+    }
+    return current;
+  }
+
   async findOnePawned(user: UserWithBranch, id: string) {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('pawned_items')
-      .select('*, item_renewals(*), customer:customers(*)')
+      .select('*, item_renewals(*), customer:customers(*), transactions(*, users(id, full_name))')
       .eq('id', id)
       .single();
 
@@ -323,6 +333,10 @@ export class InventoryService {
       this.resolveStorageUrl(data.id_photo),
       this.resolveStorageUrl(data.id_back_photo),
     ]);
+
+    const pawnTx = (data.transactions || []).find((t: any) => t.purpose === 'Pawn');
+    const createdByUser = pawnTx?.users ? this.encryption.decryptUsersJoin(pawnTx.users) : null;
+    const processorName = createdByUser ? this.decryptUserDisplayName(createdByUser.full_name) : null;
 
     return {
       ...data,
@@ -340,6 +354,7 @@ export class InventoryService {
         date: r.renewal_date,
         amount: r.amount_paid,
       })),
+      created_by_user: processorName ? { full_name: processorName } : null,
     };
   }
 

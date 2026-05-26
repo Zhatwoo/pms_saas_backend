@@ -14,6 +14,7 @@ import { SupabaseService } from '../../../infrastructure/supabase/supabase.servi
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { BranchDaySessionService } from '../../branch-finance/services/branch-day-session.service';
+import { DevicesService } from '../../devices/services/devices.service';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 
@@ -26,6 +27,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
     private readonly branchDaySession: BranchDaySessionService,
+    private readonly devicesService: DevicesService,
   ) {}
 
   private isActiveBranchStatus(status: string | null | undefined): boolean {
@@ -117,9 +119,9 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, clientIp?: string) {
     try {
-      return await this.loginInternal(loginDto);
+      return await this.loginInternal(loginDto, clientIp);
     } catch (err) {
       if (err instanceof HttpException) {
         throw err;
@@ -133,7 +135,7 @@ export class AuthService {
     }
   }
 
-  private async loginInternal(loginDto: LoginDto) {
+  private async loginInternal(loginDto: LoginDto, clientIp?: string) {
     const authClient = this.supabaseService.getAuthClient();
 
     const { data, error } = await authClient.auth.signInWithPassword({
@@ -142,6 +144,12 @@ export class AuthService {
     });
 
     if (error) {
+      await this.devicesService.writeLoginLog({
+        deviceFingerprint: loginDto.deviceFingerprint,
+        ipAddress: clientIp,
+        loginStatus: 'FAILED',
+        failureReason: 'INVALID_CREDENTIALS',
+      });
       throw new UnauthorizedException(error.message || 'Invalid credentials');
     }
 
@@ -155,11 +163,72 @@ export class AuthService {
       data.user.id,
     );
 
+    // ── Branch IP restriction ─────────────────────────────────────────────────
+    if (user.branchId && user.role !== Role.SUPER_ADMIN && clientIp) {
+      const branch = await this.prisma.branches.findUnique({
+        where: { id: user.branchId },
+        select: { allowed_ip: true },
+      });
+
+      if (branch?.allowed_ip) {
+        const allowedIPs = branch.allowed_ip
+          .split(',')
+          .map((ip) => ip.trim())
+          .filter(Boolean);
+
+        if (allowedIPs.length > 0 && !allowedIPs.includes(clientIp)) {
+          await this.devicesService.writeLoginLog({
+            employeeId: user.id,
+            deviceFingerprint: loginDto.deviceFingerprint,
+            ipAddress: clientIp,
+            loginStatus: 'BLOCKED',
+            failureReason: 'OUTSIDE_BRANCH_NETWORK',
+          });
+          throw new UnauthorizedException(
+            'Outside Branch Network. Login is only allowed from the branch WiFi.',
+          );
+        }
+      }
+    }
+
+    // ── Device fingerprint restriction ────────────────────────────────────────
+    if (loginDto.deviceFingerprint && user.role !== Role.SUPER_ADMIN) {
+      const deviceCheck = await this.devicesService.validateAndUpdateLastLogin(
+        loginDto.deviceFingerprint,
+        user.id,
+      );
+
+      if (!deviceCheck.authorized) {
+        await this.devicesService.writeLoginLog({
+          employeeId: user.id,
+          deviceFingerprint: loginDto.deviceFingerprint,
+          ipAddress: clientIp,
+          loginStatus: 'BLOCKED',
+          failureReason: deviceCheck.reason,
+        });
+
+        const messages: Record<string, string> = {
+          UNKNOWN_DEVICE: 'Unauthorized Device. Please request authorization from your admin.',
+          DEVICE_BLOCKED: 'This device has been blocked. Contact your admin.',
+          DEVICE_PENDING: 'Device authorization is pending admin approval.',
+        };
+
+        throw new UnauthorizedException(
+          messages[deviceCheck.reason ?? ''] ?? 'Device not authorized.',
+        );
+      }
+    }
+
+    // ── Successful login log ──────────────────────────────────────────────────
+    await this.devicesService.writeLoginLog({
+      employeeId: user.id,
+      deviceFingerprint: loginDto.deviceFingerprint,
+      ipAddress: clientIp,
+      loginStatus: 'SUCCESS',
+    });
+
     let requiresStartingBalance = false;
-    if (
-      user.branchId &&
-      user.role !== Role.SUPER_ADMIN
-    ) {
+    if (user.branchId && user.role !== Role.SUPER_ADMIN) {
       requiresStartingBalance =
         await this.branchDaySession.requiresStartingBalance(user.branchId);
     }

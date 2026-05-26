@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { addManilaCalendarDays } from '../../../common/utils/branch-calendar-date.util';
+import { TransactionPurpose } from '../../../common/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import {
   isInboundBranchCashFundTransferRow,
+  isJournalPurposeStartEnd,
   operationalNetFromRows,
 } from '../utils/finance-ledger.util';
 import { BranchFinanceSessionGateService } from './branch-finance-session-gate.service';
@@ -91,59 +93,24 @@ export class FinanceDailyBalanceService {
         FOR UPDATE
       `;
 
+    const { baseline, carriedForCreate } = await this.resolveCurrentBookBalanceInTx(
+      client,
+      branchId,
+      businessDateStr,
+    );
+
     const current = await client.daily_balances.findUnique({
       where: {
         branch_id_record_date: { branch_id: branchId, record_date: date },
       },
-      select: { id: true, ending_balance: true },
+      select: { id: true },
     });
 
-    if (current) {
-      const baseline = this.dec(current.ending_balance);
-      return {
-        baseline,
-        next: Number((baseline + delta).toFixed(2)),
-        existingRow: { id: current.id },
-        carriedForCreate: baseline,
-      };
-    }
-
-    const prior = await client.daily_balances.findFirst({
-      where: { branch_id: branchId, record_date: { lt: date } },
-      orderBy: { record_date: 'desc' },
-      select: { ending_balance: true },
-    });
-    const branch = await client.branches.findUnique({
-      where: { id: branchId },
-      select: { opening_cash_balance: true },
-    });
-
-    let carried: number;
-    if (prior) {
-      carried = this.dec(prior.ending_balance);
-    } else {
-      const sessionRow = await client.branch_day_sessions.findUnique({
-        where: {
-          branch_id_session_date: {
-            branch_id: branchId,
-            session_date: date,
-          },
-        },
-        select: { starting_balance: true },
-      });
-      const sessionStart =
-        sessionRow?.starting_balance != null
-          ? this.dec(sessionRow.starting_balance)
-          : null;
-      carried = sessionStart ?? this.dec(branch?.opening_cash_balance);
-    }
-
-    const baseline = carried;
     return {
       baseline,
       next: Number((baseline + delta).toFixed(2)),
-      existingRow: null,
-      carriedForCreate: carried,
+      existingRow: current ? { id: current.id } : null,
+      carriedForCreate,
     };
   }
 
@@ -290,14 +257,164 @@ export class FinanceDailyBalanceService {
     return Number.isFinite(t) ? t : 0;
   }
 
+  private markerTimestampMs(marker: {
+    updated_at?: Date | string | null;
+    created_at?: Date | string | null;
+  }): number {
+    return Math.max(
+      this.txCreatedAtMs(marker.updated_at),
+      this.txCreatedAtMs(marker.created_at),
+    );
+  }
+
+  /**
+   * Earliest instant for operational cash in the **current** open shift.
+   * max(operational_cutoff_at, opened_at, latest Start journal, latest End journal).
+   */
+  async resolveOperationalCutoffMs(
+    branchId: string,
+    sessionDate: Date,
+    client: PrismaService | Tx = this.db,
+  ): Promise<number> {
+    const daySession = await client.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: sessionDate,
+        },
+      },
+      select: {
+        opened_at: true,
+        operational_cutoff_at: true,
+      },
+    });
+
+    let cutoffMs = 0;
+    if (daySession?.operational_cutoff_at) {
+      cutoffMs = daySession.operational_cutoff_at.getTime();
+    }
+    if (daySession?.opened_at) {
+      cutoffMs = Math.max(cutoffMs, daySession.opened_at.getTime());
+    }
+
+    const journalWhere = {
+      branch_id: branchId,
+      transaction_date: sessionDate,
+      voided_at: null,
+    } as const;
+
+    const [lastStartMarker, lastEndMarker] = await Promise.all([
+      client.transactions.findFirst({
+        where: { ...journalWhere, purpose: TransactionPurpose.START },
+        orderBy: { updated_at: 'desc' },
+        select: { updated_at: true, created_at: true },
+      }),
+      client.transactions.findFirst({
+        where: { ...journalWhere, purpose: TransactionPurpose.END },
+        orderBy: { updated_at: 'desc' },
+        select: { updated_at: true, created_at: true },
+      }),
+    ]);
+
+    for (const marker of [lastStartMarker, lastEndMarker]) {
+      if (!marker) continue;
+      cutoffMs = Math.max(cutoffMs, this.markerTimestampMs(marker));
+    }
+
+    return cutoffMs;
+  }
+
+  /**
+   * Book balance for applyNetChange when today's branch_day_sessions row is open:
+   * confirmed session start + operational net since {@link resolveOperationalCutoffMs}
+   * (never a stale daily_balances.ending_balance from a prior shift).
+   */
+  private async resolveCurrentBookBalanceInTx(
+    client: Tx,
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<{ baseline: number; carriedForCreate: number }> {
+    const date = this.toRecordDate(businessDateStr);
+    const session = await client.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: date,
+        },
+      },
+      select: { starting_balance: true, is_closed: true },
+    });
+
+    if (session && !session.is_closed && session.starting_balance != null) {
+      const start = this.dec(session.starting_balance);
+      const net = await this.sumOperationalNetCashInTx(
+        client,
+        branchId,
+        businessDateStr,
+      );
+      return {
+        baseline: Number((start + net).toFixed(2)),
+        carriedForCreate: start,
+      };
+    }
+
+    const current = await client.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: { branch_id: branchId, record_date: date },
+      },
+      select: { ending_balance: true, starting_balance: true },
+    });
+
+    if (current) {
+      const ending = this.dec(current.ending_balance);
+      const starting = this.dec(current.starting_balance);
+      return {
+        baseline: ending,
+        carriedForCreate: starting > 0 ? starting : ending,
+      };
+    }
+
+    const prior = await client.daily_balances.findFirst({
+      where: { branch_id: branchId, record_date: { lt: date } },
+      orderBy: { record_date: 'desc' },
+      select: { ending_balance: true },
+    });
+    const branch = await client.branches.findUnique({
+      where: { id: branchId },
+      select: { opening_cash_balance: true },
+    });
+
+    const carried = prior
+      ? this.dec(prior.ending_balance)
+      : this.dec(branch?.opening_cash_balance);
+    return { baseline: carried, carriedForCreate: carried };
+  }
+
+  async resolveOperationalCutoffIso(
+    branchId: string,
+    businessDateStr: string,
+    client?: PrismaService | Tx,
+  ): Promise<string | null> {
+    const ms = await this.resolveOperationalCutoffMs(
+      branchId,
+      this.toRecordDate(businessDateStr),
+      client ?? this.db,
+    );
+    return ms > 0 ? new Date(ms).toISOString() : null;
+  }
+
   /**
    * Inbound fund-transfer cash posted before the branch day is "opened" (starting balance submitted)
    * is already inside the employee's physical starting count — do not add it again in operational net.
-   * When persisting starting balance, the session row does not exist yet: use forStartingPersist to drop
-   * all same-day inbound fund-transfer lines for that net snapshot.
+   *
+   * Rows before {@link resolveOperationalCutoffMs} are excluded (prior employee shift same Manila day).
+   *
+   * When persisting starting balance (`forStartingPersist`), operational net is always zero: the
+   * confirmed physical count already includes all cash on hand; same-day ops accrue only after open.
    */
   private async finalizeRowsForOperationalNet<
     T extends {
+      id?: string;
       branch_id?: string | null;
       purpose?: string | null;
       unit?: string | null;
@@ -314,10 +431,17 @@ export class FinanceDailyBalanceService {
     client: PrismaService | Tx,
     opts?: { forStartingPersist?: boolean },
   ): Promise<T[]> {
-    let out = await this.excludeInboundFundTransfersAwaitingReceiptRows(rows);
+    const out = await this.excludeInboundFundTransfersAwaitingReceiptRows(rows);
     if (opts?.forStartingPersist) {
-      return out.filter((r) => !isInboundBranchCashFundTransferRow(r));
+      return [];
     }
+
+    const cutoffMs = await this.resolveOperationalCutoffMs(
+      branchId,
+      sessionDate,
+      client,
+    );
+
     const daySession = await client.branch_day_sessions.findUnique({
       where: {
         branch_id_session_date: {
@@ -325,18 +449,44 @@ export class FinanceDailyBalanceService {
           session_date: sessionDate,
         },
       },
-      select: { opened_at: true },
+      select: { sealed_transaction_ids: true },
     });
-    if (!daySession?.opened_at) {
-      return out;
-    }
-    const openMs = daySession.opened_at.getTime();
+    const sealed = new Set(daySession?.sealed_transaction_ids ?? []);
+
     return out.filter((r) => {
-      if (!isInboundBranchCashFundTransferRow(r)) {
+      if (r.id && sealed.has(r.id)) {
+        return false;
+      }
+      if (cutoffMs <= 0) {
         return true;
       }
-      return this.txCreatedAtMs(r.created_at) >= openMs;
+      return this.txCreatedAtMs(r.created_at) >= cutoffMs;
     });
+  }
+
+  /** Operational tx ids posted strictly before the shift cutoff (prior shift, same Manila day). */
+  async listOperationalTransactionIdsSealedBeforeCutoffInTx(
+    client: Tx,
+    branchId: string,
+    sessionDate: Date,
+    cutoff: Date,
+  ): Promise<string[]> {
+    const cutoffMs = cutoff.getTime();
+    const rows = await client.transactions.findMany({
+      where: {
+        branch_id: branchId,
+        transaction_date: sessionDate,
+        voided_at: null,
+      },
+      select: { id: true, purpose: true, created_at: true },
+    });
+    return rows
+      .filter(
+        (r) =>
+          !isJournalPurposeStartEnd(r.purpose) &&
+          this.txCreatedAtMs(r.created_at) < cutoffMs,
+      )
+      .map((r) => r.id);
   }
 
   /** Operational cash movement for a Manila business date (excludes Start/End markers and voided rows). */
@@ -349,6 +499,7 @@ export class FinanceDailyBalanceService {
     const rows = await this.db.transactions.findMany({
       where: { branch_id: branchId, transaction_date: date, voided_at: null },
       select: {
+        id: true,
         branch_id: true,
         purpose: true,
         unit: true,
@@ -365,7 +516,41 @@ export class FinanceDailyBalanceService {
       this.prisma,
       opts,
     );
-    return Number(operationalNetFromRows(filtered).toFixed(2));
+    const net = Number(operationalNetFromRows(filtered).toFixed(2));
+    this.logger.warn(
+      `[SumOpNet] branch=${branchId} date=${businessDateStr} allRows=${rows.length} filteredRows=${filtered.length} net=${net} filtered=${JSON.stringify(filtered.map((r) => ({ id: r.id, purpose: r.purpose, ci: r.cash_in, co: r.cash_out, created_at: r.created_at })))}`,
+    );
+    return net;
+  }
+
+  /**
+   * Operational net for a Manila business date counting EVERY non-void operational row —
+   * no session cutoff and no sealing applied (awaiting-receipt fund transfers are still
+   * excluded). Used for the suggested next-session starting balance so a confirmed inbound
+   * fund transfer received before the session opened is still reflected in the book; the
+   * session-cutoff net would otherwise drop it and the cash would be lost.
+   */
+  async fullDayOperationalNetCash(
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<number> {
+    const date = this.toRecordDate(businessDateStr);
+    const rows = await this.db.transactions.findMany({
+      where: { branch_id: branchId, transaction_date: date, voided_at: null },
+      select: {
+        purpose: true,
+        cash_in: true,
+        cash_out: true,
+      },
+    });
+    const net = Number(operationalNetFromRows(rows).toFixed(2));
+    this.logger.warn(
+      `[FullDayNet] branch=${branchId} date=${businessDateStr} rowCount=${rows.length} net=${net} rows=${JSON.stringify(rows)}`,
+    );
+    // No receipt-status filter here: the employee physically counts all cash on hand,
+    // including fund transfers that arrived before their session opened. The suggestion
+    // is informational; the employee's confirmed count is always authoritative.
+    return net;
   }
 
   /**
@@ -379,6 +564,15 @@ export class FinanceDailyBalanceService {
     businessDateStr: string,
   ): Promise<number> {
     const date = this.toRecordDate(businessDateStr);
+    const daySession = await this.db.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: date,
+        },
+      },
+      select: { starting_balance: true, is_closed: true },
+    });
     const row = await this.db.daily_balances.findUnique({
       where: {
         branch_id_record_date: { branch_id: branchId, record_date: date },
@@ -387,7 +581,9 @@ export class FinanceDailyBalanceService {
     });
     const net = await this.sumOperationalNetCash(branchId, businessDateStr);
     let start: number;
-    if (row) {
+    if (daySession?.starting_balance != null) {
+      start = Number(this.dec(daySession.starting_balance).toFixed(2));
+    } else if (row) {
       start = Number(this.dec(row.starting_balance).toFixed(2));
     } else {
       const b = await this.db.branches.findUnique({
@@ -423,20 +619,17 @@ export class FinanceDailyBalanceService {
       const sessionDateStr = lastClosed.session_date
         .toISOString()
         .slice(0, 10);
-      const recordDate = this.toRecordDate(sessionDateStr);
 
-      const bal = await this.db.daily_balances.findUnique({
-        where: {
-          branch_id_record_date: {
-            branch_id: branchId,
-            record_date: recordDate,
-          },
-        },
-        select: { ending_balance: true },
-      });
-      if (bal?.ending_balance != null) {
+      // If the closed session is today (same-day multi-shift), use priorDayEnding + fullDayNet
+      // so the suggestion is non-compounding and counts all today's transactions exactly once.
+      if (sessionDateStr === businessDateStr) {
+        const priorStr = addManilaCalendarDays(businessDateStr, -1);
+        const priorDayEnding = Number(
+          (await this.ledgerBookEndingForBusinessDate(branchId, priorStr)).toFixed(2),
+        );
+        const fullNet = await this.fullDayOperationalNetCash(branchId, businessDateStr);
         return {
-          amount: Number(this.dec(bal.ending_balance).toFixed(2)),
+          amount: Math.max(0, Number((priorDayEnding + fullNet).toFixed(2))),
           closedSessionRecordDate: sessionDateStr,
         };
       }
@@ -449,6 +642,7 @@ export class FinanceDailyBalanceService {
           )
         ).toFixed(2),
       );
+
       return {
         amount: ledgerOnCloseDay,
         closedSessionRecordDate: sessionDateStr,
@@ -503,6 +697,7 @@ export class FinanceDailyBalanceService {
     const rows = await client.transactions.findMany({
       where: { branch_id: branchId, transaction_date: date, voided_at: null },
       select: {
+        id: true,
         branch_id: true,
         purpose: true,
         unit: true,
@@ -520,6 +715,95 @@ export class FinanceDailyBalanceService {
       opts,
     );
     return Number(operationalNetFromRows(filtered).toFixed(2));
+  }
+
+  /**
+   * Align `daily_balances` with open `branch_day_sessions` book (confirmed start + net since cutoff).
+   * Repairs stale starting/ending left from a prior shift on the same Manila date.
+   */
+  async reconcileOpenSessionDailyBalance(
+    branchId: string,
+    businessDateStr: string,
+    existingClient?: Tx,
+  ): Promise<void> {
+    const run = async (client: Tx) => {
+      const date = this.toRecordDate(businessDateStr);
+      const session = await client.branch_day_sessions.findUnique({
+        where: {
+          branch_id_session_date: {
+            branch_id: branchId,
+            session_date: date,
+          },
+        },
+        select: {
+          id: true,
+          starting_balance: true,
+          is_closed: true,
+          operational_cutoff_at: true,
+          sealed_transaction_ids: true,
+        },
+      });
+      if (!session || session.is_closed || session.starting_balance == null) {
+        return;
+      }
+
+      const cutoffMs = await this.resolveOperationalCutoffMs(
+        branchId,
+        date,
+        client,
+      );
+      const cutoffDate = new Date(cutoffMs > 0 ? cutoffMs : Date.now());
+      const sealedIds =
+        await this.listOperationalTransactionIdsSealedBeforeCutoffInTx(
+          client,
+          branchId,
+          date,
+          cutoffDate,
+        );
+
+      await client.branch_day_sessions.update({
+        where: { id: session.id },
+        data: {
+          sealed_transaction_ids: sealedIds,
+          operational_cutoff_at: cutoffDate,
+          updated_at: new Date(),
+        },
+      });
+
+      const starting = this.dec(session.starting_balance);
+      const net = await this.sumOperationalNetCashInTx(
+        client,
+        branchId,
+        businessDateStr,
+      );
+      const ending = Number((starting + net).toFixed(2));
+
+      await client.daily_balances.upsert({
+        where: {
+          branch_id_record_date: {
+            branch_id: branchId,
+            record_date: date,
+          },
+        },
+        create: {
+          branch_id: branchId,
+          record_date: date,
+          starting_balance: starting,
+          ending_balance: ending,
+        },
+        update: {
+          starting_balance: starting,
+          ending_balance: ending,
+          updated_at: new Date(),
+        },
+      });
+    };
+
+    if (existingClient) {
+      await run(existingClient);
+      return;
+    }
+    await this.db.$transaction(run);
   }
 
   /**
@@ -645,22 +929,10 @@ export class FinanceDailyBalanceService {
         select: { starting_balance: true },
       });
 
-      const bizSession = await client.branch_business_sessions.findUnique({
-        where: {
-          branch_id_business_date: {
-            branch_id: branchId,
-            business_date: date,
-          },
-        },
-        select: { starting_balance: true },
-      });
-
       const sessionConfirmedStart =
         daySession?.starting_balance != null
           ? this.dec(daySession.starting_balance)
-          : bizSession?.starting_balance != null
-            ? this.dec(bizSession.starting_balance)
-            : null;
+          : null;
 
       if (sessionConfirmedStart != null) {
         starting = sessionConfirmedStart;
@@ -680,14 +952,18 @@ export class FinanceDailyBalanceService {
           ? this.dec(prior.ending_balance)
           : this.dec(branch?.opening_cash_balance);
       }
-      ending = Number((starting + net).toFixed(2));
+      if (conf > 0) {
+        ending = conf;
+      } else {
+        ending = Number((starting + net).toFixed(2));
+      }
     }
 
     // PostgreSQL `daily_balances_ending_balance_check` (and similar) — persisted row must not violate DB.
     if (ending < 0) {
       ending = 0;
     }
-    if (ending < starting) {
+    if (mode !== 'ending' && ending < starting) {
       ending = starting;
     }
 

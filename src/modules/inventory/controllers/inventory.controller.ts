@@ -175,7 +175,7 @@ export class InventoryController {
     );
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Roles(Role.SUPER_ADMIN)
   @Post('pawned/:id/qr-replacement-request')
   requestQrReplacement(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -372,7 +372,7 @@ export class InventoryController {
   }
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
-  @Put('for-sale/:id')
+  @Patch('for-sale/:id')
   updateForSale(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,

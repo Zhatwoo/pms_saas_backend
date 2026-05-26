@@ -15,7 +15,7 @@ export class ShopSettingsController {
   }
 
   @Post(':key')
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   setSetting(@Param('key') key: string, @Body() value: any) {
     return this.settingsService.setSetting(key, value);
   }
