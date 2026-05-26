@@ -31,6 +31,7 @@ import { IncidentTicketsModule } from './modules/incident-tickets/incident-ticke
 import { RewardsModule } from './modules/rewards/rewards.module';
 import { QRReplacementRequestsModule } from './modules/qr-replacement-requests/qr-replacement-requests.module';
 import { DevicesModule } from './modules/devices/devices.module';
+import { CategoriesModule } from './modules/categories/categories.module';
 
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 import { EncryptionModule } from './common/encryption/encryption.module';
@@ -88,6 +89,7 @@ import { CacheModuleConfig } from './infrastructure/cache';
     RewardsModule,
     QRReplacementRequestsModule,
     DevicesModule,
+    CategoriesModule,
   ],
   providers: [
     {
