@@ -272,6 +272,51 @@ export class TransactionsService {
     }
   }
 
+  private async resolveLinkedPawnedItem(
+    tx: any,
+    branchId: string | null,
+    dto: Record<string, unknown>,
+  ) {
+    const relatedPawnedItemId = String(dto.related_pawned_item_id ?? '').trim();
+    const unitCode = String(dto.unit_code ?? '').trim();
+
+    if (relatedPawnedItemId) {
+      return tx.pawned_items.findFirst({
+        where: {
+          id: relatedPawnedItemId,
+          ...(branchId ? { branch_id: branchId } : {}),
+        },
+        select: {
+          id: true,
+          item_id: true,
+          item_name: true,
+          amount: true,
+          branch_id: true,
+          status: true,
+        },
+      });
+    }
+
+    if (unitCode) {
+      return tx.pawned_items.findFirst({
+        where: {
+          item_id: { equals: unitCode, mode: 'insensitive' },
+          ...(branchId ? { branch_id: branchId } : {}),
+        },
+        select: {
+          id: true,
+          item_id: true,
+          item_name: true,
+          amount: true,
+          branch_id: true,
+          status: true,
+        },
+      });
+    }
+
+    return null;
+  }
+
   private mapTransaction(row: any) {
     const pawnedItemsDecrypted = row.pawned_items
       ? {
@@ -461,10 +506,67 @@ export class TransactionsService {
     };
 
     const data = await this.prisma.$transaction(async (tx) => {
+      let linkedPawnedItem: {
+        id: string;
+        item_id: string;
+        item_name: string;
+        amount: number;
+        branch_id: string;
+        status: string;
+      } | null = null;
+
+      if (purpose === 'Buy Back' || purpose === 'Redeem') {
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(tx, branchId, dtoClean);
+
+        if (!linkedPawnedItem) {
+          throw new BadRequestException(
+            `${purpose} requires a valid pawned item reference.`,
+          );
+        }
+
+        if (linkedPawnedItem.status === 'Redeemed') {
+          throw new BadRequestException('Pawned item is already redeemed.');
+        }
+
+        const principal = Number(linkedPawnedItem.amount ?? amounts.pawnAmount ?? 0);
+        if (!Number.isFinite(principal) || principal <= 0) {
+          throw new BadRequestException(
+            'Buy back principal amount is invalid for this pawned item.',
+          );
+        }
+
+        amounts.pawnAmount = Number(principal.toFixed(2));
+        amounts.cashIn = Number(
+          (amounts.pawnAmount + amounts.storageFee + amounts.returnAmount).toFixed(
+            2,
+          ),
+        );
+
+        payload.related_pawned_item_id = linkedPawnedItem.id;
+        payload.unit_code = linkedPawnedItem.item_id;
+        payload.unit = linkedPawnedItem.item_name;
+        payload.pawn_amount = amounts.pawnAmount;
+        payload.cash_in = amounts.cashIn;
+      }
+
       const created = await tx.transactions.create({
         data: payload,
         select: TX_SELECT,
       });
+
+      if (linkedPawnedItem) {
+        await tx.pawned_items.update({
+          where: { id: linkedPawnedItem.id },
+          data: {
+            status: 'Redeemed',
+            updated_at: new Date(),
+          },
+        });
+
+        await tx.sale_items.deleteMany({
+          where: { original_pawn_id: linkedPawnedItem.id },
+        });
+      }
 
       const netChange = amounts.cashIn - amounts.cashOut;
       // Single balance writer: same Manila business date as transaction_date above.
