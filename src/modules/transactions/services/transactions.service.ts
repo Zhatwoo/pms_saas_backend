@@ -609,6 +609,14 @@ export class TransactionsService {
           : `Transaction Alert: ${purpose.toLowerCase()}`,
         category: 'Transactions',
         branch_id: branchId ?? undefined,
+        event_key: `transaction:${data.id}`,
+        entity_type:
+          purpose === 'Buy Back'
+            ? 'redemption'
+            : purpose === 'Renew'
+              ? 'payment'
+              : 'transaction',
+        entity_id: transactionNo,
       });
     } catch (e) {
       console.warn('[TransactionsService] Failed to create notification', e);

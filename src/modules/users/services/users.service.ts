@@ -14,6 +14,7 @@ import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 
 type UserRow = Prisma.usersGetPayload<{
   select: typeof UsersService.userSelect;
@@ -41,6 +42,7 @@ export class UsersService {
     private readonly supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private isUuidParam(value: string): boolean {
@@ -203,6 +205,43 @@ export class UsersService {
         },
         select: UsersService.userSelect,
       });
+
+      await this.notificationsService.createForSuperadmins({
+        title: `New staff account created - ${fullName}`,
+        subtitle: branch
+          ? `System Alert: ${normalizedRole} assigned to ${branch.name}.`
+          : `System Alert: ${normalizedRole} account created.`,
+        category: 'Alerts',
+        event_key: `user-created:${row.id}`,
+        entity_type: 'user',
+        entity_id: row.id,
+      });
+
+      if (branch && normalizedRole === 'employee') {
+        const branchAdmins = await this.prisma.users.findMany({
+          where: {
+            branch_id: branch.id,
+            role: 'admin',
+            account_status: 'active',
+          },
+          select: { id: true },
+        });
+
+        await Promise.all(
+          branchAdmins.map((admin) =>
+            this.notificationsService.create({
+              title: `New employee account created - ${fullName}`,
+              subtitle: `System Alert: employee assigned to ${branch.name}.`,
+              category: 'Alerts',
+              user_id: admin.id,
+              branch_id: branch.id,
+              event_key: `user-created:${row.id}:admin:${admin.id}`,
+              entity_type: 'user',
+              entity_id: row.id,
+            }),
+          ),
+        );
+      }
 
       return this.mapToResponse({
         ...row,
