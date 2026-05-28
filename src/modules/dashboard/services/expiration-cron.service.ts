@@ -65,6 +65,9 @@ export class ExpirationCronService {
             subtitle: `Item ${item.item_name} (Ticket ${item.item_id}) ${statusText}.`,
             category: 'Alerts',
             branch_id: item.branch_id,
+            event_key: `expiration:${item.id}:${daysRemaining}`,
+            entity_type: 'pawn_item',
+            entity_id: item.item_id,
           });
 
           count++;

@@ -632,6 +632,9 @@ export class InventoryService {
         subtitle: `Transaction Alert: expired pawn item [${pawnedItem.item_id}]`,
         category: 'Alerts',
         branch_id: pawnedItem.branch_id,
+        event_key: `inventory-expired:${pawnedItem.id}`,
+        entity_type: 'pawn_item',
+        entity_id: pawnedItem.item_id,
       });
     } catch (e) {
       console.warn('[InventoryService] Failed to create notification', e);
