@@ -243,12 +243,12 @@ export class BranchesService {
     }
   }
 
-  /** Public signup: active branches only (id + name). */
+  /** Public signup/site listing: active branches only. */
   async findActiveSummaries() {
     try {
       const rows = await this.prisma.branches.findMany({
         where: { status: 'Active' },
-        select: { id: true, name: true },
+        select: { id: true, branch_code: true, name: true, location: true },
         orderBy: { name: 'asc' },
       });
 
