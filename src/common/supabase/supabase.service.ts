@@ -19,6 +19,7 @@ interface UserRecord {
   role: string | null;
   branch_id: string | null;
   avatar_url: string | null;
+  notification_sound: string | null;
   account_status: AccountStatus | null;
   branches?: { name: string } | null;
 }
@@ -32,6 +33,7 @@ export interface AuthenticatedUserProfile {
   branchId: string | null;
   branchName: string | null;
   avatarUrl: string | null;
+  notificationSound: string | null;
 }
 
 @Injectable()
@@ -111,6 +113,7 @@ export class SupabaseService {
       branchId: user.branch_id,
       branchName: user.branches?.name ?? null,
       avatarUrl: user.avatar_url,
+      notificationSound: user.notification_sound ?? 'sound8.mp3',
     };
   }
 
@@ -145,6 +148,7 @@ export class SupabaseService {
           role: true,
           branch_id: true,
           avatar_url: true,
+          notification_sound: true,
           account_status: true,
           branches: { select: { name: true } },
         },

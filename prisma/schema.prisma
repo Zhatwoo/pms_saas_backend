@@ -55,6 +55,7 @@ model users {
   created_at                                                           DateTime                   @default(now()) @db.Timestamptz(6)
   updated_at                                                           DateTime                   @default(now()) @db.Timestamptz(6)
   avatar_url                                                           String?
+  notification_sound                                                   String?                    @default("sound8.mp3")
   account_status                                                       String                     @default("active")
   activity_logs                                                        activity_logs[]
   authorized_devices                                                   authorized_devices[]       @relation("device_employee")

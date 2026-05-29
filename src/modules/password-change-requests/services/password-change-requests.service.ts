@@ -530,18 +530,34 @@ export class PasswordChangeRequestsService {
     });
 
     await Promise.all(
-      approvers.map((approver) =>
+      [
         this.notificationsService.create({
-          title: 'Password Change Request',
-          subtitle: `${requester.fullName || requester.email} requested approval to change password.`,
+          title: 'Password Change Request Submitted',
+          subtitle: `Your request was sent to ${targetRole === Role.ADMIN ? 'your branch admin' : 'system admin'} for approval.`,
           category: 'Requests',
-          user_id: approver.id,
+          notification_type: 'PASSWORD_CHANGE_REQUEST',
+          user_id: requester.id,
           branch_id: requester.branchId ?? undefined,
-          event_key: `password-change:${requestId}:approver:${approver.id}`,
+          event_key: `password-change:${requestId}:requester-submitted`,
+          target_url: '/settings',
           entity_type: 'password_request',
           entity_id: requestId,
         }),
-      ),
+        ...approvers.map((approver) =>
+          this.notificationsService.create({
+            title: 'Password Change Request',
+            subtitle: `${requester.fullName || requester.email} requested approval to change password.`,
+            category: 'Requests',
+            notification_type: 'PASSWORD_CHANGE_REQUEST',
+            user_id: approver.id,
+            branch_id: requester.branchId ?? undefined,
+            event_key: `password-change:${requestId}:approver:${approver.id}`,
+            target_url: '/settings',
+            entity_type: 'password_request',
+            entity_id: requestId,
+          }),
+        ),
+      ],
     );
 
     const usersById = await this.loadUsersByIds([requester.id]);
@@ -677,12 +693,36 @@ export class PasswordChangeRequestsService {
           ? 'Your request has been approved. Log in with your current password and confirm the new password in Settings to activate it.'
           : `Your request was rejected${note ? `: ${note}` : '.'}`,
       category: 'Requests',
+      notification_type: 'PASSWORD_CHANGE_REQUEST',
       user_id: existing.requesterUserId,
       branch_id: existing.requesterBranchId ?? undefined,
       event_key: `password-change:${existing.id}:review`,
+      target_url: '/settings',
       entity_type: 'password_request',
       entity_id: existing.id,
     });
+
+    const approvers = await this.getApprovers(
+      existing.targetRole as Role.ADMIN | Role.SUPER_ADMIN,
+      existing.requesterBranchId,
+    );
+
+    await Promise.all(
+      approvers.map((approver) =>
+        this.notificationsService.create({
+          title: 'Password Change Request Reviewed',
+          subtitle: `A password change request was ${dto.decision}.`,
+          category: 'Requests',
+          notification_type: 'PASSWORD_CHANGE_REQUEST',
+          user_id: approver.id,
+          branch_id: existing.requesterBranchId ?? undefined,
+          event_key: `password-change:${existing.id}:review-sync:${approver.id}`,
+          target_url: '/settings',
+          entity_type: 'password_request',
+          entity_id: existing.id,
+        }),
+      ),
+    );
 
     const usersById = await this.loadUsersByIds([
       existing.requesterUserId,
@@ -733,6 +773,11 @@ export class PasswordChangeRequestsService {
         'Only approved password change requests can be activated',
       );
     }
+    if (existing.isActivated) {
+      throw new BadRequestException(
+        'This password change approval has already been used',
+      );
+    }
 
     await this.verifyActorPassword(user, currentPassword);
 
@@ -749,6 +794,20 @@ export class PasswordChangeRequestsService {
       throw new InternalServerErrorException(authError.message);
     }
 
+    const authClient = this.supabaseService.getAuthClient();
+    const { data: refreshedSession, error: signInError } =
+      await authClient.auth.signInWithPassword({
+        email: user.email,
+        password: newPassword,
+      });
+
+    if (signInError || !refreshedSession.session?.access_token) {
+      throw new InternalServerErrorException(
+        signInError?.message ||
+          'Password was updated, but the session could not be refreshed',
+      );
+    }
+
     await this.activityLogsService.createLog({
       userId: user.id,
       branchId: user.branchId,
@@ -759,6 +818,24 @@ export class PasswordChangeRequestsService {
       },
     });
 
-    return { success: true };
+    await this.notificationsService.create({
+      title: 'Password Change Activated',
+      subtitle: 'Your one-time password change approval has been used.',
+      category: 'Requests',
+      notification_type: 'PASSWORD_CHANGE_REQUEST',
+      user_id: user.id,
+      branch_id: user.branchId ?? undefined,
+      event_key: `password-change:${existing.id}:activated:${user.id}`,
+      target_url: '/settings',
+      entity_type: 'password_request',
+      entity_id: existing.id,
+    });
+
+    return {
+      success: true,
+      message: 'Password saved successfully.',
+      access_token: refreshedSession.session.access_token,
+      expires_in: refreshedSession.session.expires_in,
+    };
   }
 }

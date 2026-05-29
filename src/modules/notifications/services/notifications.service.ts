@@ -170,7 +170,15 @@ export class NotificationsService {
 
   private buildVisibilityWhere(user: AuthenticatedUserProfile) {
     if (user.role === Role.SUPER_ADMIN) {
-      return { user_id: null };
+      return {
+        OR: [
+          { user_id: user.id },
+          {
+            user_id: null,
+            OR: [{ target_role: null }, { target_role: Role.SUPER_ADMIN }],
+          },
+        ],
+      };
     }
 
     const scoped: Prisma.notificationsWhereInput[] = [{ user_id: user.id }];
@@ -187,7 +195,15 @@ export class NotificationsService {
 
   private buildMutableWhere(user: AuthenticatedUserProfile) {
     if (user.role === Role.SUPER_ADMIN) {
-      return { user_id: null };
+      return {
+        OR: [
+          { user_id: user.id },
+          {
+            user_id: null,
+            OR: [{ target_role: null }, { target_role: Role.SUPER_ADMIN }],
+          },
+        ],
+      };
     }
 
     const scoped: Prisma.notificationsWhereInput[] = [{ user_id: user.id }];
@@ -207,7 +223,7 @@ export class NotificationsService {
     notification: NotificationDto,
   ): boolean {
     if (user.role === Role.SUPER_ADMIN) {
-      return !notification.user_id;
+      return notification.user_id === user.id || !notification.user_id;
     }
 
     return (
