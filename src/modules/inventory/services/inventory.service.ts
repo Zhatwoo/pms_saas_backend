@@ -20,6 +20,7 @@ import { FinanceDailyBalanceService } from '../../branch-finance/services/financ
 import {
   INVENTORY_VALUATION_STATUSES,
   isStatusIncludedInInventoryValuation,
+  findInterestRateGroup,
 } from '../../../common/utils/inventory-valuation.util';
 
 interface QueryFilters {
@@ -140,8 +141,7 @@ export class InventoryService {
 
     let query = client
       .from('pawned_items')
-      .select('*, customers(*), item_renewals(*)', { count: 'exact' })
-      .order('created_at', { ascending: false });
+      .select('*, customers(*), item_renewals(*)');
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
@@ -154,6 +154,8 @@ export class InventoryService {
     }
     if (filters.status) {
       query = query.eq('status', filters.status);
+    } else {
+      query = query.neq('status', 'Expired');
     }
     if (filters.search) {
       query = query.or(
@@ -168,17 +170,54 @@ export class InventoryService {
         .lt('pawn_date', this.nextDay(filters.date));
     }
 
-    const from = (filters.page - 1) * filters.limit;
-    query = query.range(from, from + filters.limit - 1);
-
-    const { data, error, count } = await query;
+    const { data, error } = await query;
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
+    const { data: interestRatesData } = await client
+      .from('shop_settings')
+      .select('setting_value')
+      .eq('setting_key', 'interest_rates')
+      .maybeSingle();
+    const interestRates = (interestRatesData?.setting_value as any[]) || [];
+    const today = new Date();
+
+    const filteredItems = (data || []).filter((item: any) => {
+      if (item.status !== 'Active') {
+        return true;
+      }
+      if (!item.pawn_date) {
+        return true;
+      }
+      const category = item.category;
+      const group = findInterestRateGroup(interestRates, category);
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
+      const maturityDate = new Date(item.pawn_date);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
+
+      const daysRemaining = Math.ceil(
+        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
+      return daysRemaining > 0;
+    });
+
+    // Order by created_at descending in memory
+    filteredItems.sort((a: any, b: any) => {
+      const dateA = new Date(a.created_at || 0).getTime();
+      const dateB = new Date(b.created_at || 0).getTime();
+      return dateB - dateA;
+    });
+
+    const totalCount = filteredItems.length;
+    const from = (filters.page - 1) * filters.limit;
+    const paginatedItems = filteredItems.slice(from, from + filters.limit);
+
     return {
       items: await Promise.all(
-        (data || []).map(async (item: any) => ({
+        paginatedItems.map(async (item: any) => ({
           id: item.id,
           itemId: item.item_id,
           itemName: item.item_name,
@@ -208,7 +247,7 @@ export class InventoryService {
           memoryStorage: item.memory_storage,
         })),
       ),
-      total: count || 0,
+      total: totalCount,
     };
   }
 
@@ -1250,6 +1289,7 @@ export class InventoryService {
           'id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url, created_at',
         )
         .eq('status', 'Available')
+        .gt('price', 0)
         .order('created_at', { ascending: false }),
       client.from('branches').select('id, name, location'),
     ]);

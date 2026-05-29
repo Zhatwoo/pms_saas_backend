@@ -45,3 +45,39 @@ export function inventoryLineValue(
   }
   return loan;
 }
+
+export function categoryNamesMatch(cat1: string, cat2: string): boolean {
+  const c1 = cat1.trim().toLowerCase();
+  const c2 = cat2.trim().toLowerCase();
+  if (c1 === c2) return true;
+
+  const getVariations = (s: string) => {
+    const vars = [s];
+    if (s.endsWith('s')) {
+      vars.push(s.slice(0, -1)); // cameras -> camera
+    } else {
+      vars.push(s + 's'); // camera -> cameras
+    }
+    if (s.endsWith('es')) {
+      vars.push(s.slice(0, -2)); // watches -> watch
+    } else {
+      vars.push(s + 'es'); // watch -> watches
+    }
+    if (s.endsWith('ies')) {
+      vars.push(s.slice(0, -3) + 'y'); // categories -> category
+    }
+    return vars;
+  };
+
+  const vars1 = getVariations(c1);
+  const vars2 = getVariations(c2);
+
+  return vars1.some(v => vars2.includes(v));
+}
+
+export function findInterestRateGroup(interestRates: any[], category?: string): any | null {
+  if (!category) return null;
+  return interestRates.find((group) =>
+    group.categories?.some((cat: string) => categoryNamesMatch(cat, category))
+  ) ?? null;
+}

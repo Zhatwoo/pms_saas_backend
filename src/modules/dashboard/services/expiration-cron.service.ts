@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import { findInterestRateGroup } from '../../../common/utils/inventory-valuation.util';
 
 @Injectable()
 export class ExpirationCronService {
@@ -48,7 +49,7 @@ export class ExpirationCronService {
         if (!item.pawn_date) continue;
 
         const category = item.category;
-        const group = interestRates.find((g: any) => g.categories?.includes(category));
+        const group = findInterestRateGroup(interestRates, category);
         const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
 
         const maturityDate = new Date(item.pawn_date);
