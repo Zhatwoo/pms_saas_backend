@@ -853,63 +853,110 @@ export class InventoryService {
     user: UserWithBranch,
     branchIdParam: string | number,
     scannedItemIds: string[],
+    checklistSource: 'pawned' | 'sale' | null = null,
   ) {
     const branchId = String(branchIdParam);
     assertResourceBranch(user, branchId);
 
     const client = this.supabase.getClient();
 
-    // Fetch only items that still count as branch inventory, then remove anything
-    // that already has a Redeem / Buy Back transaction so stale rows cannot reappear.
-    const { data: pawnedItems, error: pawnedError } = await client
-      .from('pawned_items')
-      .select('item_id, item_name, category')
-      .eq('branch_id', branchId)
-      .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
-    if (pawnedError) {
-      throw new InternalServerErrorException(pawnedError.message);
-    }
+    let systemItemListSource:
+      | Array<{ item_id?: string | null; item_name?: string | null; category?: string | null; status?: string | null }>
+      = [];
 
-    const { data: redeemedRows, error: redeemedError } = await client
-      .from('transactions')
-      .select('related_pawned_item_id')
-      .eq('branch_id', branchId)
-      .in('purpose', ['Redeem', 'Buy Back']);
-    if (redeemedError) {
-      throw new InternalServerErrorException(redeemedError.message);
-    }
+    if (checklistSource === 'sale') {
+      const { data: saleItems, error: saleError } = await client
+        .from('sale_items')
+        .select('item_id, item_name, category')
+        .eq('branch_id', branchId)
+        .in('status', ['Available', 'available']);
+      if (saleError) {
+        throw new InternalServerErrorException(saleError.message);
+      }
 
-    const redeemedPawnedIds = new Set(
-      (Array.isArray(redeemedRows) ? redeemedRows : [])
-        .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
-    );
+      systemItemListSource = Array.isArray(saleItems) ? saleItems : [];
+    } else if (checklistSource === 'pawned') {
+      const { data: pawnedItems, error: pawnedError } = await client
+        .from('pawned_items')
+        .select('item_id, item_name, category, status')
+        .eq('branch_id', branchId)
+        .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
+      if (pawnedError) {
+        throw new InternalServerErrorException(pawnedError.message);
+      }
 
-    // Also include items transferred to sale (Items for Sale) with status Available
-    const { data: saleItems, error: saleError } = await client
-      .from('sale_items')
-      .select('item_id, item_name, category')
-      .eq('branch_id', branchId)
-      .in('status', ['Available', 'available']);
-    if (saleError) {
-      throw new InternalServerErrorException(saleError.message);
-    }
+      const { data: redeemedRows, error: redeemedError } = await client
+        .from('transactions')
+        .select('related_pawned_item_id')
+        .eq('branch_id', branchId)
+        .in('purpose', ['Redeem', 'Buy Back']);
+      if (redeemedError) {
+        throw new InternalServerErrorException(redeemedError.message);
+      }
 
-    const combined = [
-      ...((Array.isArray(pawnedItems) ? pawnedItems : []).filter(
+      const redeemedPawnedIds = new Set(
+        (Array.isArray(redeemedRows) ? redeemedRows : [])
+          .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+      );
+
+      systemItemListSource = (Array.isArray(pawnedItems) ? pawnedItems : []).filter(
         (item: { item_id?: string | null; status?: string | null }) =>
           isStatusIncludedInInventoryValuation(item.status) &&
           typeof item.item_id === 'string' &&
           item.item_id.trim().length > 0 &&
           !redeemedPawnedIds.has(item.item_id),
-      )),
-      ...(Array.isArray(saleItems) ? saleItems : []),
-    ];
+      );
+    } else {
+      const { data: pawnedItems, error: pawnedError } = await client
+        .from('pawned_items')
+        .select('item_id, item_name, category, status')
+        .eq('branch_id', branchId)
+        .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
+      if (pawnedError) {
+        throw new InternalServerErrorException(pawnedError.message);
+      }
+
+      const { data: redeemedRows, error: redeemedError } = await client
+        .from('transactions')
+        .select('related_pawned_item_id')
+        .eq('branch_id', branchId)
+        .in('purpose', ['Redeem', 'Buy Back']);
+      if (redeemedError) {
+        throw new InternalServerErrorException(redeemedError.message);
+      }
+
+      const redeemedPawnedIds = new Set(
+        (Array.isArray(redeemedRows) ? redeemedRows : [])
+          .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+      );
+
+      const { data: saleItems, error: saleError } = await client
+        .from('sale_items')
+        .select('item_id, item_name, category')
+        .eq('branch_id', branchId)
+        .in('status', ['Available', 'available']);
+      if (saleError) {
+        throw new InternalServerErrorException(saleError.message);
+      }
+
+      systemItemListSource = [
+        ...((Array.isArray(pawnedItems) ? pawnedItems : []).filter(
+          (item: { item_id?: string | null; status?: string | null }) =>
+            isStatusIncludedInInventoryValuation(item.status) &&
+            typeof item.item_id === 'string' &&
+            item.item_id.trim().length > 0 &&
+            !redeemedPawnedIds.has(item.item_id),
+        )),
+        ...(Array.isArray(saleItems) ? saleItems : []),
+      ];
+    }
 
     const normalizeId = (value: string) => value.trim().toUpperCase();
 
     const systemItemList = Array.from(
-      (combined || [])
+      (systemItemListSource || [])
         .filter(
           (item: any) =>
             typeof item?.item_id === 'string' && item.item_id.trim().length > 0,
