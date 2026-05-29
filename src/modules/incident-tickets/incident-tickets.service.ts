@@ -10,6 +10,7 @@ import { Role } from '../../common/enums';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import { NotificationsService } from '../notifications/services/notifications.service';
 
 interface CreateIncidentTicketDto {
   title?: string;
@@ -53,6 +54,7 @@ export class IncidentTicketsService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private ensureBranchAccess(user: AuthenticatedUserProfile, branchId: string) {
@@ -217,6 +219,16 @@ export class IncidentTicketsService {
           notes: 'Ticket escalated for manager action.',
         });
       }
+
+      await this.notifyIncidentCreated({
+        ticketId: data.id as string,
+        ticketNo: String(data.ticket_no ?? data.id),
+        title: dto.title.trim(),
+        branchId,
+        reporterUserId: user.id,
+        priority: dto.priority ?? 'medium',
+        category: dto.category.trim(),
+      });
     }
 
     return data;
@@ -377,7 +389,114 @@ export class IncidentTicketsService {
       await this.recordEvent(event);
     }
 
+    if (data?.id) {
+      await this.notifyIncidentUpdated({
+        ticketId: data.id as string,
+        ticketNo: String(data.ticket_no ?? data.id),
+        title: String(data.title ?? 'Incident ticket'),
+        branchId: data.branch_id as string,
+        reportedByUserId: data.reported_by_user_id as string | null,
+        status: data.status as string,
+        updatedAt: String(data.updated_at ?? new Date().toISOString()),
+        actorUserId: user.id,
+      });
+    }
+
     return data;
+  }
+
+  private async notifyIncidentCreated(params: {
+    ticketId: string;
+    ticketNo: string;
+    title: string;
+    branchId: string;
+    reporterUserId: string;
+    priority: string;
+    category: string;
+  }) {
+    const title = `New incident report - ${params.ticketNo}`;
+    const message = `${params.title} (${params.category}, ${params.priority}) was reported for review.`;
+
+    await Promise.all([
+      this.notificationsService.createForSuperadmins({
+        title,
+        subtitle: message,
+        message,
+        category: 'Alerts',
+        branch_id: params.branchId,
+        notification_type: 'INCIDENT_REPORT',
+        event_key: `incident:${params.ticketId}:created:superadmin`,
+        entity_type: 'incident_ticket',
+        entity_id: params.ticketId,
+      }),
+      this.notificationsService.create({
+        title,
+        subtitle: message,
+        message,
+        category: 'Alerts',
+        branch_id: params.branchId,
+        target_role: Role.ADMIN,
+        notification_type: 'INCIDENT_REPORT',
+        event_key: `incident:${params.ticketId}:created:admin`,
+        entity_type: 'incident_ticket',
+        entity_id: params.ticketId,
+      }),
+    ]);
+  }
+
+  private async notifyIncidentUpdated(params: {
+    ticketId: string;
+    ticketNo: string;
+    title: string;
+    branchId: string;
+    reportedByUserId: string | null;
+    status: string;
+    updatedAt: string;
+    actorUserId: string;
+  }) {
+    const readableStatus = params.status.replaceAll('_', ' ');
+    const title = `Incident report updated - ${params.ticketNo}`;
+    const message = `${params.title} is now ${readableStatus}.`;
+
+    await Promise.all([
+      this.notificationsService.createForSuperadmins({
+        title,
+        subtitle: message,
+        message,
+        category: 'Alerts',
+        branch_id: params.branchId,
+        notification_type: 'INCIDENT_REPORT',
+        event_key: `incident:${params.ticketId}:update:${params.status}:${params.updatedAt}:superadmin`,
+        entity_type: 'incident_ticket',
+        entity_id: params.ticketId,
+      }),
+      this.notificationsService.create({
+        title,
+        subtitle: message,
+        message,
+        category: 'Alerts',
+        branch_id: params.branchId,
+        target_role: Role.ADMIN,
+        notification_type: 'INCIDENT_REPORT',
+        event_key: `incident:${params.ticketId}:update:${params.status}:${params.updatedAt}:admin`,
+        entity_type: 'incident_ticket',
+        entity_id: params.ticketId,
+      }),
+      params.reportedByUserId && params.reportedByUserId !== params.actorUserId
+        ? this.notificationsService.create({
+            title,
+            subtitle: message,
+            message,
+            category: 'Alerts',
+            branch_id: params.branchId,
+            user_id: params.reportedByUserId,
+            notification_type: 'INCIDENT_REPORT',
+            event_key: `incident:${params.ticketId}:update:${params.status}:${params.updatedAt}:reporter:${params.reportedByUserId}`,
+            entity_type: 'incident_ticket',
+            entity_id: params.ticketId,
+          })
+        : Promise.resolve(null),
+    ]);
   }
 
   private async resolveManagerId(branchId: string) {

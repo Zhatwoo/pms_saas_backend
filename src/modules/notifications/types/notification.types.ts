@@ -11,7 +11,9 @@ export type NotificationEntityType =
   | 'customer'
   | 'fund_request'
   | 'fund_transfer'
+  | 'incident_ticket'
   | 'password_request'
+  | 'user_branch_transfer'
   | 'system';
 
 export type NotificationCreateInput = {
