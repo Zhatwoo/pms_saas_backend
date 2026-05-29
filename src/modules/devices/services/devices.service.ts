@@ -267,7 +267,7 @@ export class DevicesService {
       where: branchFilter,
       include: {
         employee: {
-          select: { id: true, full_name: true, email: true, role: true },
+          select: { id: true, full_name: true, email: true, role: true, avatar_url: true },
         },
       },
       orderBy: { created_at: 'desc' },
@@ -276,7 +276,10 @@ export class DevicesService {
 
     return logs.map((log) => ({
       ...log,
-      employee: this.decryptUserJoin(log.employee),
+      employee: {
+        ...this.decryptUserJoin(log.employee),
+        avatarUrl: log.employee?.avatar_url ?? null,
+      },
     }));
   }
 
