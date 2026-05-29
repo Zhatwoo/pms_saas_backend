@@ -170,7 +170,7 @@ export class NotificationsService {
 
   private buildVisibilityWhere(user: AuthenticatedUserProfile) {
     if (user.role === Role.SUPER_ADMIN) {
-      return {};
+      return { user_id: null };
     }
 
     const scoped: Prisma.notificationsWhereInput[] = [{ user_id: user.id }];
@@ -187,7 +187,7 @@ export class NotificationsService {
 
   private buildMutableWhere(user: AuthenticatedUserProfile) {
     if (user.role === Role.SUPER_ADMIN) {
-      return {};
+      return { user_id: null };
     }
 
     const scoped: Prisma.notificationsWhereInput[] = [{ user_id: user.id }];
@@ -207,7 +207,7 @@ export class NotificationsService {
     notification: NotificationDto,
   ): boolean {
     if (user.role === Role.SUPER_ADMIN) {
-      return true;
+      return !notification.user_id;
     }
 
     return (
@@ -267,6 +267,12 @@ export class NotificationsService {
         return entityId
           ? `/branch-finance?fundRequestId=${encodeURIComponent(entityId)}`
           : '/branch-finance';
+      case 'incident_ticket':
+        return entityId
+          ? `/incident-report?ticketId=${encodeURIComponent(entityId)}`
+          : '/incident-report';
+      case 'user_branch_transfer':
+        return '/dashboard';
       case 'password_request':
         return '/settings';
       case 'system':
