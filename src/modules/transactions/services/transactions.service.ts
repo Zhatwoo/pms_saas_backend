@@ -86,6 +86,7 @@ const TX_SELECT = {
           city: true,
           region: true,
           contact_number: true,
+          id_presented: true,
         },
       },
     },
@@ -99,6 +100,7 @@ const TX_SELECT = {
       city: true,
       region: true,
       contact_number: true,
+      id_presented: true,
     },
   },
 } as any;
@@ -706,6 +708,42 @@ export class TransactionsService {
     if (!data) throw new NotFoundException('Transaction not found');
     assertBranchAccess(user, (data as any).branch_id);
     return this.mapTransaction(data);
+  }
+
+  async findLatestPawnSource(
+    user: UserWithBranch,
+    relatedPawnedItemId?: string,
+    unitCode?: string,
+  ) {
+    const trimmedRelatedId = (relatedPawnedItemId || '').trim();
+    const trimmedUnitCode = (unitCode || '').trim();
+
+    if (!trimmedRelatedId && !trimmedUnitCode) {
+      throw new BadRequestException(
+        'Either relatedPawnedItemId or unitCode is required',
+      );
+    }
+
+    const where: any = {
+      purpose: 'Pawn',
+      ...(isSuperAdmin(user) ? {} : buildBranchFilter(user)),
+    };
+
+    if (trimmedRelatedId) {
+      where.related_pawned_item_id = trimmedRelatedId;
+    } else {
+      where.unit_code = trimmedUnitCode;
+    }
+
+    const row = await this.prisma.transactions.findFirst({
+      where,
+      select: TX_SELECT,
+      orderBy: [{ transaction_date: 'desc' }, { transaction_time: 'desc' }],
+    });
+
+    if (!row) return null;
+    assertBranchAccess(user, (row as any).branch_id);
+    return this.mapTransaction(row);
   }
 
   async update(

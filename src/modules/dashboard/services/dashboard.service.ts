@@ -351,7 +351,7 @@ export class DashboardService {
     let query = client
       .from('pawned_items')
       .select(
-        'id, item_id, item_name, amount, pawn_date, status, branch_id, customers(full_name, email)',
+        'id, item_id, item_name, category, amount, pawn_date, status, branch_id, customers(full_name, email)',
       )
       .eq('status', 'Active')
       .not('pawn_date', 'is', null)
@@ -364,9 +364,20 @@ export class DashboardService {
       throw new InternalServerErrorException(error.message);
     }
 
+    const interestRatesSetting = await this.prisma.shop_settings.findUnique({
+      where: { setting_key: 'interest_rates' },
+      select: { setting_value: true },
+    });
+    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+
     return (data || []).map((item: any) => {
+      const category = item.category;
+      const group = interestRates.find((g: any) => g.categories?.includes(category));
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
       const maturityDate = new Date(item.pawn_date);
-      maturityDate.setDate(maturityDate.getDate() + 30);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
+
       const daysRemaining = Math.ceil(
         (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
       );
@@ -1024,6 +1035,12 @@ export class DashboardService {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
 
+    const interestRatesSetting = await this.prisma.shop_settings.findUnique({
+      where: { setting_key: 'interest_rates' },
+      select: { setting_value: true },
+    });
+    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+
     let fromDate: string;
     let toDate: string;
 
@@ -1059,14 +1076,11 @@ export class DashboardService {
         .lte('pawn_date', toDate),
     );
     // 2. Items near expiration (maturity within 7 days)
-    const twentyThreeDaysAgo = new Date(today);
-    twentyThreeDaysAgo.setDate(twentyThreeDaysAgo.getDate() - 23);
     const nearExpQuery = buildPawnQuery(
       client
         .from('pawned_items')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'Active')
-        .lte('pawn_date', twentyThreeDaysAgo.toISOString().split('T')[0]),
+        .select('category, pawn_date')
+        .eq('status', 'Active'),
     );
     // 3. Items ready for sale
     let saleQuery = client
@@ -1136,7 +1150,7 @@ export class DashboardService {
     const attentionQuery = buildPawnQuery(
       client
         .from('pawned_items')
-        .select('id, item_name, item_id, amount, pawn_date, status')
+        .select('id, item_name, item_id, category, amount, pawn_date, status')
         .eq('status', 'Active')
         .lte('pawn_date', todayStr)
         .order('pawn_date', { ascending: true })
@@ -1277,8 +1291,12 @@ export class DashboardService {
 
     // Build attention items
     const attentionItems = (attentionResult.data || []).map((item: any) => {
+      const category = item.category;
+      const group = interestRates.find((g: any) => g.categories?.includes(category));
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
       const maturityDate = new Date(item.pawn_date);
-      maturityDate.setDate(maturityDate.getDate() + 30);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
       const daysRemaining = Math.ceil(
         (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
       );
@@ -1331,6 +1349,23 @@ export class DashboardService {
       branchId: item.branch_id || null,
     }));
 
+    let itemsNearExpiration = 0;
+    for (const item of nearExpResult.data || []) {
+      if (!item.pawn_date) continue;
+      const category = item.category;
+      const group = interestRates.find((g: any) => g.categories?.includes(category));
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
+      const maturityDate = new Date(item.pawn_date);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
+      const daysRemaining = Math.ceil(
+        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (daysRemaining > 0 && daysRemaining <= 7) {
+        itemsNearExpiration++;
+      }
+    }
+
     return {
       overallData: {
         totalContracts: totalContractsResult.count ?? 0,
@@ -1343,7 +1378,7 @@ export class DashboardService {
       },
       kpiData: {
         activeContracts: activeResult.count ?? 0,
-        itemsNearExpiration: nearExpResult.count ?? 0,
+        itemsNearExpiration,
         itemsReadyForSale: saleResult.count ?? 0,
         monthlyRevenue: `₱ ${monthlyRevenue.toLocaleString()}`,
       },
