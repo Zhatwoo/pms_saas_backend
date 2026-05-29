@@ -317,7 +317,7 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('pawned_items')
-      .select('*, item_renewals(*), customer:customers(*), transactions(*, users(id, full_name))')
+      .select('*, item_renewals(*), customer:customers(*), transactions(*, users!transactions_created_by_user_id_fkey(id, full_name))')
       .eq('id', id)
       .single();
 

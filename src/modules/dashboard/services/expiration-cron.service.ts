@@ -22,13 +22,21 @@ export class ExpirationCronService {
       // Fetch active pawned items
       const { data: items, error } = await client
         .from('pawned_items')
-        .select('id, item_id, item_name, branch_id, pawn_date')
+        .select('id, item_id, item_name, branch_id, pawn_date, category')
         .eq('status', 'Active');
 
       if (error) {
         this.logger.error('Failed to fetch pawned items', error);
         return;
       }
+
+      // Fetch interest rates settings
+      const { data: settingsData } = await client
+        .from('shop_settings')
+        .select('setting_value')
+        .eq('setting_key', 'interest_rates')
+        .maybeSingle();
+      const interestRates = (settingsData?.setting_value as any[]) || [];
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -39,8 +47,12 @@ export class ExpirationCronService {
       for (const item of items || []) {
         if (!item.pawn_date) continue;
 
+        const category = item.category;
+        const group = interestRates.find((g: any) => g.categories?.includes(category));
+        const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
         const maturityDate = new Date(item.pawn_date);
-        maturityDate.setDate(maturityDate.getDate() + 30);
+        maturityDate.setDate(maturityDate.getDate() + defaultDuration);
         maturityDate.setHours(0, 0, 0, 0);
 
         const diffTime = maturityDate.getTime() - today.getTime();
