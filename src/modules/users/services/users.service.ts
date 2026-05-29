@@ -323,6 +323,7 @@ export class UsersService {
     const payload: Prisma.usersUncheckedUpdateInput = {
       updated_at: new Date(),
     };
+    let branchTransferTarget: { id: string; name: string } | null = null;
 
     if (dto.fullName !== undefined) {
       const trimmed = dto.fullName.trim();
@@ -350,12 +351,15 @@ export class UsersService {
       } else {
         const branch = await this.prisma.branches.findUnique({
           where: { id: dto.branchId },
-          select: { id: true, status: true },
+          select: { id: true, status: true, name: true },
         });
         if (!branch || !this.isActiveBranchStatus(branch.status)) {
           throw new BadRequestException('Invalid or inactive branch');
         }
         payload.branch_id = dto.branchId;
+        if (String(existing.branch_id) !== String(dto.branchId)) {
+          branchTransferTarget = { id: branch.id, name: branch.name };
+        }
       }
     }
 
@@ -380,6 +384,13 @@ export class UsersService {
           },
         });
       if (error) throw new InternalServerErrorException(error.message);
+    }
+
+    if (
+      branchTransferTarget &&
+      this.normalizeStoredRole(updated.role ?? '') !== 'super_admin'
+    ) {
+      await this.notifyUserBranchTransfer(updated, branchTransferTarget);
     }
 
     return this.mapToResponse(updated);
@@ -407,9 +418,10 @@ export class UsersService {
       throw new BadRequestException('Invalid or inactive target branch');
     }
 
+    const transferredAt = new Date();
     const updated = await this.prisma.users.update({
       where: { auth_id: existing.auth_id },
-      data: { branch_id: targetBranchId, updated_at: new Date() },
+      data: { branch_id: targetBranchId, updated_at: transferredAt },
       select: UsersService.userSelect,
     });
 
@@ -420,9 +432,33 @@ export class UsersService {
       });
     if (error) throw new InternalServerErrorException(error.message);
 
+    await this.notifyUserBranchTransfer(updated, targetBranch, transferredAt);
+
     return this.mapToResponse({
       ...updated,
       branches: { name: targetBranch.name },
+    });
+  }
+
+  private async notifyUserBranchTransfer(
+    user: UserRow,
+    targetBranch: { id: string; name: string },
+    transferredAt = new Date(),
+  ) {
+    const message = `You were transferred to ${targetBranch.name}. Please sign in again, then confirm this branch assignment before continuing.`;
+
+    await this.notificationsService.create({
+      title: `You were transferred to ${targetBranch.name}`,
+      subtitle: message,
+      message,
+      category: 'Alerts',
+      user_id: user.id,
+      branch_id: targetBranch.id,
+      notification_type: 'USER_BRANCH_TRANSFER',
+      target_url: '/dashboard',
+      entity_type: 'user_branch_transfer',
+      entity_id: user.id,
+      event_key: `user-branch-transfer:${user.id}:${targetBranch.id}:${transferredAt.toISOString()}`,
     });
   }
 

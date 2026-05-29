@@ -98,6 +98,10 @@ export class NotificationEventsService {
     user: AuthenticatedUserProfile,
     notification: NotificationDto,
   ): boolean {
+    if (notification.user_id) {
+      return notification.user_id === user.id;
+    }
+
     if (user.role === Role.SUPER_ADMIN) {
       return true;
     }
@@ -107,10 +111,8 @@ export class NotificationEventsService {
     }
 
     return (
-      notification.user_id === user.id ||
-      (!notification.user_id &&
-        Boolean(notification.branch_id) &&
-        notification.branch_id === user.branchId)
+      Boolean(notification.branch_id) &&
+      notification.branch_id === user.branchId
     );
   }
 }
