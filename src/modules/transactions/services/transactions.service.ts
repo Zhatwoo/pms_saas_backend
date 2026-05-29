@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
@@ -21,6 +22,7 @@ import { normalizeCustomerFullName } from '../../../common/utils/customer-name.u
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
+import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 type CustomerGroupMatch = {
   id: string;
@@ -133,14 +135,20 @@ const ALLOWED_TRANSACTION_PURPOSES = new Set([
 ]);
 
 @Injectable()
-export class TransactionsService {
+export class TransactionsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly rewardsService: RewardsService,
     private readonly encryption: EncryptionService,
     private readonly financeDailyBalance: FinanceDailyBalanceService,
+    private readonly supabase: SupabaseService,
   ) {}
+
+  async onModuleInit() {
+    // Run retroactive sync on startup
+    void this.syncPastRenewals();
+  }
 
   private toDbDate(value?: string | null): Date {
     const date = value || getPhCalendarDateString();
@@ -319,7 +327,7 @@ export class TransactionsService {
     return null;
   }
 
-  private mapTransaction(row: any) {
+  private async mapTransaction(row: any) {
     const pawnedItemsDecrypted = row.pawned_items
       ? {
           ...row.pawned_items,
@@ -339,6 +347,11 @@ export class TransactionsService {
 
     const createdByUser = this.encryption.decryptUsersJoin(row.users);
 
+    const [resolvedIdPhoto, resolvedIdBackPhoto] = await Promise.all([
+      this.resolveStorageUrl(row.id_photo),
+      this.resolveStorageUrl(row.id_back_photo),
+    ]);
+
     return {
       ...row,
       transaction_date: this.formatDate(row.transaction_date),
@@ -349,6 +362,8 @@ export class TransactionsService {
       storage_fee: this.toNumber(row.storage_fee),
       pawn_amount: this.toNumber(row.pawn_amount),
       details: this.encryption.decryptTransactionDetails(row.details),
+      id_photo: resolvedIdPhoto,
+      id_back_photo: resolvedIdBackPhoto,
       pawned_item: pawnedItemsDecrypted
         ? {
             ...pawnedItemsDecrypted,
@@ -481,6 +496,17 @@ export class TransactionsService {
     const transactionNo = `${purpose.substring(0, 2).toUpperCase()}-${Date.now()}`;
     const now = new Date();
 
+    let idPhotoUrl = dtoClean.id_photo ?? null;
+    if (idPhotoUrl && idPhotoUrl.startsWith('data:image/')) {
+      const uploadBranchId = branchId || 'system';
+      const uploadCustomerId = dtoClean.customer_id || 'unknown';
+      idPhotoUrl = await this.uploadPhoto(
+        idPhotoUrl,
+        this.buildRenewalUploadPath(uploadBranchId, uploadCustomerId),
+        'id_pictures',
+      );
+    }
+
     const payload: any = {
       transaction_no: transactionNo,
       branch_id: branchId,
@@ -503,7 +529,7 @@ export class TransactionsService {
           ? null
           : this.encryption.encryptTransactionDetails(String(dtoClean.details)),
       profile_photo: dtoClean.profile_photo ?? null,
-      id_photo: dtoClean.id_photo ?? null,
+      id_photo: idPhotoUrl,
       id_back_photo: dtoClean.id_back_photo ?? null,
     };
 
@@ -551,12 +577,44 @@ export class TransactionsService {
         payload.cash_in = amounts.cashIn;
       }
 
+      if (purpose === 'Renew') {
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(tx, branchId, dtoClean);
+
+        if (!linkedPawnedItem) {
+          throw new BadRequestException(
+            'Renew requires a valid pawned item reference.',
+          );
+        }
+
+        const manilaDateStr = getPhCalendarDateString();
+        await tx.item_renewals.create({
+          data: {
+            pawned_item_id: linkedPawnedItem.id,
+            renewal_date: this.toDbDate(manilaDateStr),
+            amount_paid: amounts.cashIn,
+          },
+        });
+
+        await tx.pawned_items.update({
+          where: { id: linkedPawnedItem.id },
+          data: {
+            pawn_date: this.toDbDate(manilaDateStr),
+            status: 'Active',
+            updated_at: new Date(),
+          },
+        });
+
+        payload.related_pawned_item_id = linkedPawnedItem.id;
+        payload.unit_code = linkedPawnedItem.item_id;
+        payload.unit = linkedPawnedItem.item_name;
+      }
+
       const created = await tx.transactions.create({
         data: payload,
         select: TX_SELECT,
       });
 
-      if (linkedPawnedItem) {
+      if (linkedPawnedItem && (purpose === 'Buy Back' || purpose === 'Redeem')) {
         await tx.pawned_items.update({
           where: { id: linkedPawnedItem.id },
           data: {
@@ -637,7 +695,7 @@ export class TransactionsService {
         );
     }
 
-    return this.mapTransaction(data);
+    return await this.mapTransaction(data);
   }
 
   async findAll(
@@ -694,7 +752,9 @@ export class TransactionsService {
       take: 500,
     });
 
-    const transactions = rows.map((row) => this.mapTransaction(row));
+    const transactions = await Promise.all(
+      rows.map((row) => this.mapTransaction(row)),
+    );
     const stats = await this.buildStats(transactions, scoped, date);
 
     return { transactions, stats };
@@ -707,7 +767,7 @@ export class TransactionsService {
     });
     if (!data) throw new NotFoundException('Transaction not found');
     assertBranchAccess(user, (data as any).branch_id);
-    return this.mapTransaction(data);
+    return await this.mapTransaction(data);
   }
 
   async findLatestPawnSource(
@@ -743,7 +803,7 @@ export class TransactionsService {
 
     if (!row) return null;
     assertBranchAccess(user, (row as any).branch_id);
-    return this.mapTransaction(row);
+    return await this.mapTransaction(row);
   }
 
   async update(
@@ -775,7 +835,7 @@ export class TransactionsService {
       },
       select: TX_SELECT,
     });
-    return this.mapTransaction(updated);
+    return await this.mapTransaction(updated);
   }
 
   async remove(user: UserWithBranch, id: string) {
@@ -809,7 +869,7 @@ export class TransactionsService {
   }
 
   private async buildStats(
-    rows: Array<ReturnType<TransactionsService['mapTransaction']>>,
+    rows: Array<Awaited<ReturnType<TransactionsService['mapTransaction']>>>,
     scoped: string | null,
     date?: string,
   ) {
@@ -910,5 +970,181 @@ export class TransactionsService {
     }
 
     return stats;
+  }
+
+  private async uploadPhoto(
+    base64: string,
+    path: string,
+    bucket: string,
+  ): Promise<string> {
+    const client = this.supabase.getClient();
+    const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
+    const buf = Buffer.from(base64Data, 'base64');
+
+    const { data, error } = await client.storage
+      .from(bucket)
+      .upload(path, buf, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `Photo upload to ${bucket} failed: ${error.message}`,
+      );
+    }
+
+    const { data: signedData, error: signError } = await client.storage
+      .from(bucket)
+      .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+    if (signError || !signedData?.signedUrl) {
+      return `${bucket}/${path}`;
+    }
+
+    return signedData.signedUrl;
+  }
+
+  private buildRenewalUploadPath(
+    branchId: string,
+    customerId: string,
+  ) {
+    const timestamp = Date.now();
+    const rand = Math.random().toString(36).slice(2, 8);
+    return `${branchId}/${customerId}/renewal_${timestamp}_${rand}.jpg`;
+  }
+
+  private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
+    if (!storedUrl) {
+      return '';
+    }
+
+    if (!storedUrl.startsWith('http')) {
+      const parts = storedUrl.split('/');
+      if (parts.length < 2) return storedUrl;
+      const bucket = parts[0];
+      const path = parts.slice(1).join('/');
+
+      try {
+        const { data } = await this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+        return data?.signedUrl || storedUrl;
+      } catch {
+        return storedUrl;
+      }
+    }
+
+    try {
+      const parsedUrl = new URL(storedUrl);
+      const storagePrefix = '/storage/v1/object/public/';
+
+      if (!parsedUrl.pathname.includes(storagePrefix)) {
+        return storedUrl;
+      }
+
+      const storagePath = parsedUrl.pathname.split(storagePrefix)[1];
+      if (!storagePath) {
+        return storedUrl;
+      }
+
+      const [bucketName, ...objectPathParts] = storagePath.split('/');
+      const objectPath = objectPathParts.join('/');
+
+      if (!bucketName || !objectPath) {
+        return storedUrl;
+      }
+
+      const { data, error } = await this.supabase
+        .getClient()
+        .storage.from(bucketName)
+        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+
+      if (error || !data?.signedUrl) {
+        return storedUrl;
+      }
+
+      return data.signedUrl;
+    } catch {
+      return storedUrl;
+    }
+  }
+
+  async syncPastRenewals() {
+    try {
+      const renewTx = await this.prisma.transactions.findMany({
+        where: {
+          purpose: 'Renew',
+          related_pawned_item_id: { not: null },
+          voided_at: null,
+        },
+        select: {
+          id: true,
+          related_pawned_item_id: true,
+          transaction_date: true,
+          cash_in: true,
+        },
+      });
+
+      for (const tx of renewTx) {
+        const pawnedItemId = tx.related_pawned_item_id!;
+        const renewalDate = tx.transaction_date;
+
+        const existingRenewal = await this.prisma.item_renewals.findFirst({
+          where: {
+            pawned_item_id: pawnedItemId,
+            renewal_date: renewalDate,
+          },
+        });
+
+        if (!existingRenewal) {
+          console.log(`[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date}`);
+          await this.prisma.item_renewals.create({
+            data: {
+              pawned_item_id: pawnedItemId,
+              renewal_date: renewalDate,
+              amount_paid: tx.cash_in,
+            },
+          });
+        }
+      }
+
+      const pawnedItems = await this.prisma.pawned_items.findMany({
+        where: {
+          status: 'Active',
+          item_renewals: { some: {} },
+        },
+        include: {
+          item_renewals: {
+            orderBy: { renewal_date: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      for (const item of pawnedItems) {
+        const latestRenewal = item.item_renewals[0];
+        if (latestRenewal) {
+          const renewalDate = new Date(latestRenewal.renewal_date);
+          const pawnDate = new Date(item.pawn_date);
+          
+          if (renewalDate.getTime() > pawnDate.getTime()) {
+            console.log(`[Sync] Updating pawn_date of item ${item.item_id} from ${item.pawn_date} to ${latestRenewal.renewal_date}`);
+            await this.prisma.pawned_items.update({
+              where: { id: item.id },
+              data: {
+                pawn_date: latestRenewal.renewal_date,
+                updated_at: new Date(),
+              },
+            });
+          }
+        }
+      }
+      console.log('[Sync] Past renewals synchronization completed successfully.');
+    } catch (error) {
+      console.error('[Sync] Failed to sync past renewals:', error);
+    }
   }
 }
