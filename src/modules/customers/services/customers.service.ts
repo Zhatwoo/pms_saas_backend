@@ -537,6 +537,7 @@ export class CustomersService {
         existing.full_name,
         changedFields,
         Boolean(logId),
+        logId,
       );
     }
 
@@ -594,6 +595,9 @@ export class CustomersService {
             user_id: admin.id,
             customer_id: id,
             log_id: requestLog.id,
+            event_key: `customer-edit-request:${requestLog.id}:admin:${admin.id}`,
+            entity_type: 'customer',
+            entity_id: id,
           }),
         ),
       );
@@ -825,6 +829,7 @@ export class CustomersService {
     customerName: string,
     changedFields: Record<string, { from: string | null; to: string | null }>,
     hasLogId: boolean,
+    logId?: string,
   ) {
     try {
       const reviewedField = Object.keys(changedFields)[0] ?? 'profile';
@@ -845,6 +850,9 @@ export class CustomersService {
         category: 'Requests',
         user_id: employeeId,
         customer_id: customerId,
+        event_key: `customer-edit-review:${hasLogId ? logId : customerId}:employee:${employeeId}`,
+        entity_type: 'customer',
+        entity_id: customerId,
       });
     } catch (error) {
       this.logger.warn(

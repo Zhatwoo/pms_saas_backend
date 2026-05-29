@@ -18,6 +18,7 @@ import {
   isStatusIncludedInInventoryValuation,
   type InventoryValuationMode,
 } from '../../../common/utils/inventory-valuation.util';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 
 @Injectable()
 export class BranchesService {
@@ -27,6 +28,7 @@ export class BranchesService {
     private readonly supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -174,6 +176,15 @@ export class BranchesService {
     if (!data) {
       throw new InternalServerErrorException('Branch insert returned no row');
     }
+
+    await this.notificationsService.createForSuperadmins({
+      title: `New branch added - ${String(data.name)}`,
+      subtitle: `System Alert: branch ${String(data.branch_code)} is now available.`,
+      category: 'Alerts',
+      event_key: `branch-created:${String(data.id)}`,
+      entity_type: 'branch',
+      entity_id: String(data.branch_code),
+    });
 
     return this.mapBranchFromDb(data);
   }

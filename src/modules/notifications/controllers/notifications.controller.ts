@@ -1,4 +1,13 @@
-import { Controller, Get, Patch, Param, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  MessageEvent,
+  Param,
+  Patch,
+  Req,
+  Sse,
+} from '@nestjs/common';
+import { map, Observable } from 'rxjs';
 import { NotificationsService } from '../services/notifications.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
@@ -12,6 +21,25 @@ export class NotificationsController {
   @Get()
   findAll(@Req() req: { user: AuthenticatedUserProfile }) {
     return this.notificationsService.findAll(req.user);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('unread-count')
+  unreadCount(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.notificationsService.unreadCount(req.user);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Sse('stream')
+  stream(
+    @Req() req: { user: AuthenticatedUserProfile },
+  ): Observable<MessageEvent> {
+    return this.notificationsService.stream(req.user).pipe(
+      map((event) => ({
+        type: event.type,
+        data: event.data,
+      })),
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

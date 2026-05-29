@@ -844,19 +844,54 @@ export class FundRequestsService {
     });
   }
 
-  private async notifyBranch(params: {
+  private buildFundTransferTargetUrl(params: {
+    branchId: string;
+    requestId: string;
+  }): string {
+    const search = new URLSearchParams({
+      branch: params.branchId,
+      fundRequestId: params.requestId,
+      focus: 'fund-transfer',
+    });
+
+    return `/branch-finance?${search.toString()}`;
+  }
+
+  private async notifyFundTransfer(params: {
     branchId: string | null | undefined;
     title: string;
-    subtitle: string;
-    category: 'Transactions' | 'Alerts' | 'Requests';
+    message: string;
+    requestId: string;
+    requestNo: string;
+    eventAction: string;
+    recipientUserId?: string | null;
+    recipientRole?: 'admin' | 'employee' | null;
   }) {
     if (!params.branchId) return;
 
     await this.notificationsService.create({
       title: params.title,
-      subtitle: params.subtitle,
-      category: params.category,
+      subtitle: params.message,
+      message: params.message,
+      category: 'Requests',
+      notification_type: 'FUND_TRANSFER',
+      user_id: params.recipientUserId ?? null,
       branch_id: params.branchId,
+      target_role: params.recipientUserId
+        ? null
+        : (params.recipientRole ?? null),
+      target_url: this.buildFundTransferTargetUrl({
+        branchId: params.branchId,
+        requestId: params.requestId,
+      }),
+      entity_type: 'fund_transfer',
+      entity_id: params.requestId,
+      event_key: [
+        'fund-transfer',
+        params.requestId,
+        params.eventAction,
+        params.recipientUserId ?? params.recipientRole ?? params.branchId,
+      ].join(':'),
     });
   }
 
@@ -958,11 +993,13 @@ export class FundRequestsService {
     });
 
     try {
-      await this.notifyBranch({
+      await this.notifyFundTransfer({
         branchId: branch.id,
         title: 'New fund request submitted',
-        subtitle: `${mapped.branch?.name ?? 'A branch'} submitted ${mapped.requestNo} for ₱${mapped.amountRequested.toFixed(2)}${mapped.purpose ? ` (${mapped.purpose})` : ''}.`,
-        category: 'Requests',
+        message: `${mapped.branch?.name ?? 'A branch'} submitted ${mapped.requestNo} for PHP ${mapped.amountRequested.toFixed(2)}${mapped.purpose ? ` (${mapped.purpose})` : ''}.`,
+        requestId: mapped.id,
+        requestNo: mapped.requestNo,
+        eventAction: 'created',
       });
     } catch (notifErr) {
       console.error(
@@ -1120,25 +1157,35 @@ export class FundRequestsService {
 
       if (sourceBranch) {
         await Promise.all([
-          this.notifyBranch({
+          this.notifyFundTransfer({
             branchId: sourceBranch.id,
             title: 'Branch transfer requires source confirmation',
-            subtitle: `${mapped.requestNo} will be deducted from ${sourceBranch.name} for ${destinationBranch.name}.`,
-            category: 'Requests',
+            message: `${mapped.requestNo} will be deducted from ${sourceBranch.name} for ${destinationBranch.name}.`,
+            requestId: mapped.id,
+            requestNo: mapped.requestNo,
+            eventAction: 'source-confirmation-required',
           }),
-          this.notifyBranch({
+          this.notifyFundTransfer({
             branchId: destinationBranch.id,
             title: 'Incoming branch transfer scheduled',
-            subtitle: transferSubtitle,
-            category: 'Requests',
+            message: transferSubtitle,
+            requestId: mapped.id,
+            requestNo: mapped.requestNo,
+            eventAction: 'destination-scheduled',
+            recipientUserId: mapped.receiverUserId,
+            recipientRole: mapped.receiverRole as 'admin' | 'employee' | null,
           }),
         ]);
       } else {
-        await this.notifyBranch({
+        await this.notifyFundTransfer({
           branchId: destinationBranch.id,
           title: 'Fund transfer awaiting receipt confirmation',
-          subtitle: transferSubtitle,
-          category: 'Requests',
+          message: transferSubtitle,
+          requestId: mapped.id,
+          requestNo: mapped.requestNo,
+          eventAction: 'receipt-confirmation-required',
+          recipientUserId: mapped.receiverUserId,
+          recipientRole: mapped.receiverRole as 'admin' | 'employee' | null,
         });
       }
     } catch (notifErr) {
@@ -1288,17 +1335,22 @@ export class FundRequestsService {
     });
 
     try {
-      await this.notifyBranch({
+      await this.notifyFundTransfer({
         branchId: mapped.branchId,
         title:
           dto.decision === FundRequestReviewDecision.APPROVED
             ? 'Fund request approved'
             : 'Fund request rejected',
-        subtitle:
+        message:
           dto.decision === FundRequestReviewDecision.APPROVED
             ? `${mapped.requestNo} was approved for ₱${(mapped.approvedAmount ?? mapped.amountRequested).toFixed(2)}.`
             : `${mapped.requestNo} was rejected by Super Admin.`,
-        category: 'Requests',
+        requestId: mapped.id,
+        requestNo: mapped.requestNo,
+        eventAction:
+          dto.decision === FundRequestReviewDecision.APPROVED
+            ? 'approved'
+            : 'rejected',
       });
     } catch (notifErr) {
       console.error(
@@ -1470,6 +1522,52 @@ export class FundRequestsService {
         awaitingSourceConfirmation: !!sourceBranch,
       },
     });
+
+    try {
+      const transferMessage = sourceBranch
+        ? `${mapped.requestNo} is awaiting source confirmation from ${sourceBranch.name} before ${resolvedDestinationBranch.name} can receive PHP ${mapped.amountTransferred?.toFixed(2) ?? transferAmount.toFixed(2)}.`
+        : `${mapped.requestNo} is ready for ${resolvedDestinationBranch.name} to confirm receipt of PHP ${mapped.amountTransferred?.toFixed(2) ?? transferAmount.toFixed(2)}.`;
+
+      if (sourceBranch) {
+        await Promise.all([
+          this.notifyFundTransfer({
+            branchId: sourceBranch.id,
+            title: 'Branch transfer requires source confirmation',
+            message: `${mapped.requestNo} will be deducted from ${sourceBranch.name} for ${resolvedDestinationBranch.name}.`,
+            requestId: mapped.id,
+            requestNo: mapped.requestNo,
+            eventAction: 'source-confirmation-required',
+          }),
+          this.notifyFundTransfer({
+            branchId: resolvedDestinationBranch.id,
+            title: 'Incoming branch transfer scheduled',
+            message: transferMessage,
+            requestId: mapped.id,
+            requestNo: mapped.requestNo,
+            eventAction: 'destination-scheduled',
+            recipientUserId: mapped.receiverUserId,
+            recipientRole: mapped.receiverRole as 'admin' | 'employee' | null,
+          }),
+        ]);
+      } else {
+        await this.notifyFundTransfer({
+          branchId: resolvedDestinationBranch.id,
+          title: 'Fund transfer awaiting receipt confirmation',
+          message: transferMessage,
+          requestId: mapped.id,
+          requestNo: mapped.requestNo,
+          eventAction: 'receipt-confirmation-required',
+          recipientUserId: mapped.receiverUserId,
+          recipientRole: mapped.receiverRole as 'admin' | 'employee' | null,
+        });
+      }
+    } catch (notifErr) {
+      console.error(
+        '[FundRequestsService] Failed to notify transfer recipients:',
+        notifErr,
+      );
+    }
+
     return mapped;
   }
 
@@ -1612,11 +1710,15 @@ export class FundRequestsService {
     });
 
     try {
-      await this.notifyBranch({
+      await this.notifyFundTransfer({
         branchId: destinationBranch.id,
         title: 'Branch transfer ready for receipt confirmation',
-        subtitle: `${mapped.requestNo} was released by ${sourceBranch.name} for ₱${sentAmount.toFixed(2)} and is waiting for ${destinationBranch.name} to confirm receipt.`,
-        category: 'Requests',
+        message: `${mapped.requestNo} was released by ${sourceBranch.name} for PHP ${sentAmount.toFixed(2)} and is waiting for ${destinationBranch.name} to confirm receipt.`,
+        requestId: mapped.id,
+        requestNo: mapped.requestNo,
+        eventAction: 'source-confirmed',
+        recipientUserId: mapped.receiverUserId,
+        recipientRole: mapped.receiverRole as 'admin' | 'employee' | null,
       });
     } catch (notifErr) {
       console.error(
@@ -1883,11 +1985,13 @@ export class FundRequestsService {
 
     try {
       if (mapped.sourceBranchId) {
-        await this.notifyBranch({
+        await this.notifyFundTransfer({
           branchId: mapped.sourceBranchId,
           title: 'Branch transfer completed',
-          subtitle: `${mapped.requestNo} was received by ${resolvedDestinationBranch.name} for ₱${mapped.confirmedReceivedAmount?.toFixed(2) ?? confirmedAmount.toFixed(2)}.`,
-          category: 'Requests',
+          message: `${mapped.requestNo} was received by ${resolvedDestinationBranch.name} for PHP ${mapped.confirmedReceivedAmount?.toFixed(2) ?? confirmedAmount.toFixed(2)}.`,
+          requestId: mapped.id,
+          requestNo: mapped.requestNo,
+          eventAction: 'completed',
         });
       }
     } catch (notifErr) {

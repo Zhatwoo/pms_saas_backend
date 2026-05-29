@@ -537,6 +537,9 @@ export class PasswordChangeRequestsService {
           category: 'Requests',
           user_id: approver.id,
           branch_id: requester.branchId ?? undefined,
+          event_key: `password-change:${requestId}:approver:${approver.id}`,
+          entity_type: 'password_request',
+          entity_id: requestId,
         }),
       ),
     );
@@ -676,6 +679,9 @@ export class PasswordChangeRequestsService {
       category: 'Requests',
       user_id: existing.requesterUserId,
       branch_id: existing.requesterBranchId ?? undefined,
+      event_key: `password-change:${existing.id}:review`,
+      entity_type: 'password_request',
+      entity_id: existing.id,
     });
 
     const usersById = await this.loadUsersByIds([
