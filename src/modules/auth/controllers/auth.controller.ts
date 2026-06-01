@@ -230,6 +230,9 @@ export class AuthController {
     const sanitized: UpdateUserDto = {};
     if (dto.fullName !== undefined) sanitized.fullName = dto.fullName;
     if (dto.avatarUrl !== undefined) sanitized.avatarUrl = dto.avatarUrl;
+    if (dto.notificationSound !== undefined) {
+      sanitized.notificationSound = dto.notificationSound;
+    }
 
     const updated = await this.usersService.update(req.user.id, sanitized);
     req.auditLogContext = {
