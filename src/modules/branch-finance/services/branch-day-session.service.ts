@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Role, TransactionPurpose } from '../../../common/enums';
@@ -404,14 +405,18 @@ export class BranchDaySessionService {
       this.logger.debug(
         `[StartingBalance] check branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
       );
-      // The employee's physical cash count is authoritative — they must count all
-      // cash on hand, including fund transfers received before the session opened.
-      // A variance from the system's suggested amount is recorded for audit but must
-      // never block the count; blocking it would leave the branch book at zero.
       if (Math.abs(expected - confirmedAmount) > 0.009) {
         this.logger.warn(
-          `[StartingBalance] VARIANCE branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
+          `[StartingBalance] MISMATCH branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
         );
+        throw new UnprocessableEntityException({
+          code: 'STARTING_BALANCE_MISMATCH',
+          message:
+            'Starting cash does not match the expected amount from the last closed business day. File an incident report.',
+          expectedAmount: expected,
+          enteredAmount: confirmedAmount,
+          businessDate: todayStr,
+        });
       }
     }
 

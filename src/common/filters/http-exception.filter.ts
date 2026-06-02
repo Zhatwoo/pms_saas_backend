@@ -155,6 +155,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
           'required_amount',
           'branch_id',
           'business_date',
+          'businessDate',
+          'expectedAmount',
+          'enteredAmount',
           'sessionStatus',
         ] as const;
         for (const key of passthrough) {
