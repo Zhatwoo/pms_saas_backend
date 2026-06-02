@@ -70,7 +70,11 @@ export class FinanceDailyBalanceService {
     branchId: string,
     businessDateStr: string,
     delta: number,
-    options?: { bypassOperationalSessionGate?: boolean },
+    options?: {
+      bypassOperationalSessionGate?: boolean;
+      /** Use stored ending + delta (applyNetChange after a ledger row already exists). */
+      useIncrementalBaseline?: boolean;
+    },
   ): Promise<{
     baseline: number;
     next: number;
@@ -93,11 +97,17 @@ export class FinanceDailyBalanceService {
         FOR UPDATE
       `;
 
-    const { baseline, carriedForCreate } = await this.resolveCurrentBookBalanceInTx(
-      client,
-      branchId,
-      businessDateStr,
-    );
+    const { baseline, carriedForCreate } = options?.useIncrementalBaseline
+      ? await this.resolveIncrementalBookBalanceInTx(
+          client,
+          branchId,
+          businessDateStr,
+        )
+      : await this.resolveCurrentBookBalanceInTx(
+          client,
+          branchId,
+          businessDateStr,
+        );
 
     const current = await client.daily_balances.findUnique({
       where: {
@@ -325,9 +335,58 @@ export class FinanceDailyBalanceService {
   }
 
   /**
-   * Book balance for applyNetChange when today's branch_day_sessions row is open:
-   * confirmed session start + operational net since {@link resolveOperationalCutoffMs}
-   * (never a stale daily_balances.ending_balance from a prior shift).
+   * Incremental book balance for applyNetChange: stored daily_balances.ending_balance
+   * (or confirmed session start when today's row is not written yet). Avoids double-counting
+   * when the caller already persisted the transaction row before applying the delta.
+   */
+  private async resolveIncrementalBookBalanceInTx(
+    client: Tx,
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<{ baseline: number; carriedForCreate: number }> {
+    const date = this.toRecordDate(businessDateStr);
+    const current = await client.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: { branch_id: branchId, record_date: date },
+      },
+      select: { ending_balance: true, starting_balance: true },
+    });
+
+    if (current) {
+      const ending = this.dec(current.ending_balance);
+      const starting = this.dec(current.starting_balance);
+      return {
+        baseline: ending,
+        carriedForCreate: starting > 0 ? starting : ending,
+      };
+    }
+
+    const session = await client.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: date,
+        },
+      },
+      select: { starting_balance: true, is_closed: true },
+    });
+
+    if (session && !session.is_closed && session.starting_balance != null) {
+      const start = this.dec(session.starting_balance);
+      return { baseline: start, carriedForCreate: start };
+    }
+
+    return this.resolveCurrentBookBalanceInTx(
+      client,
+      branchId,
+      businessDateStr,
+    );
+  }
+
+  /**
+   * Full book balance recompute (pre-post validation, reconciliation, live ledger display).
+   * When today's branch_day_sessions row is open: confirmed session start + operational net
+   * since {@link resolveOperationalCutoffMs}.
    */
   private async resolveCurrentBookBalanceInTx(
     client: Tx,
@@ -875,7 +934,7 @@ export class FinanceDailyBalanceService {
           branchId,
           businessDateStr,
           delta,
-          options,
+          { ...options, useIncrementalBaseline: true },
         );
 
       this.throwIfNegativeEnding(
