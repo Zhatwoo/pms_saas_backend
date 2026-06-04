@@ -33,6 +33,7 @@ export class UsersService {
     role: true,
     branch_id: true,
     avatar_url: true,
+    notification_sound: true,
     account_status: true,
     created_at: true,
     branches: { select: { name: true } },
@@ -94,6 +95,7 @@ export class UsersService {
       branchId: row.branch_id,
       branchName: row.branches?.name ?? null,
       accountStatus: row.account_status ?? 'active',
+      notificationSound: row.notification_sound ?? 'sound8.mp3',
       createdAt: row.created_at,
     };
   }
@@ -263,7 +265,8 @@ export class UsersService {
       dto.avatarUrl === undefined &&
       dto.accountStatus === undefined &&
       dto.role === undefined &&
-      dto.branchId === undefined
+      dto.branchId === undefined &&
+      dto.notificationSound === undefined
     ) {
       throw new BadRequestException('No updates provided');
     }
@@ -364,6 +367,9 @@ export class UsersService {
     }
 
     if (dto.avatarUrl !== undefined) payload.avatar_url = dto.avatarUrl;
+    if (dto.notificationSound !== undefined) {
+      payload.notification_sound = dto.notificationSound;
+    }
 
     const updated = await this.prisma.users.update({
       where: { auth_id: existing.auth_id },

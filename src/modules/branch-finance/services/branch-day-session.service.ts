@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Role, TransactionPurpose } from '../../../common/enums';
@@ -139,16 +140,10 @@ export class BranchDaySessionService {
   /**
    * Suggested starting cash for the next shift on businessDateStr.
    *
-   * When today's session is already closed (same-day multi-shift scenario):
-   *   suggestion = priorDayEnding + fullDayNet(today)
+   * Prefers the employee-confirmed End Day closing balance (daily_balances.ending_balance)
+   * from the last closed session — e.g. ₱16,000 entered at End Day stays ₱16,000 at Start Day.
    *
-   * This is non-compounding: priorDayEnding is yesterday's fixed book closing.
-   * No matter how many End→Start cycles happen today, the same priorDayEnding
-   * is used each time, so todayÛs transactions (including pre-session fund
-   * transfers) are counted exactly once in fullDayNet.
-   *
-   * When no session exists yet (normal next-day start), falls back to the
-   * standard suggestion (prior day's book ending).
+   * Falls back to ledger math (prior day ending + today's net) only when no confirmed closing exists.
    */
   private async resolveSuggestedStartingBalance(
     branchId: string,
@@ -168,6 +163,18 @@ export class BranchDaySessionService {
       `[ResolveSuggestedStart] branch=${branchId} date=${businessDateStr} isClosed=${dayRow?.is_closed ?? null}`,
     );
     if (dayRow?.is_closed) {
+      const confirmedClosing =
+        await this.financeDailyBalance.confirmedClosingBalanceForBusinessDate(
+          branchId,
+          businessDateStr,
+        );
+      if (confirmedClosing != null) {
+        this.logger.warn(
+          `[ResolveSuggestedStart] isClosed=true confirmedClosing=${confirmedClosing}`,
+        );
+        return confirmedClosing;
+      }
+
       const yesterdayStr = addManilaCalendarDays(businessDateStr, -1);
       const priorDayEnding =
         await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
@@ -180,7 +187,7 @@ export class BranchDaySessionService {
       );
       const result = Math.max(0, Number((priorDayEnding + fullNet).toFixed(2)));
       this.logger.warn(
-        `[ResolveSuggestedStart] isClosed=true priorDayEnding=${priorDayEnding} fullNet=${fullNet} result=${result}`,
+        `[ResolveSuggestedStart] isClosed=true (ledger fallback) priorDayEnding=${priorDayEnding} fullNet=${fullNet} result=${result}`,
       );
       return result;
     }
@@ -398,14 +405,18 @@ export class BranchDaySessionService {
       this.logger.debug(
         `[StartingBalance] check branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
       );
-      // The employee's physical cash count is authoritative — they must count all
-      // cash on hand, including fund transfers received before the session opened.
-      // A variance from the system's suggested amount is recorded for audit but must
-      // never block the count; blocking it would leave the branch book at zero.
       if (Math.abs(expected - confirmedAmount) > 0.009) {
         this.logger.warn(
-          `[StartingBalance] VARIANCE branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
+          `[StartingBalance] MISMATCH branch=${params.branchId} businessDate=${todayStr} expected=${expected} entered=${confirmedAmount}`,
         );
+        throw new UnprocessableEntityException({
+          code: 'STARTING_BALANCE_MISMATCH',
+          message:
+            'Starting cash does not match the expected amount from the last closed business day. File an incident report.',
+          expectedAmount: expected,
+          enteredAmount: confirmedAmount,
+          businessDate: todayStr,
+        });
       }
     }
 

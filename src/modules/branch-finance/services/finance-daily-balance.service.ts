@@ -70,7 +70,11 @@ export class FinanceDailyBalanceService {
     branchId: string,
     businessDateStr: string,
     delta: number,
-    options?: { bypassOperationalSessionGate?: boolean },
+    options?: {
+      bypassOperationalSessionGate?: boolean;
+      /** Use stored ending + delta (applyNetChange after a ledger row already exists). */
+      useIncrementalBaseline?: boolean;
+    },
   ): Promise<{
     baseline: number;
     next: number;
@@ -93,11 +97,17 @@ export class FinanceDailyBalanceService {
         FOR UPDATE
       `;
 
-    const { baseline, carriedForCreate } = await this.resolveCurrentBookBalanceInTx(
-      client,
-      branchId,
-      businessDateStr,
-    );
+    const { baseline, carriedForCreate } = options?.useIncrementalBaseline
+      ? await this.resolveIncrementalBookBalanceInTx(
+          client,
+          branchId,
+          businessDateStr,
+        )
+      : await this.resolveCurrentBookBalanceInTx(
+          client,
+          branchId,
+          businessDateStr,
+        );
 
     const current = await client.daily_balances.findUnique({
       where: {
@@ -325,9 +335,58 @@ export class FinanceDailyBalanceService {
   }
 
   /**
-   * Book balance for applyNetChange when today's branch_day_sessions row is open:
-   * confirmed session start + operational net since {@link resolveOperationalCutoffMs}
-   * (never a stale daily_balances.ending_balance from a prior shift).
+   * Incremental book balance for applyNetChange: stored daily_balances.ending_balance
+   * (or confirmed session start when today's row is not written yet). Avoids double-counting
+   * when the caller already persisted the transaction row before applying the delta.
+   */
+  private async resolveIncrementalBookBalanceInTx(
+    client: Tx,
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<{ baseline: number; carriedForCreate: number }> {
+    const date = this.toRecordDate(businessDateStr);
+    const current = await client.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: { branch_id: branchId, record_date: date },
+      },
+      select: { ending_balance: true, starting_balance: true },
+    });
+
+    if (current) {
+      const ending = this.dec(current.ending_balance);
+      const starting = this.dec(current.starting_balance);
+      return {
+        baseline: ending,
+        carriedForCreate: starting > 0 ? starting : ending,
+      };
+    }
+
+    const session = await client.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: date,
+        },
+      },
+      select: { starting_balance: true, is_closed: true },
+    });
+
+    if (session && !session.is_closed && session.starting_balance != null) {
+      const start = this.dec(session.starting_balance);
+      return { baseline: start, carriedForCreate: start };
+    }
+
+    return this.resolveCurrentBookBalanceInTx(
+      client,
+      branchId,
+      businessDateStr,
+    );
+  }
+
+  /**
+   * Full book balance recompute (pre-post validation, reconciliation, live ledger display).
+   * When today's branch_day_sessions row is open: confirmed session start + operational net
+   * since {@link resolveOperationalCutoffMs}.
    */
   private async resolveCurrentBookBalanceInTx(
     client: Tx,
@@ -554,6 +613,40 @@ export class FinanceDailyBalanceService {
   }
 
   /**
+   * Employee-confirmed closing balance from End Day (physical count persisted on daily_balances).
+   * Used as the expected opening count for the next shift — not a recalculated ledger total.
+   */
+  async confirmedClosingBalanceForBusinessDate(
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<number | null> {
+    const date = this.toRecordDate(businessDateStr);
+    const daySession = await this.db.branch_day_sessions.findUnique({
+      where: {
+        branch_id_session_date: {
+          branch_id: branchId,
+          session_date: date,
+        },
+      },
+      select: { is_closed: true },
+    });
+    if (!daySession?.is_closed) {
+      return null;
+    }
+
+    const row = await this.db.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: { branch_id: branchId, record_date: date },
+      },
+      select: { ending_balance: true },
+    });
+    if (row?.ending_balance == null) {
+      return null;
+    }
+    return Number(this.dec(row.ending_balance).toFixed(2));
+  }
+
+  /**
    * Book cash position at end of a Manila calendar day (for suggested next-day opening count).
    * = that day's stored starting (employee-confirmed when row exists, else branch opening capital)
    * + same-day operational net (cash_in − cash_out, excluding Start/End & voided).
@@ -620,8 +713,19 @@ export class FinanceDailyBalanceService {
         .toISOString()
         .slice(0, 10);
 
-      // If the closed session is today (same-day multi-shift), use priorDayEnding + fullDayNet
-      // so the suggestion is non-compounding and counts all today's transactions exactly once.
+      const confirmedClosing =
+        await this.confirmedClosingBalanceForBusinessDate(
+          branchId,
+          sessionDateStr,
+        );
+      if (confirmedClosing != null) {
+        return {
+          amount: confirmedClosing,
+          closedSessionRecordDate: sessionDateStr,
+        };
+      }
+
+      // Legacy fallback when End Day did not persist daily_balances (older DB rows).
       if (sessionDateStr === businessDateStr) {
         const priorStr = addManilaCalendarDays(businessDateStr, -1);
         const priorDayEnding = Number(
@@ -669,10 +773,9 @@ export class FinanceDailyBalanceService {
   }
 
   /**
-   * Expected physical count when opening `businessDateStr` (Manila): the **book ending** from the
-   * most recent closed `branch_day_sessions` row with `session_date <=` that date — i.e. what End Day
-   * persisted on `daily_balances` for that session date. Not `Math.max` with older rows (that showed
-   * yesterday’s 1500 over today’s closed 1200).
+   * Expected physical count when opening `businessDateStr` (Manila): the employee-confirmed End Day
+   * closing balance (`daily_balances.ending_balance`) from the most recent closed session on or
+   * before that date. Falls back to ledger math only when no confirmed closing row exists.
    *
    * If no closed session yet: `opening_cash_balance` vs prior-day ledger ending (first-day fallback).
    */
@@ -831,7 +934,7 @@ export class FinanceDailyBalanceService {
           branchId,
           businessDateStr,
           delta,
-          options,
+          { ...options, useIncrementalBaseline: true },
         );
 
       this.throwIfNegativeEnding(
