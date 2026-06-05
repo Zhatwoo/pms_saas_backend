@@ -41,6 +41,8 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { CacheModuleConfig } from './infrastructure/cache';
+import { AppController } from './app.controller';
+import { HealthController } from './modules/health/health.controller';
 
 @Module({
   // Triggering reload for new QR replacement routes
@@ -96,6 +98,7 @@ import { CacheModuleConfig } from './infrastructure/cache';
     DevicesModule,
     CategoriesModule,
   ],
+  controllers: [AppController, HealthController],
   providers: [
     {
       provide: APP_GUARD,
