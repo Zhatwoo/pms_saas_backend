@@ -17,6 +17,11 @@ import {
 import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
+import {
+  INVENTORY_VALUATION_STATUSES,
+  isStatusIncludedInInventoryValuation,
+  findInterestRateGroup,
+} from '../../../common/utils/inventory-valuation.util';
 
 interface QueryFilters {
   branch?: string;
@@ -136,8 +141,7 @@ export class InventoryService {
 
     let query = client
       .from('pawned_items')
-      .select('*, customers(*), item_renewals(*)', { count: 'exact' })
-      .order('created_at', { ascending: false });
+      .select('*, customers(*), item_renewals(*)');
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
@@ -150,6 +154,8 @@ export class InventoryService {
     }
     if (filters.status) {
       query = query.eq('status', filters.status);
+    } else {
+      query = query.neq('status', 'Expired');
     }
     if (filters.search) {
       query = query.or(
@@ -164,17 +170,54 @@ export class InventoryService {
         .lt('pawn_date', this.nextDay(filters.date));
     }
 
-    const from = (filters.page - 1) * filters.limit;
-    query = query.range(from, from + filters.limit - 1);
-
-    const { data, error, count } = await query;
+    const { data, error } = await query;
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
+    const { data: interestRatesData } = await client
+      .from('shop_settings')
+      .select('setting_value')
+      .eq('setting_key', 'interest_rates')
+      .maybeSingle();
+    const interestRates = (interestRatesData?.setting_value as any[]) || [];
+    const today = new Date();
+
+    const filteredItems = (data || []).filter((item: any) => {
+      if (item.status !== 'Active') {
+        return true;
+      }
+      if (!item.pawn_date) {
+        return true;
+      }
+      const category = item.category;
+      const group = findInterestRateGroup(interestRates, category);
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
+      const maturityDate = new Date(item.pawn_date);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
+
+      const daysRemaining = Math.ceil(
+        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
+      return daysRemaining > 0;
+    });
+
+    // Order by created_at descending in memory
+    filteredItems.sort((a: any, b: any) => {
+      const dateA = new Date(a.created_at || 0).getTime();
+      const dateB = new Date(b.created_at || 0).getTime();
+      return dateB - dateA;
+    });
+
+    const totalCount = filteredItems.length;
+    const from = (filters.page - 1) * filters.limit;
+    const paginatedItems = filteredItems.slice(from, from + filters.limit);
+
     return {
       items: await Promise.all(
-        (data || []).map(async (item: any) => ({
+        paginatedItems.map(async (item: any) => ({
           id: item.id,
           itemId: item.item_id,
           itemName: item.item_name,
@@ -204,7 +247,7 @@ export class InventoryService {
           memoryStorage: item.memory_storage,
         })),
       ),
-      total: count || 0,
+      total: totalCount,
     };
   }
 
@@ -317,7 +360,7 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('pawned_items')
-      .select('*, item_renewals(*), customer:customers(*), transactions(*, users(id, full_name))')
+      .select('*, item_renewals(*), customer:customers(*), transactions(*, users!transactions_created_by_user_id_fkey(id, full_name))')
       .eq('id', id)
       .single();
 
@@ -365,18 +408,42 @@ export class InventoryService {
     const scopedBranchId =
       user.role === Role.SUPER_ADMIN ? null : requireUserBranchId(user);
 
-    // 1. Try Pawned Items
+    // Resolve the live inventory row first. A stale pawned row can remain in the
+    // table after a buy-back/redeem flow, so prefer the current Available sale row
+    // when the same item ID exists in both places.
     let pawnedQuery = client
       .from('pawned_items')
       .select('*, item_renewals(*)')
-      .ilike('item_id', cleanId);
+      .ilike('item_id', cleanId)
+      .in('status', ['Active', 'Expired', 'Inventory'])
+      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false });
 
     if (scopedBranchId) {
       pawnedQuery = pawnedQuery.eq('branch_id', scopedBranchId);
     }
 
-    const { data: pawnedRows, error: pawnedError } = await pawnedQuery.limit(1);
+    let saleQuery = client
+      .from('sale_items')
+      .select('*')
+      .ilike('item_id', cleanId)
+      .in('status', ['Available', 'available'])
+      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (scopedBranchId) {
+      saleQuery = saleQuery.eq('branch_id', scopedBranchId);
+    }
+
+    const [pawnedResult, saleResult] = await Promise.all([
+      pawnedQuery.limit(1),
+      saleQuery.limit(1),
+    ]);
+
+    const { data: pawnedRows, error: pawnedError } = pawnedResult;
     const pawnedData = Array.isArray(pawnedRows) ? pawnedRows[0] : null;
+    const { data: saleRows, error: saleError } = saleResult;
+    const saleData = Array.isArray(saleRows) ? saleRows[0] : null;
 
     if (pawnedError) {
       console.error(
@@ -385,7 +452,34 @@ export class InventoryService {
       );
     }
 
-    if (pawnedData) {
+    if (saleError) {
+      console.error(
+        `[InventoryService] Error fetching sale item ${cleanId}:`,
+        saleError,
+      );
+    }
+
+    const pawnedStatus = String(pawnedData?.status || '').trim();
+    const pawnedIsCurrentInventory = isStatusIncludedInInventoryValuation(pawnedStatus);
+
+    if (saleData) {
+      assertResourceBranch(user, saleData.branch_id);
+      const originalPhoto = await this.resolveStorageUrl(saleData.image_url);
+
+      return {
+        id: saleData.id,
+        itemId: saleData.item_id,
+        itemName: saleData.item_name,
+        category: saleData.category,
+        branch: saleData.branch,
+        pawnDate: saleData.available_date,
+        status: saleData.status,
+        originalPhoto,
+        type: 'SALE',
+      };
+    }
+
+    if (pawnedData && pawnedIsCurrentInventory) {
       assertResourceBranch(user, pawnedData.branch_id);
 
       type CustomerSnapshot = {
@@ -455,43 +549,6 @@ export class InventoryService {
         customerContact: customerData?.contact_number || '',
         customerIdPresented: customerData?.id_presented || '',
         type: 'PAWNED',
-      };
-    }
-
-    // 2. Try Sale Items
-    let saleQuery = client
-      .from('sale_items')
-      .select('*')
-      .ilike('item_id', cleanId);
-
-    if (scopedBranchId) {
-      saleQuery = saleQuery.eq('branch_id', scopedBranchId);
-    }
-
-    const { data: saleRows, error: saleError } = await saleQuery.limit(1);
-    const saleData = Array.isArray(saleRows) ? saleRows[0] : null;
-
-    if (saleError) {
-      console.error(
-        `[InventoryService] Error fetching sale item ${cleanId}:`,
-        saleError,
-      );
-    }
-
-    if (saleData) {
-      assertResourceBranch(user, saleData.branch_id);
-      const originalPhoto = await this.resolveStorageUrl(saleData.image_url);
-
-      return {
-        id: saleData.id,
-        itemId: saleData.item_id,
-        itemName: saleData.item_name,
-        category: saleData.category,
-        branch: saleData.branch,
-        pawnDate: saleData.available_date,
-        status: saleData.status,
-        originalPhoto,
-        type: 'SALE',
       };
     }
 
@@ -647,6 +704,9 @@ export class InventoryService {
         subtitle: `Transaction Alert: expired pawn item [${pawnedItem.item_id}]`,
         category: 'Alerts',
         branch_id: pawnedItem.branch_id,
+        event_key: `inventory-expired:${pawnedItem.id}`,
+        entity_type: 'pawn_item',
+        entity_id: pawnedItem.item_id,
       });
     } catch (e) {
       console.warn('[InventoryService] Failed to create notification', e);
@@ -832,25 +892,110 @@ export class InventoryService {
     user: UserWithBranch,
     branchIdParam: string | number,
     scannedItemIds: string[],
+    checklistSource: 'pawned' | 'sale' | null = null,
   ) {
     const branchId = String(branchIdParam);
     assertResourceBranch(user, branchId);
 
     const client = this.supabase.getClient();
 
-    const { data: systemItems, error } = await client
-      .from('pawned_items')
-      .select('item_id, item_name, category')
-      .eq('branch_id', branchId)
-      .eq('status', 'Active');
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    let systemItemListSource:
+      | Array<{ item_id?: string | null; item_name?: string | null; category?: string | null; status?: string | null }>
+      = [];
+
+    if (checklistSource === 'sale') {
+      const { data: saleItems, error: saleError } = await client
+        .from('sale_items')
+        .select('item_id, item_name, category')
+        .eq('branch_id', branchId)
+        .in('status', ['Available', 'available']);
+      if (saleError) {
+        throw new InternalServerErrorException(saleError.message);
+      }
+
+      systemItemListSource = Array.isArray(saleItems) ? saleItems : [];
+    } else if (checklistSource === 'pawned') {
+      const { data: pawnedItems, error: pawnedError } = await client
+        .from('pawned_items')
+        .select('item_id, item_name, category, status')
+        .eq('branch_id', branchId)
+        .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
+      if (pawnedError) {
+        throw new InternalServerErrorException(pawnedError.message);
+      }
+
+      const { data: redeemedRows, error: redeemedError } = await client
+        .from('transactions')
+        .select('related_pawned_item_id')
+        .eq('branch_id', branchId)
+        .in('purpose', ['Redeem', 'Buy Back']);
+      if (redeemedError) {
+        throw new InternalServerErrorException(redeemedError.message);
+      }
+
+      const redeemedPawnedIds = new Set(
+        (Array.isArray(redeemedRows) ? redeemedRows : [])
+          .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+      );
+
+      systemItemListSource = (Array.isArray(pawnedItems) ? pawnedItems : []).filter(
+        (item: { item_id?: string | null; status?: string | null }) =>
+          isStatusIncludedInInventoryValuation(item.status) &&
+          typeof item.item_id === 'string' &&
+          item.item_id.trim().length > 0 &&
+          !redeemedPawnedIds.has(item.item_id),
+      );
+    } else {
+      const { data: pawnedItems, error: pawnedError } = await client
+        .from('pawned_items')
+        .select('item_id, item_name, category, status')
+        .eq('branch_id', branchId)
+        .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
+      if (pawnedError) {
+        throw new InternalServerErrorException(pawnedError.message);
+      }
+
+      const { data: redeemedRows, error: redeemedError } = await client
+        .from('transactions')
+        .select('related_pawned_item_id')
+        .eq('branch_id', branchId)
+        .in('purpose', ['Redeem', 'Buy Back']);
+      if (redeemedError) {
+        throw new InternalServerErrorException(redeemedError.message);
+      }
+
+      const redeemedPawnedIds = new Set(
+        (Array.isArray(redeemedRows) ? redeemedRows : [])
+          .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+      );
+
+      const { data: saleItems, error: saleError } = await client
+        .from('sale_items')
+        .select('item_id, item_name, category')
+        .eq('branch_id', branchId)
+        .in('status', ['Available', 'available']);
+      if (saleError) {
+        throw new InternalServerErrorException(saleError.message);
+      }
+
+      systemItemListSource = [
+        ...((Array.isArray(pawnedItems) ? pawnedItems : []).filter(
+          (item: { item_id?: string | null; status?: string | null }) =>
+            isStatusIncludedInInventoryValuation(item.status) &&
+            typeof item.item_id === 'string' &&
+            item.item_id.trim().length > 0 &&
+            !redeemedPawnedIds.has(item.item_id),
+        )),
+        ...(Array.isArray(saleItems) ? saleItems : []),
+      ];
     }
 
     const normalizeId = (value: string) => value.trim().toUpperCase();
 
     const systemItemList = Array.from(
-      (systemItems || [])
+      (systemItemListSource || [])
         .filter(
           (item: any) =>
             typeof item?.item_id === 'string' && item.item_id.trim().length > 0,
@@ -1144,6 +1289,7 @@ export class InventoryService {
           'id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url, created_at',
         )
         .eq('status', 'Available')
+        .gt('price', 0)
         .order('created_at', { ascending: false }),
       client.from('branches').select('id, name, location'),
     ]);

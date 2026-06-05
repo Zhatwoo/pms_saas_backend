@@ -104,7 +104,7 @@ export class ActivityLogsService {
         where,
         orderBy: { created_at: 'desc' },
         include: {
-          users: { select: { full_name: true, email: true, role: true } },
+          users: { select: { full_name: true, email: true, role: true, avatar_url: true } },
           branches: { select: { name: true } },
         },
       });
@@ -121,6 +121,7 @@ export class ActivityLogsService {
           userFullName:
             usersJoin?.full_name || usersJoin?.email || 'Unknown User',
           userRole: log.users?.role || 'Unknown Role',
+          userAvatarUrl: log.users?.avatar_url ?? null,
           branchName: log.branches?.name || 'All Branches',
         };
       });

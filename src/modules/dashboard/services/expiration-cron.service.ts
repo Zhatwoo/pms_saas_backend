@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import { findInterestRateGroup } from '../../../common/utils/inventory-valuation.util';
 
 @Injectable()
 export class ExpirationCronService {
@@ -22,13 +23,21 @@ export class ExpirationCronService {
       // Fetch active pawned items
       const { data: items, error } = await client
         .from('pawned_items')
-        .select('id, item_id, item_name, branch_id, pawn_date')
+        .select('id, item_id, item_name, branch_id, pawn_date, category')
         .eq('status', 'Active');
 
       if (error) {
         this.logger.error('Failed to fetch pawned items', error);
         return;
       }
+
+      // Fetch interest rates settings
+      const { data: settingsData } = await client
+        .from('shop_settings')
+        .select('setting_value')
+        .eq('setting_key', 'interest_rates')
+        .maybeSingle();
+      const interestRates = (settingsData?.setting_value as any[]) || [];
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -39,8 +48,12 @@ export class ExpirationCronService {
       for (const item of items || []) {
         if (!item.pawn_date) continue;
 
+        const category = item.category;
+        const group = findInterestRateGroup(interestRates, category);
+        const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
         const maturityDate = new Date(item.pawn_date);
-        maturityDate.setDate(maturityDate.getDate() + 30);
+        maturityDate.setDate(maturityDate.getDate() + defaultDuration);
         maturityDate.setHours(0, 0, 0, 0);
 
         const diffTime = maturityDate.getTime() - today.getTime();
@@ -65,6 +78,9 @@ export class ExpirationCronService {
             subtitle: `Item ${item.item_name} (Ticket ${item.item_id}) ${statusText}.`,
             category: 'Alerts',
             branch_id: item.branch_id,
+            event_key: `expiration:${item.id}:${daysRemaining}`,
+            entity_type: 'pawn_item',
+            entity_id: item.item_id,
           });
 
           count++;

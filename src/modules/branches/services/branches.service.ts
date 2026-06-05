@@ -18,6 +18,7 @@ import {
   isStatusIncludedInInventoryValuation,
   type InventoryValuationMode,
 } from '../../../common/utils/inventory-valuation.util';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 
 @Injectable()
 export class BranchesService {
@@ -27,6 +28,7 @@ export class BranchesService {
     private readonly supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -175,6 +177,15 @@ export class BranchesService {
       throw new InternalServerErrorException('Branch insert returned no row');
     }
 
+    await this.notificationsService.createForSuperadmins({
+      title: `New branch added - ${String(data.name)}`,
+      subtitle: `System Alert: branch ${String(data.branch_code)} is now available.`,
+      category: 'Alerts',
+      event_key: `branch-created:${String(data.id)}`,
+      entity_type: 'branch',
+      entity_id: String(data.branch_code),
+    });
+
     return this.mapBranchFromDb(data);
   }
 
@@ -243,12 +254,12 @@ export class BranchesService {
     }
   }
 
-  /** Public signup: active branches only (id + name). */
+  /** Public signup/site listing: active branches only. */
   async findActiveSummaries() {
     try {
       const rows = await this.prisma.branches.findMany({
         where: { status: 'Active' },
-        select: { id: true, name: true },
+        select: { id: true, branch_code: true, name: true, location: true },
         orderBy: { name: 'asc' },
       });
 

@@ -264,12 +264,18 @@ export class InventoryController {
   @Post('pawned/qr-tally')
   qrTally(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() dto: { branch_id: string | number; scanned_item_ids: string[] },
+    @Body()
+    dto: {
+      branch_id: string | number;
+      scanned_item_ids: string[];
+      checklist_source?: 'pawned' | 'sale' | null;
+    },
   ) {
     return this.inventoryService.qrTally(
       req.user,
       dto.branch_id,
       dto.scanned_item_ids,
+      dto.checklist_source ?? null,
     );
   }
 

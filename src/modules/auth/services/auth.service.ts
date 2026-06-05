@@ -245,6 +245,7 @@ export class AuthService {
         role: user.role,
         branchId: user.branchId,
         avatarUrl: user.avatarUrl,
+        notificationSound: user.notificationSound,
       },
     };
   }
@@ -260,6 +261,7 @@ export class AuthService {
       role: user.role,
       branchId: user.branchId,
       avatarUrl: user.avatarUrl,
+      notificationSound: user.notificationSound,
     };
   }
 

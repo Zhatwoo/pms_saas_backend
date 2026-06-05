@@ -678,6 +678,9 @@ export class PawnTicketsService {
         subtitle: `Transaction Alert: new pawn [${dto.item.unitName}]`,
         category: 'Transactions',
         branch_id: branchId,
+        event_key: `pawn-ticket:${result.transaction.id}`,
+        entity_type: 'transaction',
+        entity_id: result.transactionNo,
       });
     } catch (e) {
       console.warn('[PawnTicketsService] Failed to create notification', e);
