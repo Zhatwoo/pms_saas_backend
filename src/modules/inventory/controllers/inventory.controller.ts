@@ -14,7 +14,9 @@ import { InventoryService } from '../services/inventory.service';
 import { Public, Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('inventory')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
@@ -175,7 +177,7 @@ export class InventoryController {
     );
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Post('pawned/:id/qr-replacement-request')
   requestQrReplacement(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -264,18 +266,12 @@ export class InventoryController {
   @Post('pawned/qr-tally')
   qrTally(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body()
-    dto: {
-      branch_id: string | number;
-      scanned_item_ids: string[];
-      checklist_source?: 'pawned' | 'sale' | null;
-    },
+    @Body() dto: { branch_id: string | number; scanned_item_ids: string[] },
   ) {
     return this.inventoryService.qrTally(
       req.user,
       dto.branch_id,
       dto.scanned_item_ids,
-      dto.checklist_source ?? null,
     );
   }
 
@@ -378,7 +374,7 @@ export class InventoryController {
   }
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
-  @Patch('for-sale/:id')
+  @Put('for-sale/:id')
   updateForSale(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,

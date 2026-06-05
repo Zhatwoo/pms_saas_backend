@@ -4,7 +4,9 @@ import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('transactions')
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
@@ -36,20 +38,6 @@ export class TransactionsController {
       date,
       range,
       customerId,
-    );
-  }
-
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
-  @Get('pawn-source')
-  findLatestPawnSource(
-    @Req() req: { user: AuthenticatedUserProfile },
-    @Query('relatedPawnedItemId') relatedPawnedItemId?: string,
-    @Query('unitCode') unitCode?: string,
-  ) {
-    return this.transactionsService.findLatestPawnSource(
-      req.user,
-      relatedPawnedItemId,
-      unitCode,
     );
   }
 

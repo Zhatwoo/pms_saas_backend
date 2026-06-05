@@ -19,7 +19,9 @@ import { ListCustomersDto } from '../dto/list-customers.dto';
 import { CustomerNoteDto } from '../dto/customer-note.dto';
 import { RequestCustomerEditDto } from '../dto/request-customer-edit.dto';
 import { MergeDuplicateCustomersDto } from '../dto/merge-duplicate-customers.dto';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}

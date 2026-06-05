@@ -7,7 +7,12 @@ import appConfig from './config/app.config';
 import securityConfig from './config/security.config';
 import { CsrfOriginMiddleware } from './common/middleware/csrf-origin.middleware';
 
-import { AppThrottlerGuard, JwtAuthGuard, RolesGuard } from './common/guards';
+import {
+  AppThrottlerGuard,
+  JwtAuthGuard,
+  OpeningChecklistGuard,
+  RolesGuard,
+} from './common/guards';
 
 import { SupabaseModule } from './infrastructure/supabase/supabase.module';
 import { PrismaModule } from './infrastructure/prisma';
@@ -103,6 +108,10 @@ import { CacheModuleConfig } from './infrastructure/cache';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: OpeningChecklistGuard,
     },
     {
       provide: APP_INTERCEPTOR,
