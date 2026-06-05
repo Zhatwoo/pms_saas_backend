@@ -23,7 +23,11 @@ export class TransformInterceptor<T> implements NestInterceptor<
     next: CallHandler,
   ): Observable<ResponseShape<T>> {
     const request = context.switchToHttp().getRequest<Request>();
-    if (request.path === '/api/notifications/stream') {
+    if (
+      request.path === '/' ||
+      request.path === '/health' ||
+      request.path === '/api/notifications/stream'
+    ) {
       return next.handle() as Observable<ResponseShape<T>>;
     }
 
