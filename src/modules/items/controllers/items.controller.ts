@@ -10,7 +10,9 @@ import {
 import { ItemsService } from '../services/items.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('items')
 export class ItemsController {
   constructor(private readonly itemsService: ItemsService) {}

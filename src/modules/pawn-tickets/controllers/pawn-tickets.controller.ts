@@ -5,7 +5,9 @@ import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('pawn-tickets')
 export class PawnTicketsController {
   constructor(private readonly pawnTicketsService: PawnTicketsService) {}

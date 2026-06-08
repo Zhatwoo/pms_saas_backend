@@ -71,18 +71,37 @@ export class DevicesService {
     // For each device, fetch distinct recent users who successfully logged in
     const enriched = await Promise.all(
       devices.map(async (device) => {
-        const recentLogs = await this.prisma.login_logs.findMany({
-          where: {
-            device_fingerprint: device.device_fingerprint,
-            login_status: 'SUCCESS',
-            employee_id: { not: null },
-          },
-          include: {
-            employee: { select: { id: true, full_name: true, email: true, role: true } },
-          },
-          orderBy: { created_at: 'desc' },
-          take: 20,
-        });
+        let recentLogs: Array<{
+          employee_id: string | null;
+          created_at: Date;
+          employee: {
+            id: string;
+            full_name: string | null;
+            email: string | null;
+            role: string;
+          } | null;
+        }> = [];
+
+        try {
+          recentLogs = await this.prisma.login_logs.findMany({
+            where: {
+              device_fingerprint: device.device_fingerprint,
+              login_status: 'SUCCESS',
+              employee_id: { not: null },
+            },
+            include: {
+              employee: { select: { id: true, full_name: true, email: true, role: true } },
+            },
+            orderBy: { created_at: 'desc' },
+            take: 20,
+          });
+        } catch (error) {
+          this.logger.warn(
+            `Unable to load recent login users for device ${device.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
 
         // Deduplicate by employee id, keep most recent per employee
         const seen = new Set<string>();
@@ -263,24 +282,33 @@ export class DevicesService {
         ? { employee: { branch_id: actorBranchId } }
         : {};
 
-    const logs = await this.prisma.login_logs.findMany({
-      where: branchFilter,
-      include: {
-        employee: {
-          select: { id: true, full_name: true, email: true, role: true, avatar_url: true },
+    try {
+      const logs = await this.prisma.login_logs.findMany({
+        where: branchFilter,
+        include: {
+          employee: {
+            select: { id: true, full_name: true, email: true, role: true, avatar_url: true },
+          },
         },
-      },
-      orderBy: { created_at: 'desc' },
-      take: limit,
-    });
+        orderBy: { created_at: 'desc' },
+        take: limit,
+      });
 
-    return logs.map((log) => ({
-      ...log,
-      employee: {
-        ...this.decryptUserJoin(log.employee),
-        avatarUrl: log.employee?.avatar_url ?? null,
-      },
-    }));
+      return logs.map((log) => ({
+        ...log,
+        employee: {
+          ...this.decryptUserJoin(log.employee),
+          avatarUrl: log.employee?.avatar_url ?? null,
+        },
+      }));
+    } catch (error) {
+      this.logger.warn(
+        `Unable to load login logs: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return [];
+    }
   }
 
   /** Validate device fingerprint during login and update last_login timestamp.
