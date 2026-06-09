@@ -24,6 +24,7 @@ import { buildBranchDaySnapshotFromFetched } from '../../common/utils/daily-bala
 import { FinanceAuditService } from './services/finance-audit.service';
 import { FinanceDailyBalanceService } from './services/finance-daily-balance.service';
 import { BranchDaySessionService } from './services/branch-day-session.service';
+import { OpeningChecklistGateService } from './services/opening-checklist-gate.service';
 
 interface TransactionRow {
   id: string;
@@ -101,6 +102,10 @@ export interface EmployeeDailyOpeningStatus {
   openingDate: string;
   status: 'none' | 'pending' | 'completed';
   checklistStep: DailyOpeningChecklistStep;
+  /** Matches OpeningChecklistGuard — when false, checklist-gated API routes return 403. */
+  modulesAllowed: boolean;
+  /** Suggested opening count from last End Day / ledger (CASH_ON_HAND step only). */
+  expectedStartingCash?: number;
   startingCash?: number;
 }
 
@@ -141,6 +146,7 @@ export class BranchFinanceService {
     private readonly financeDailyBalance: FinanceDailyBalanceService,
     private readonly financeAudit: FinanceAuditService,
     private readonly branchDaySession: BranchDaySessionService,
+    private readonly openingGate: OpeningChecklistGateService,
   ) {}
 
   async getBusinessSession(user: UserWithBranch, branchQuery?: string) {
@@ -236,6 +242,18 @@ export class BranchFinanceService {
    * Branch opening checklist status (shared by all employees at the branch).
    * Backed by daily_opening: unique (branch_id, opening_date). Employee ids are audit-only.
    */
+  private async resolveExpectedStartingCash(
+    branchId: string,
+    openingDate: string,
+  ): Promise<number> {
+    const amount =
+      await this.financeDailyBalance.suggestedStartingCashForBusinessDate(
+        branchId,
+        openingDate,
+      );
+    return Number(Number(amount).toFixed(2));
+  }
+
   async getEmployeeDailyOpeningStatus(
     user: AuthenticatedUserProfile,
   ): Promise<EmployeeDailyOpeningStatus> {
@@ -245,23 +263,51 @@ export class BranchFinanceService {
         openingDate,
         status: 'completed',
         checklistStep: 'COMPLETED',
+        modulesAllowed: true,
       };
     }
 
     const branchId = requireUserBranchId(user);
     const openingDate = getPhCalendarDateString();
+    const openingDateRecord = new Date(`${openingDate}T00:00:00.000Z`);
 
-    const client = this.supabaseService.getClient();
+    const modulesAllowed = await this.openingGate.isModulesAllowed(
+      branchId,
+      user.id ?? null,
+    );
 
-    const { data: row, error } = await client
-      .from('daily_opening')
-      .select('status, starting_cash')
-      .eq('branch_id', branchId)
-      .eq('opening_date', openingDate)
-      .maybeSingle();
+    const row = await this.prisma.daily_opening.findUnique({
+      where: {
+        branch_id_opening_date: {
+          branch_id: branchId,
+          opening_date: openingDateRecord,
+        },
+      },
+      select: { status: true, starting_cash: true },
+    });
 
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    if (!modulesAllowed) {
+      if (row?.status === 'pending') {
+        return {
+          openingDate,
+          status: 'pending',
+          checklistStep: 'INVENTORY_AUDIT',
+          modulesAllowed: false,
+          startingCash: this.toMoney(row.starting_cash),
+        };
+      }
+
+      return {
+        openingDate,
+        status: row?.status === 'completed' ? 'completed' : 'none',
+        checklistStep: 'CASH_ON_HAND',
+        modulesAllowed: false,
+        expectedStartingCash: await this.resolveExpectedStartingCash(
+          branchId,
+          openingDate,
+        ),
+        startingCash: row ? this.toMoney(row.starting_cash) : undefined,
+      };
     }
 
     if (row?.status === 'completed') {
@@ -269,35 +315,17 @@ export class BranchFinanceService {
         openingDate,
         status: 'completed',
         checklistStep: 'COMPLETED',
+        modulesAllowed: true,
         startingCash: this.toMoney(row.starting_cash),
       };
     }
 
     if (row?.status === 'pending') {
-      const nowIso = new Date().toISOString();
-      const { error: migrateErr } = await client
-        .from('daily_opening')
-        .update({
-          status: 'completed',
-          updated_at: nowIso,
-          last_updated_by_user_id: user.id ?? null,
-        })
-        .eq('branch_id', branchId)
-        .eq('opening_date', openingDate);
-
-      if (!migrateErr) {
-        return {
-          openingDate,
-          status: 'completed',
-          checklistStep: 'COMPLETED',
-          startingCash: this.toMoney(row.starting_cash),
-        };
-      }
-
       return {
         openingDate,
         status: 'pending',
         checklistStep: 'INVENTORY_AUDIT',
+        modulesAllowed: true,
         startingCash: this.toMoney(row.starting_cash),
       };
     }
@@ -307,44 +335,24 @@ export class BranchFinanceService {
         openingDate,
         status: 'none',
         checklistStep: 'CASH_ON_HAND',
+        modulesAllowed: true,
+        expectedStartingCash: await this.resolveExpectedStartingCash(
+          branchId,
+          openingDate,
+        ),
       };
     }
 
-    const { count, error: countErr } = await client
-      .from('pawned_items')
-      .select('*', { count: 'exact', head: true })
-      .eq('branch_id', branchId);
+    const pawnCount = await this.prisma.pawned_items.count({
+      where: { branch_id: branchId },
+    });
 
-    if (countErr) {
-      throw new InternalServerErrorException(countErr.message);
-    }
-
-    const total = count ?? 0;
-    if (total === 0) {
-      const nowIso = new Date().toISOString();
-      const { error: upErr } = await client.from('daily_opening').upsert(
-        {
-          branch_id: branchId,
-          opening_date: openingDate,
-          starting_cash: 0,
-          status: 'completed',
-          employee_id: user.id ?? null,
-          last_updated_by_user_id: user.id ?? null,
-          updated_at: nowIso,
-        },
-        { onConflict: 'branch_id,opening_date' },
-      );
-      if (upErr) {
-        this.logger.error(
-          `daily_opening upsert failed (branch=${branchId} date=${openingDate}): ${upErr.message}`,
-          upErr instanceof Error ? upErr.stack : undefined,
-        );
-        throw new InternalServerErrorException(upErr.message);
-      }
+    if (pawnCount === 0) {
       return {
         openingDate,
         status: 'completed',
         checklistStep: 'COMPLETED',
+        modulesAllowed: true,
         startingCash: 0,
       };
     }
@@ -353,6 +361,11 @@ export class BranchFinanceService {
       openingDate,
       status: 'none',
       checklistStep: 'CASH_ON_HAND',
+      modulesAllowed: true,
+      expectedStartingCash: await this.resolveExpectedStartingCash(
+        branchId,
+        openingDate,
+      ),
     };
   }
 

@@ -7,6 +7,7 @@ import { FinanceDailyBalanceService } from './services/finance-daily-balance.ser
 import { BranchBusinessSessionService } from './services/branch-business-session.service';
 import { BranchFinanceSessionGateService } from './services/branch-finance-session-gate.service';
 import { BranchDaySessionService } from './services/branch-day-session.service';
+import { OpeningChecklistGateService } from './services/opening-checklist-gate.service';
 
 import { BranchFinanceEndDayCronService } from './branch-finance-end-day.cron';
 
@@ -21,6 +22,7 @@ import { BranchFinanceEndDayCronService } from './branch-finance-end-day.cron';
     BranchFinanceService,
     FinanceAuditService,
     BranchFinanceEndDayCronService,
+    OpeningChecklistGateService,
   ],
   exports: [
     BranchFinanceService,
@@ -28,6 +30,7 @@ import { BranchFinanceEndDayCronService } from './branch-finance-end-day.cron';
     FinanceDailyBalanceService,
     FinanceAuditService,
     BranchBusinessSessionService,
+    OpeningChecklistGateService,
   ],
 })
 export class BranchFinanceModule {}
