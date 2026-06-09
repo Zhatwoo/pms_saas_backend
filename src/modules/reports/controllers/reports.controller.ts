@@ -3,7 +3,9 @@ import { ReportsService } from '../services/reports.service';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}

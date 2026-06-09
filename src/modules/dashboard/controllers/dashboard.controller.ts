@@ -1,7 +1,9 @@
 import { Controller, Get, Post, Query, Req, Body, Param } from '@nestjs/common';
 import { DashboardService } from '../services/dashboard.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}

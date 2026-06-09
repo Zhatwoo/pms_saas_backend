@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
@@ -37,11 +37,39 @@ function resolveTrustProxy(): boolean | number {
   return Number.isFinite(n) && n >= 0 ? n : 1;
 }
 
+function resolveAllowedOrigins(): string[] {
+  const configuredOrigins =
+    process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '';
+
+  const origins = configuredOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (process.env.NODE_ENV === 'production' && origins.length === 0) {
+    throw new Error(
+      'CORS_ORIGINS or FRONTEND_URL must be configured in production.',
+    );
+  }
+
+  if (origins.length > 0) {
+    return origins;
+  }
+
+  return [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+  ];
+}
+
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance() as Application;
+  const configService = app.get(ConfigService);
 
   /*
    * trust proxy MUST be configured when the Nest app sits behind HTTPS terminators/CDNs so:
@@ -51,16 +79,14 @@ async function bootstrap() {
    */
   expressApp.set('trust proxy', resolveTrustProxy());
 
-  const allowedOrigins = (
-    process.env.CORS_ORIGINS ||
-    process.env.FRONTEND_URL ||
-    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001'
-  )
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const allowedOrigins = resolveAllowedOrigins();
 
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', {
+    exclude: [
+      { path: '/', method: RequestMethod.GET },
+      { path: 'health', method: RequestMethod.GET },
+    ],
+  });
 
   /*
    * Helmet raises baseline browser protections on API responses too (MIME sniff / clickjacking / referrer hygiene).
@@ -95,7 +121,6 @@ async function bootstrap() {
   );
   expressApp.disable('x-powered-by');
 
-  const configService = app.get(ConfigService);
   const defaultMb =
     configService.get<number>('security.httpJsonBodyLimitDefaultMb') ?? 1;
   const heavyMb =
@@ -128,7 +153,7 @@ async function bootstrap() {
     origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-API-Key'],
   });
 
   const preferredPort =

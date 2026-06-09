@@ -12,7 +12,9 @@ import { Roles } from '../../common/decorators';
 import { Role } from '../../common/enums';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
 import { IncidentTicketsService } from './incident-tickets.service';
+import { RequiresOpeningChecklist } from '../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('incident-tickets')
 export class IncidentTicketsController {
   constructor(

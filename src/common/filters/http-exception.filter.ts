@@ -13,6 +13,8 @@ import { Response } from 'express';
 const HTTP_PAYLOAD_TOO_LARGE = 413;
 /** HTTP 429 — rate limiting / quotas. */
 const HTTP_TOO_MANY_REQUESTS = 429;
+/** HTTP 401 — all authentication failures use one public contract. */
+const HTTP_UNAUTHORIZED = 401;
 
 function extractMessage(payload: unknown): string {
   if (typeof payload === 'string' && payload.trim()) {
@@ -66,6 +68,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     // Standard contract for abusive traffic / quotas (do not expose internal throttler details).
     if (exception instanceof HttpException) {
+      if (exception.getStatus() === HTTP_UNAUTHORIZED) {
+        response.status(HTTP_UNAUTHORIZED).json({
+          statusCode: HTTP_UNAUTHORIZED,
+          message: 'Unauthorized request',
+          error: 'Unauthorized',
+        });
+        return;
+      }
       if (exception.getStatus() === HTTP_TOO_MANY_REQUESTS) {
         response.status(HTTP_TOO_MANY_REQUESTS).json({
           success: false,
@@ -97,9 +107,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
           process.env.NODE_ENV !== 'production'
             ? exception.message
             : 'Database error',
-        prismaCode: exception.code,
         timestamp: new Date().toISOString(),
       };
+      if (process.env.NODE_ENV !== 'production') {
+        Object.assign(prismaBody, { prismaCode: exception.code });
+      }
       this.logger.error(
         `[HttpExceptionFilter] Prisma ${exception.code}: ${exception.message}`,
         exception.stack,

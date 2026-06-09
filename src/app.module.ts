@@ -7,7 +7,12 @@ import appConfig from './config/app.config';
 import securityConfig from './config/security.config';
 import { CsrfOriginMiddleware } from './common/middleware/csrf-origin.middleware';
 
-import { AppThrottlerGuard, JwtAuthGuard, RolesGuard } from './common/guards';
+import {
+  AppThrottlerGuard,
+  JwtAuthGuard,
+  OpeningChecklistGuard,
+  RolesGuard,
+} from './common/guards';
 
 import { SupabaseModule } from './infrastructure/supabase/supabase.module';
 import { PrismaModule } from './infrastructure/prisma';
@@ -36,6 +41,8 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { CacheModuleConfig } from './infrastructure/cache';
+import { AppController } from './app.controller';
+import { HealthController } from './modules/health/health.controller';
 
 @Module({
   // Triggering reload for new QR replacement routes
@@ -91,6 +98,7 @@ import { CacheModuleConfig } from './infrastructure/cache';
     DevicesModule,
     CategoriesModule,
   ],
+  controllers: [AppController, HealthController],
   providers: [
     {
       provide: APP_GUARD,
@@ -103,6 +111,10 @@ import { CacheModuleConfig } from './infrastructure/cache';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: OpeningChecklistGuard,
     },
     {
       provide: APP_INTERCEPTOR,
