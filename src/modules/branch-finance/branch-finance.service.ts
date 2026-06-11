@@ -325,7 +325,7 @@ export class BranchFinanceService {
         openingDate,
         status: 'pending',
         checklistStep: 'INVENTORY_AUDIT',
-        modulesAllowed: true,
+        modulesAllowed: false,
         startingCash: this.toMoney(row.starting_cash),
       };
     }
@@ -335,7 +335,7 @@ export class BranchFinanceService {
         openingDate,
         status: 'none',
         checklistStep: 'CASH_ON_HAND',
-        modulesAllowed: true,
+        modulesAllowed: false,
         expectedStartingCash: await this.resolveExpectedStartingCash(
           branchId,
           openingDate,
@@ -361,7 +361,7 @@ export class BranchFinanceService {
       openingDate,
       status: 'none',
       checklistStep: 'CASH_ON_HAND',
-      modulesAllowed: true,
+      modulesAllowed: false,
       expectedStartingCash: await this.resolveExpectedStartingCash(
         branchId,
         openingDate,
