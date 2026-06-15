@@ -42,6 +42,20 @@ export class TransactionsController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('pawn-source')
+  findLatestPawnSource(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('relatedPawnedItemId') relatedPawnedItemId?: string,
+    @Query('unitCode') unitCode?: string,
+  ) {
+    return this.transactionsService.findLatestPawnSource(
+      req.user,
+      relatedPawnedItemId,
+      unitCode,
+    );
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get(':id')
   findOne(
     @Req() req: { user: AuthenticatedUserProfile },
