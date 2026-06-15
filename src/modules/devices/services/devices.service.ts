@@ -296,10 +296,12 @@ export class DevicesService {
 
       return logs.map((log) => ({
         ...log,
-        employee: {
-          ...this.decryptUserJoin(log.employee),
-          avatarUrl: log.employee?.avatar_url ?? null,
-        },
+        employee: log.employee
+          ? {
+              ...this.decryptUserJoin(log.employee),
+              avatarUrl: log.employee.avatar_url ?? null,
+            }
+          : null,
       }));
     } catch (error) {
       this.logger.warn(
