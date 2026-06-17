@@ -363,7 +363,7 @@ model authorized_devices {
   branch_id          String?      @db.Uuid
   device_name        String
   device_type        String       @default("DESKTOP")
-  device_fingerprint String       @unique
+  device_fingerprint String
   ip_address         String?
   status             String       @default("PENDING")
   last_login         DateTime?    @db.Timestamp(6)
@@ -372,8 +372,10 @@ model authorized_devices {
   employee           users?       @relation(fields: [employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   branch             branches?    @relation(fields: [branch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
+  @@unique([employee_id, device_fingerprint], map: "uq_authorized_devices_employee_fingerprint")
   @@index([branch_id])
   @@index([employee_id])
+  @@index([device_fingerprint])
   @@index([status])
   @@schema("public")
 }

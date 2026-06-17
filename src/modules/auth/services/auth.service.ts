@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -192,16 +193,30 @@ export class AuthService {
     }
 
     // ── Device fingerprint restriction ────────────────────────────────────────
-    if (loginDto.deviceFingerprint && user.role !== Role.SUPER_ADMIN) {
+    if (user.role !== Role.SUPER_ADMIN) {
+      const fingerprint = loginDto.deviceFingerprint?.trim();
+      if (!fingerprint) {
+        await this.devicesService.writeLoginLog({
+          employeeId: user.id,
+          ipAddress: clientIp,
+          loginStatus: 'BLOCKED',
+          failureReason: 'MISSING_DEVICE_FINGERPRINT',
+        });
+        throw new ForbiddenException({
+          message: 'Device fingerprint is required.',
+          code: 'MISSING_DEVICE_FINGERPRINT',
+        });
+      }
+
       const deviceCheck = await this.devicesService.validateAndUpdateLastLogin(
-        loginDto.deviceFingerprint,
+        fingerprint,
         user.id,
       );
 
       if (!deviceCheck.authorized) {
         await this.devicesService.writeLoginLog({
           employeeId: user.id,
-          deviceFingerprint: loginDto.deviceFingerprint,
+          deviceFingerprint: fingerprint,
           ipAddress: clientIp,
           loginStatus: 'BLOCKED',
           failureReason: deviceCheck.reason,
@@ -213,9 +228,11 @@ export class AuthService {
           DEVICE_PENDING: 'Device authorization is pending admin approval.',
         };
 
-        throw new UnauthorizedException(
-          messages[deviceCheck.reason ?? ''] ?? 'Device not authorized.',
-        );
+        const reason = deviceCheck.reason ?? 'UNKNOWN_DEVICE';
+        throw new ForbiddenException({
+          message: messages[reason] ?? 'Device not authorized.',
+          code: reason,
+        });
       }
     }
 

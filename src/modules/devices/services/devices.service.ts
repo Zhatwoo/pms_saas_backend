@@ -12,8 +12,7 @@ import { AuthorizeDeviceDto } from '../dto/authorize-device.dto';
 import { UpdateDeviceDto } from '../dto/update-device.dto';
 import { RequestAuthorizationDto } from '../dto/request-authorization.dto';
 
-// Device limits removed — any authorized device can be used by any number of employees,
-// and any employee can use any number of authorized devices.
+// Login is allowed only for Super-Admin-approved (employee_id, device_fingerprint) pairs.
 
 @Injectable()
 export class DevicesService {
@@ -167,7 +166,12 @@ export class DevicesService {
     const effectiveBranchId = dto.branchId ?? employee.branch_id ?? null;
 
     return this.prisma.authorized_devices.upsert({
-      where: { device_fingerprint: dto.deviceFingerprint },
+      where: {
+        employee_id_device_fingerprint: {
+          employee_id: dto.employeeId,
+          device_fingerprint: dto.deviceFingerprint,
+        },
+      },
       create: {
         employee_id: dto.employeeId,
         branch_id: effectiveBranchId,
@@ -178,6 +182,7 @@ export class DevicesService {
         status: 'AUTHORIZED',
       },
       update: {
+        employee_id: dto.employeeId,
         status: 'AUTHORIZED',
         device_name: dto.deviceName,
         device_type: dto.deviceType ?? 'DESKTOP',
@@ -214,22 +219,32 @@ export class DevicesService {
       resolvedBranchId = user?.branch_id ?? null;
     }
 
-    const existing = await this.prisma.authorized_devices.findUnique({
-      where: { device_fingerprint: dto.deviceFingerprint },
+    if (!resolvedEmployeeId) {
+      throw new BadRequestException(
+        'A valid employee email is required to request device authorization.',
+      );
+    }
+
+    const existing = await this.prisma.authorized_devices.findFirst({
+      where: {
+        employee_id: resolvedEmployeeId,
+        device_fingerprint: dto.deviceFingerprint,
+      },
     });
 
     if (existing) {
-      if (existing.status === 'AUTHORIZED')
-        throw new BadRequestException('Device is already authorized');
-      if (existing.status === 'BLOCKED')
+      if (existing.status === 'AUTHORIZED') {
+        throw new BadRequestException('This device is already authorized for your account.');
+      }
+      if (existing.status === 'BLOCKED') {
         throw new ForbiddenException('Device is blocked');
-      // Already pending — idempotent
+      }
       return existing;
     }
 
     return this.prisma.authorized_devices.create({
       data: {
-        employee_id: resolvedEmployeeId ?? undefined,
+        employee_id: resolvedEmployeeId,
         branch_id: resolvedBranchId ?? undefined,
         device_name: dto.deviceName ?? 'Unknown Device',
         device_type: dto.deviceType ?? 'DESKTOP',
@@ -313,57 +328,40 @@ export class DevicesService {
     }
   }
 
-  /** Validate device fingerprint during login and update last_login timestamp.
-   *
-   *  Strategy:
-   *  1. Look up the device by the fingerprint sent from the browser.
-   *  2. If not found by fingerprint, check whether the employee already has an
-   *     AUTHORIZED device record.  If they do, it means the browser computed a
-   *     slightly different fingerprint this session (FingerprintJS drift).
-   *     In that case, update the stored fingerprint to the new value so future
-   *     logins match again — this is the "self-healing" step.
-   *  3. If neither fingerprint nor employee has an authorized device → UNKNOWN.
-   */
+  /** Validate that this employee is authorized on this specific device fingerprint. */
   async validateAndUpdateLastLogin(
     deviceFingerprint: string,
     employeeId: string,
   ): Promise<{ authorized: boolean; reason?: string }> {
-    // ── Primary lookup: by fingerprint ───────────────────────────────────────
-    const deviceByFp = await this.prisma.authorized_devices.findUnique({
-      where: { device_fingerprint: deviceFingerprint },
+    const device = await this.prisma.authorized_devices.findFirst({
+      where: {
+        employee_id: employeeId,
+        device_fingerprint: deviceFingerprint,
+      },
     });
 
-    if (deviceByFp) {
-      if (deviceByFp.status === 'BLOCKED') return { authorized: false, reason: 'DEVICE_BLOCKED' };
-      if (deviceByFp.status === 'PENDING') return { authorized: false, reason: 'DEVICE_PENDING' };
-
-      await this.prisma.authorized_devices.update({
-        where: { id: deviceByFp.id },
-        data: { last_login: new Date(), updated_at: new Date() },
-      });
-      return { authorized: true };
+    if (!device) {
+      return { authorized: false, reason: 'UNKNOWN_DEVICE' };
     }
 
-    // ── Fallback: fingerprint drifted — look up by employee ──────────────────
-    const deviceByEmployee = await this.prisma.authorized_devices.findFirst({
-      where: { employee_id: employeeId, status: 'AUTHORIZED' },
-      orderBy: { last_login: 'desc' },
+    if (device.status === 'BLOCKED') {
+      return { authorized: false, reason: 'DEVICE_BLOCKED' };
+    }
+
+    if (device.status === 'PENDING') {
+      return { authorized: false, reason: 'DEVICE_PENDING' };
+    }
+
+    if (device.status !== 'AUTHORIZED') {
+      return { authorized: false, reason: 'UNKNOWN_DEVICE' };
+    }
+
+    await this.prisma.authorized_devices.update({
+      where: { id: device.id },
+      data: { last_login: new Date(), updated_at: new Date() },
     });
 
-    if (deviceByEmployee) {
-      // Heal: update the stored fingerprint to match what the browser sends now
-      await this.prisma.authorized_devices.update({
-        where: { id: deviceByEmployee.id },
-        data: {
-          device_fingerprint: deviceFingerprint,
-          last_login: new Date(),
-          updated_at: new Date(),
-        },
-      });
-      return { authorized: true };
-    }
-
-    return { authorized: false, reason: 'UNKNOWN_DEVICE' };
+    return { authorized: true };
   }
 
   /** Write a login log entry. */
