@@ -32,6 +32,10 @@ import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
 import { UploadFundTransferProofDto } from '../dto/upload-fund-transfer-proof.dto';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
+import {
+  environmentCreateFields,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 interface BranchRow {
   id: string;
@@ -90,6 +94,8 @@ interface FundRequestRow {
   destination_received_amount: number | string | null;
   destination_confirmation_proof_url: string | null;
   related_transaction_id: string | null;
+  environment: string;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
   branches?: BranchRow | BranchRow[] | null;
@@ -141,6 +147,8 @@ const FUND_REQUEST_SELECT = `
   destination_received_amount,
   destination_confirmation_proof_url,
   related_transaction_id,
+  environment,
+  created_by,
   created_at,
   updated_at,
   branches:branches!branch_id(id, name, branch_code, location),
@@ -364,9 +372,12 @@ export class FundRequestsService {
     return { proofUrl: data.publicUrl };
   }
 
-  private async getBranchById(branchId: string): Promise<BranchRow> {
-    const data = await this.prisma.branches.findUnique({
-      where: { id: branchId },
+  private async getBranchById(
+    branchId: string,
+    user: AuthenticatedUserProfile,
+  ): Promise<BranchRow> {
+    const data = await this.prisma.branches.findFirst({
+      where: { id: branchId, environment: getEnvironment(user) },
       select: {
         id: true,
         name: true,
@@ -383,12 +394,16 @@ export class FundRequestsService {
     return data;
   }
 
-  private async getUserById(userId: string): Promise<UserSummaryRow> {
+  private async getUserById(
+    userId: string,
+    user: AuthenticatedUserProfile,
+  ): Promise<UserSummaryRow> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('users')
       .select('id, full_name, email, role, branch_id')
       .eq('id', userId)
+      .eq('environment', getEnvironment(user))
       .maybeSingle<UserSummaryRow>();
 
     if (error) {
@@ -403,12 +418,16 @@ export class FundRequestsService {
     };
   }
 
-  private async getLatestBranchBalance(branchId: string): Promise<number> {
+  private async getLatestBranchBalance(
+    branchId: string,
+    user: AuthenticatedUserProfile,
+  ): Promise<number> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('daily_balances')
       .select('ending_balance')
       .eq('branch_id', branchId)
+      .eq('environment', getEnvironment(user))
       .order('record_date', { ascending: false })
       .limit(1)
       .maybeSingle<{ ending_balance: number | string }>();
@@ -423,12 +442,14 @@ export class FundRequestsService {
     table: 'fund_requests' | 'transactions',
     column: 'request_no' | 'transaction_no',
     prefix: string,
+    user: AuthenticatedUserProfile,
   ): Promise<string> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from(table)
       .select(column)
       .ilike(column, `${prefix}%`)
+      .eq('environment', getEnvironment(user))
       .order(column, { ascending: false })
       .limit(1);
 
@@ -445,12 +466,16 @@ export class FundRequestsService {
     return `${prefix}${String(nextSeq).padStart(3, '0')}`;
   }
 
-  private async getFundRequestById(id: string): Promise<FundRequestRow> {
+  private async getFundRequestById(
+    id: string,
+    user: AuthenticatedUserProfile,
+  ): Promise<FundRequestRow> {
     const { data, error } = await this.supabaseService
       .getClient()
       .from('fund_requests')
       .select(FUND_REQUEST_SELECT)
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .maybeSingle<FundRequestRow>();
 
     if (error) {
@@ -465,6 +490,7 @@ export class FundRequestsService {
   }
 
   private async resolveSuperAdminBranchIdsByName(
+    user: AuthenticatedUserProfile,
     branchQuery?: string,
   ): Promise<string[] | null> {
     const branchName = superAdminBranchNameFilter(
@@ -478,6 +504,7 @@ export class FundRequestsService {
 
     const data = await this.prisma.branches.findMany({
       where: {
+        environment: getEnvironment(user),
         name: {
           contains: branchName,
           mode: 'insensitive',
@@ -636,6 +663,7 @@ export class FundRequestsService {
   }
 
   private async createTransferTransaction(params: {
+    user: AuthenticatedUserProfile;
     branch: BranchRow;
     request: FundRequestRow;
     amount: number;
@@ -652,6 +680,7 @@ export class FundRequestsService {
       'transactions',
       'transaction_no',
       prefix,
+      params.user,
     );
     const isInbound = params.direction === 'in';
     const detailsParts = isInbound
@@ -694,6 +723,7 @@ export class FundRequestsService {
         pawn_amount: 0,
         storage_fee: 0,
         created_by_user_id: params.createdByUserId ?? null,
+        ...environmentCreateFields(params.user),
         details: this.encryption.encryptTransactionDetails(
           detailsParts.join(' | '),
         ),
@@ -709,6 +739,7 @@ export class FundRequestsService {
   }
 
   private async createOwnerOutTransferTransaction(params: {
+    user: AuthenticatedUserProfile;
     request: FundRequestRow;
     amount: number;
     transferReference: string | null;
@@ -723,6 +754,7 @@ export class FundRequestsService {
       'transactions',
       'transaction_no',
       prefix,
+      params.user,
     );
 
     const details = [
@@ -753,6 +785,7 @@ export class FundRequestsService {
         pawn_amount: 0,
         storage_fee: 0,
         created_by_user_id: params.createdByUserId ?? null,
+        ...environmentCreateFields(params.user),
         details: this.encryption.encryptTransactionDetails(details),
       })
       .select('id')
@@ -766,6 +799,7 @@ export class FundRequestsService {
   }
 
   private async createTransferTransactions(params: {
+    user: AuthenticatedUserProfile;
     request: FundRequestRow;
     destinationBranch: BranchRow;
     amount: number;
@@ -784,6 +818,7 @@ export class FundRequestsService {
         'transactions',
         'transaction_no',
         prefix,
+        params.user,
       );
       const { data, error } = await this.supabaseService
         .getClient()
@@ -802,6 +837,7 @@ export class FundRequestsService {
           unit_code: params.request.request_no,
           pawn_amount: 0,
           storage_fee: 0,
+          ...environmentCreateFields(params.user),
           details: this.encryption.encryptTransactionDetails(
             `Transfer out to ${params.destinationBranch.name} | Ref: ${params.transferReference ?? 'N/A'} | Notes: ${params.transferNotes ?? '-'}`,
           ),
@@ -822,6 +858,7 @@ export class FundRequestsService {
       transferReference: params.transferReference,
       transferNotes: params.transferNotes,
       direction: 'in',
+      user: params.user,
     });
 
     return {
@@ -858,6 +895,7 @@ export class FundRequestsService {
   }
 
   private async notifyFundTransfer(params: {
+    user: AuthenticatedUserProfile;
     branchId: string | null | undefined;
     title: string;
     message: string;
@@ -886,6 +924,7 @@ export class FundRequestsService {
       }),
       entity_type: 'fund_transfer',
       entity_id: params.requestId,
+      ...environmentCreateFields(params.user),
       event_key: [
         'fund-transfer',
         params.requestId,
@@ -896,6 +935,7 @@ export class FundRequestsService {
   }
 
   private async resolveReceiver(dto: {
+    user: AuthenticatedUserProfile;
     receiverUserId?: string;
     receiverRole?: 'admin' | 'employee';
     branchId: string;
@@ -905,7 +945,7 @@ export class FundRequestsService {
     }
 
     if (dto.receiverUserId) {
-      const receiver = await this.getUserById(dto.receiverUserId);
+      const receiver = await this.getUserById(dto.receiverUserId, dto.user);
       if (receiver.branch_id !== dto.branchId) {
         throw new BadRequestException(
           'Receiver user must belong to the same destination branch',
@@ -937,7 +977,7 @@ export class FundRequestsService {
     }
 
     const branchId = requireUserBranchId(user);
-    const branch = await this.getBranchById(branchId);
+    const branch = await this.getBranchById(branchId, user);
     if (!this.isActiveBranch(branch.status)) {
       throw new BadRequestException(
         'Inactive branches cannot submit fund requests',
@@ -945,6 +985,7 @@ export class FundRequestsService {
     }
 
     const receiver = await this.resolveReceiver({
+      user,
       branchId: branch.id,
       receiverRole: dto.receiverRole,
       receiverUserId: dto.receiverUserId,
@@ -955,6 +996,7 @@ export class FundRequestsService {
       'fund_requests',
       'request_no',
       `FR-${this.phDateKey(now)}-`,
+      user,
     );
 
     const { data, error } = await this.supabaseService
@@ -971,6 +1013,7 @@ export class FundRequestsService {
         receiver_user_id: receiver.receiverUserId,
         receiver_role: receiver.receiverRole,
         status: 'pending',
+        ...environmentCreateFields(user),
       })
       .select(FUND_REQUEST_SELECT)
       .single<FundRequestRow>();
@@ -994,6 +1037,7 @@ export class FundRequestsService {
 
     try {
       await this.notifyFundTransfer({
+        user,
         branchId: branch.id,
         title: 'New fund request submitted',
         message: `${mapped.branch?.name ?? 'A branch'} submitted ${mapped.requestNo} for PHP ${mapped.amountRequested.toFixed(2)}${mapped.purpose ? ` (${mapped.purpose})` : ''}.`,
@@ -1021,7 +1065,7 @@ export class FundRequestsService {
       );
     }
 
-    const destinationBranch = await this.getBranchById(dto.toBranchId);
+    const destinationBranch = await this.getBranchById(dto.toBranchId, user);
     if (!this.isActiveBranch(destinationBranch.status)) {
       throw new BadRequestException(
         'Cannot transfer funds to an inactive branch',
@@ -1029,7 +1073,7 @@ export class FundRequestsService {
     }
 
     const sourceBranch = dto.fromBranchId
-      ? await this.getBranchById(dto.fromBranchId)
+      ? await this.getBranchById(dto.fromBranchId, user)
       : null;
     if (sourceBranch && sourceBranch.id === destinationBranch.id) {
       throw new BadRequestException(
@@ -1038,6 +1082,7 @@ export class FundRequestsService {
     }
 
     const receiver = await this.resolveReceiver({
+      user,
       branchId: destinationBranch.id,
       receiverRole: dto.receiverRole,
       receiverUserId: dto.receiverUserId,
@@ -1048,11 +1093,12 @@ export class FundRequestsService {
       'fund_requests',
       'request_no',
       `DF-${this.phDateKey(now)}-`,
+      user,
     );
     const amount = this.normalizeMoney(dto.amount);
     const transferMode = dto.transferMode ?? 'cash';
     if (sourceBranch) {
-      const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+      const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id, user);
       if (sourceBalance < amount) {
         throw new BadRequestException(
           `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
@@ -1087,6 +1133,7 @@ export class FundRequestsService {
         transfer_notes: this.compactText(dto.notes),
         transfer_mode: transferMode,
         transfer_reference_no: this.compactText(dto.transferReference),
+        ...environmentCreateFields(user),
       })
       .select(FUND_REQUEST_SELECT)
       .single<FundRequestRow>();
@@ -1122,6 +1169,7 @@ export class FundRequestsService {
           transfer_notes: this.compactText(dto.notes),
           transfer_mode: transferMode,
           transfer_reference_no: this.compactText(dto.transferReference),
+          ...environmentCreateFields(user),
         })
         .select(FUND_REQUEST_SELECT)
         .single<FundRequestRow>();
@@ -1158,6 +1206,7 @@ export class FundRequestsService {
       if (sourceBranch) {
         await Promise.all([
           this.notifyFundTransfer({
+            user,
             branchId: sourceBranch.id,
             title: 'Branch transfer requires source confirmation',
             message: `${mapped.requestNo} will be deducted from ${sourceBranch.name} for ${destinationBranch.name}.`,
@@ -1166,6 +1215,7 @@ export class FundRequestsService {
             eventAction: 'source-confirmation-required',
           }),
           this.notifyFundTransfer({
+            user,
             branchId: destinationBranch.id,
             title: 'Incoming branch transfer scheduled',
             message: transferSubtitle,
@@ -1178,6 +1228,7 @@ export class FundRequestsService {
         ]);
       } else {
         await this.notifyFundTransfer({
+          user,
           branchId: destinationBranch.id,
           title: 'Fund transfer awaiting receipt confirmation',
           message: transferSubtitle,
@@ -1203,11 +1254,12 @@ export class FundRequestsService {
     let query = client
       .from('fund_requests')
       .select(FUND_REQUEST_SELECT)
+      .eq('environment', getEnvironment(user))
       .order('created_at', { ascending: false });
 
     const matchingBranchIds =
       user.role === Role.SUPER_ADMIN
-        ? await this.resolveSuperAdminBranchIdsByName(queryDto.branch)
+        ? await this.resolveSuperAdminBranchIdsByName(user, queryDto.branch)
         : null;
     const branchId =
       user.role === Role.SUPER_ADMIN
@@ -1254,7 +1306,7 @@ export class FundRequestsService {
   }
 
   async findOne(user: AuthenticatedUserProfile, id: string) {
-    const fundRequest = await this.getFundRequestById(id);
+    const fundRequest = await this.getFundRequestById(id, user);
     if (user.role !== Role.SUPER_ADMIN) {
       const branchId = requireUserBranchId(user);
       if (
@@ -1280,7 +1332,7 @@ export class FundRequestsService {
       );
     }
 
-    const existing = await this.getFundRequestById(id);
+    const existing = await this.getFundRequestById(id, user);
     if (existing.status !== 'pending') {
       throw new BadRequestException(
         'Only pending fund requests can be reviewed',
@@ -1315,6 +1367,7 @@ export class FundRequestsService {
         review_notes: this.compactText(dto.reviewNotes),
       })
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select(FUND_REQUEST_SELECT)
       .single<FundRequestRow>();
 
@@ -1336,6 +1389,7 @@ export class FundRequestsService {
 
     try {
       await this.notifyFundTransfer({
+        user,
         branchId: mapped.branchId,
         title:
           dto.decision === FundRequestReviewDecision.APPROVED
@@ -1371,7 +1425,7 @@ export class FundRequestsService {
       throw new ForbiddenException('Only super admins can transfer funds');
     }
 
-    const existing = await this.getFundRequestById(id);
+    const existing = await this.getFundRequestById(id, user);
     if (existing.status === 'rejected' || existing.status === 'cancelled') {
       throw new BadRequestException(
         'Rejected or cancelled fund requests cannot be transferred',
@@ -1397,11 +1451,11 @@ export class FundRequestsService {
       ? (existing.branches[0] ?? null)
       : (existing.branches ?? null);
     const resolvedDestinationBranch =
-      destinationBranch ?? (await this.getBranchById(existing.branch_id));
+      destinationBranch ?? (await this.getBranchById(existing.branch_id, user));
     const sourceBranch = dto.sourceBranchId
-      ? await this.getBranchById(dto.sourceBranchId)
+      ? await this.getBranchById(dto.sourceBranchId, user)
       : existing.source_branch_id
-        ? await this.getBranchById(existing.source_branch_id)
+        ? await this.getBranchById(existing.source_branch_id, user)
         : null;
 
     if (sourceBranch && sourceBranch.id === resolvedDestinationBranch.id) {
@@ -1424,7 +1478,10 @@ export class FundRequestsService {
     }
 
     if (sourceBranch) {
-      const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+      const sourceBalance = await this.getLatestBranchBalance(
+        sourceBranch.id,
+        user,
+      );
       if (sourceBalance < transferAmount) {
         throw new BadRequestException(
           `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
@@ -1433,6 +1490,7 @@ export class FundRequestsService {
     }
 
     const receiver = await this.resolveReceiver({
+      user,
       branchId: existing.branch_id,
       receiverRole: dto.receiverRole,
       receiverUserId: dto.receiverUserId,
@@ -1466,6 +1524,7 @@ export class FundRequestsService {
         receiver_role: receiver.receiverRole,
       })
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select(FUND_REQUEST_SELECT)
       .single<FundRequestRow>();
 
@@ -1496,6 +1555,7 @@ export class FundRequestsService {
           receiver_role: receiver.receiverRole,
         })
         .eq('id', id)
+        .eq('environment', getEnvironment(user))
         .select(FUND_REQUEST_SELECT)
         .single<FundRequestRow>();
       if (fallback.error) {
@@ -1531,6 +1591,7 @@ export class FundRequestsService {
       if (sourceBranch) {
         await Promise.all([
           this.notifyFundTransfer({
+            user,
             branchId: sourceBranch.id,
             title: 'Branch transfer requires source confirmation',
             message: `${mapped.requestNo} will be deducted from ${sourceBranch.name} for ${resolvedDestinationBranch.name}.`,
@@ -1539,6 +1600,7 @@ export class FundRequestsService {
             eventAction: 'source-confirmation-required',
           }),
           this.notifyFundTransfer({
+            user,
             branchId: resolvedDestinationBranch.id,
             title: 'Incoming branch transfer scheduled',
             message: transferMessage,
@@ -1551,6 +1613,7 @@ export class FundRequestsService {
         ]);
       } else {
         await this.notifyFundTransfer({
+          user,
           branchId: resolvedDestinationBranch.id,
           title: 'Fund transfer awaiting receipt confirmation',
           message: transferMessage,
@@ -1582,7 +1645,7 @@ export class FundRequestsService {
       );
     }
 
-    const existing = await this.getFundRequestById(id);
+    const existing = await this.getFundRequestById(id, user);
     if (!existing.source_branch_id) {
       throw new BadRequestException(
         'This transfer is not routed through another branch',
@@ -1597,8 +1660,11 @@ export class FundRequestsService {
       );
     }
 
-    const sourceBranch = await this.getBranchById(existing.source_branch_id);
-    const destinationBranch = await this.getBranchById(existing.branch_id);
+    const sourceBranch = await this.getBranchById(
+      existing.source_branch_id,
+      user,
+    );
+    const destinationBranch = await this.getBranchById(existing.branch_id, user);
     const sentAmount = this.normalizeMoney(
       dto.sentAmount ??
         this.toMoneyOrNull(existing.amount_transferred) ??
@@ -1619,7 +1685,10 @@ export class FundRequestsService {
       );
     }
 
-    const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id);
+    const sourceBalance = await this.getLatestBranchBalance(
+      sourceBranch.id,
+      user,
+    );
     if (sourceBalance < sentAmount) {
       throw new BadRequestException(
         `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
@@ -1633,6 +1702,7 @@ export class FundRequestsService {
     let outboundTransactionId: string | null = null;
     try {
       const outboundTransaction = await this.createTransferTransaction({
+        user,
         branch: sourceBranch,
         request: existing,
         amount: sentAmount,
@@ -1687,6 +1757,7 @@ export class FundRequestsService {
         related_transaction_id: outboundTransactionId,
       })
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select(FUND_REQUEST_SELECT)
       .single<FundRequestRow>();
 
@@ -1711,6 +1782,7 @@ export class FundRequestsService {
 
     try {
       await this.notifyFundTransfer({
+        user,
         branchId: destinationBranch.id,
         title: 'Branch transfer ready for receipt confirmation',
         message: `${mapped.requestNo} was released by ${sourceBranch.name} for PHP ${sentAmount.toFixed(2)} and is waiting for ${destinationBranch.name} to confirm receipt.`,
@@ -1790,7 +1862,7 @@ export class FundRequestsService {
       );
     }
 
-    const existing = await this.getFundRequestById(id);
+    const existing = await this.getFundRequestById(id, user);
     assertResourceBranch(user, existing.branch_id);
 
     if (existing.status === 'transferred') {
@@ -1832,7 +1904,7 @@ export class FundRequestsService {
       ? (existing.branches[0] ?? null)
       : (existing.branches ?? null);
     const resolvedDestinationBranch =
-      destinationBranch ?? (await this.getBranchById(existing.branch_id));
+      destinationBranch ?? (await this.getBranchById(existing.branch_id, user));
     const transferAmount =
       this.toMoneyOrNull(existing.amount_transferred) ??
       this.toMoneyOrNull(existing.approved_amount) ??
@@ -1864,6 +1936,7 @@ export class FundRequestsService {
       if (!existing.source_branch_id && !isExpenseTransfer) {
         const ownerOutTransaction =
           await this.createOwnerOutTransferTransaction({
+            user,
             request: existing,
             amount: confirmedAmount,
             transferReference:
@@ -1880,6 +1953,7 @@ export class FundRequestsService {
       }
 
       const inboundTransaction = await this.createTransferTransaction({
+        user,
         branch: resolvedDestinationBranch,
         request: existing,
         amount: confirmedAmount,
@@ -1954,6 +2028,7 @@ export class FundRequestsService {
         related_transaction_id: inboundTransactionId ?? ownerOutTransactionId,
       })
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select(FUND_REQUEST_SELECT)
       .single<FundRequestRow>();
 
@@ -1986,6 +2061,7 @@ export class FundRequestsService {
     try {
       if (mapped.sourceBranchId) {
         await this.notifyFundTransfer({
+          user,
           branchId: mapped.sourceBranchId,
           title: 'Branch transfer completed',
           message: `${mapped.requestNo} was received by ${resolvedDestinationBranch.name} for PHP ${mapped.confirmedReceivedAmount?.toFixed(2) ?? confirmedAmount.toFixed(2)}.`,
@@ -2024,7 +2100,7 @@ export class FundRequestsService {
       );
     }
 
-    const existing = await this.getFundRequestById(id);
+    const existing = await this.getFundRequestById(id, user);
     assertResourceBranch(user, existing.branch_id);
 
     if (existing.status !== 'pending') {
@@ -2038,6 +2114,7 @@ export class FundRequestsService {
       .from('fund_requests')
       .update({ status: 'cancelled' })
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select(FUND_REQUEST_SELECT)
       .single<FundRequestRow>();
 

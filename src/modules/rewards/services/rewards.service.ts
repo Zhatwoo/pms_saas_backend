@@ -11,6 +11,7 @@ import { Role } from '../../../common/enums';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   buildBranchFilter,
+  environmentCreateFields,
   isSuperAdmin,
 } from '../../../common/utils/authorization.util';
 import { CreateRewardDto } from '../dto/create-reward.dto';
@@ -185,6 +186,7 @@ export class RewardsService {
           user_id: user.id,
           branch_id: cr.branch_id,
           action: 'REWARD_CLAIMED',
+          ...environmentCreateFields(user),
           details: JSON.stringify({
             customerRewardId: cr.id,
             customerId: cr.customer_id,

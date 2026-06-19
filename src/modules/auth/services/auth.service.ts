@@ -676,7 +676,8 @@ export class AuthService {
     const { error: updateError } = await client
       .from('activity_logs')
       .update({ details: JSON.stringify(reviewDetails) })
-      .eq('id', requestId);
+      .eq('id', requestId)
+      .eq('environment', getEnvironment(reviewer));
 
     if (updateError) {
       throw new InternalServerErrorException(
