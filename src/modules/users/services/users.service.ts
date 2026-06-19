@@ -15,6 +15,12 @@ import { UpdateUserDto } from '../dto/update-user.dto';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import {
+  applyEnvironmentFilter,
+  environmentCreateFields,
+  getEnvironment,
+  isDeveloper,
+} from '../../../common/utils/authorization.util';
 
 type UserRow = Prisma.usersGetPayload<{
   select: typeof UsersService.userSelect;
@@ -35,6 +41,8 @@ export class UsersService {
     avatar_url: true,
     notification_sound: true,
     account_status: true,
+    is_developer: true,
+    environment: true,
     created_at: true,
     branches: { select: { name: true } },
   } satisfies Prisma.usersSelect;
@@ -96,18 +104,33 @@ export class UsersService {
       branchName: row.branches?.name ?? null,
       accountStatus: row.account_status ?? 'active',
       notificationSound: row.notification_sound ?? 'sound8.mp3',
+      isDeveloper: row.is_developer,
+      environment: row.environment,
       createdAt: row.created_at,
     };
   }
 
-  async findAll(scope?: { branchId: string; scopedToBranch: true }) {
-    const where: Prisma.usersWhereInput = {};
+  async findAll(
+    viewer?: AuthenticatedUserProfile,
+    scope?: { branchId: string; scopedToBranch: true },
+  ) {
+    const where: Prisma.usersWhereInput = viewer
+      ? applyEnvironmentFilter(viewer)
+      : {};
 
     if (scope?.scopedToBranch && scope.branchId) {
-      Object.assign(where, {
+      const branchScopedStaff: Prisma.usersWhereInput = {
         branch_id: scope.branchId,
         role: { in: ['admin', 'employee', 'branch'] },
-      });
+      };
+
+      if (viewer?.role === Role.SUPER_ADMIN && viewer.id) {
+        Object.assign(where, {
+          OR: [branchScopedStaff, { id: viewer.id }],
+        });
+      } else {
+        Object.assign(where, branchScopedStaff);
+      }
     }
 
     const rows = await this.prisma.users.findMany({
@@ -139,10 +162,11 @@ export class UsersService {
     return this.mapToResponse(row);
   }
 
-  async create(dto: CreateUserDto) {
+  async create(dto: CreateUserDto, actor?: AuthenticatedUserProfile) {
     const email = dto.email.trim().toLowerCase();
     const fullName = dto.fullName.trim();
     const normalizedRole = this.normalizeStoredRole(dto.role);
+    const developer = isDeveloper({ email });
     const isTargetSuperAdmin = normalizedRole === 'super_admin';
     const effectiveBranchId = isTargetSuperAdmin
       ? null
@@ -196,6 +220,9 @@ export class UsersService {
           role: normalizedRole,
           branch_id: effectiveBranchId,
           account_status: 'active',
+          is_developer: developer,
+          environment: getEnvironment({ email, isDeveloper: developer }),
+          created_by: actor?.authId ?? authId,
         },
         update: {
           email,
@@ -203,6 +230,8 @@ export class UsersService {
           role: normalizedRole,
           branch_id: effectiveBranchId,
           account_status: 'active',
+          is_developer: developer,
+          environment: getEnvironment({ email, isDeveloper: developer }),
           updated_at: new Date(),
         },
         select: UsersService.userSelect,
@@ -217,6 +246,7 @@ export class UsersService {
         event_key: `user-created:${row.id}`,
         entity_type: 'user',
         entity_id: row.id,
+        ...environmentCreateFields(actor ?? { email, isDeveloper: developer }),
       });
 
       if (branch && normalizedRole === 'employee') {
@@ -240,6 +270,11 @@ export class UsersService {
               event_key: `user-created:${row.id}:admin:${admin.id}`,
               entity_type: 'user',
               entity_id: row.id,
+              environment: getEnvironment({
+                email,
+                isDeveloper: developer,
+              }),
+              created_by: actor?.authId ?? authId,
             }),
           ),
         );
@@ -465,6 +500,8 @@ export class UsersService {
       entity_type: 'user_branch_transfer',
       entity_id: user.id,
       event_key: `user-branch-transfer:${user.id}:${targetBranch.id}:${transferredAt.toISOString()}`,
+      environment: user.environment,
+      created_by: user.auth_id,
     });
   }
 

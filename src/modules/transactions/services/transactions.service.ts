@@ -10,6 +10,9 @@ import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   assertBranchAccess,
   buildBranchFilter,
+  applyEnvironmentFilter,
+  environmentCreateFields,
+  getEnvironment,
   isSuperAdmin,
   requireBranchId,
 } from '../../../common/utils/authorization.util';
@@ -58,6 +61,8 @@ const TX_SELECT = {
   id_photo: true,
   id_back_photo: true,
   created_by_user_id: true,
+  environment: true,
+  created_by: true,
   created_at: true,
   users: {
     select: {
@@ -284,6 +289,7 @@ export class TransactionsService implements OnModuleInit {
 
   private async resolveLinkedPawnedItem(
     tx: any,
+    user: UserWithBranch,
     branchId: string | null,
     dto: Record<string, unknown>,
   ) {
@@ -295,6 +301,7 @@ export class TransactionsService implements OnModuleInit {
         where: {
           id: relatedPawnedItemId,
           ...(branchId ? { branch_id: branchId } : {}),
+          ...applyEnvironmentFilter(user),
         },
         select: {
           id: true,
@@ -312,6 +319,7 @@ export class TransactionsService implements OnModuleInit {
         where: {
           item_id: { equals: unitCode, mode: 'insensitive' },
           ...(branchId ? { branch_id: branchId } : {}),
+          ...applyEnvironmentFilter(user),
         },
         select: {
           id: true,
@@ -394,6 +402,7 @@ export class TransactionsService implements OnModuleInit {
         id: customerId,
         deleted_at: null,
         ...buildBranchFilter(user),
+        ...applyEnvironmentFilter(user),
       },
       select: { id: true, full_name: true, branch_id: true },
     });
@@ -406,6 +415,7 @@ export class TransactionsService implements OnModuleInit {
       where: {
         deleted_at: null,
         ...buildBranchFilter(user),
+        ...applyEnvironmentFilter(user),
         // Database-level case-insensitive match
         full_name: {
           equals: customer.full_name,
@@ -423,7 +433,9 @@ export class TransactionsService implements OnModuleInit {
     }
 
     const pawnedItems = await this.prisma.pawned_items.findMany({
-      where: { customer_id: { in: matchingCustomerIds } },
+      where: applyEnvironmentFilter(user, {
+        customer_id: { in: matchingCustomerIds },
+      }),
       select: { id: true },
       take: 1000,
     });
@@ -483,6 +495,7 @@ export class TransactionsService implements OnModuleInit {
           id: dtoClean.customer_id,
           branch_id: branchId,
           deleted_at: null,
+          ...applyEnvironmentFilter(user),
         },
         select: { id: true },
       });
@@ -531,6 +544,7 @@ export class TransactionsService implements OnModuleInit {
       profile_photo: dtoClean.profile_photo ?? null,
       id_photo: idPhotoUrl,
       id_back_photo: dtoClean.id_back_photo ?? null,
+      ...environmentCreateFields(user),
     };
 
     const data = await this.prisma.$transaction(async (tx) => {
@@ -544,7 +558,12 @@ export class TransactionsService implements OnModuleInit {
       } | null = null;
 
       if (purpose === 'Buy Back' || purpose === 'Redeem') {
-        linkedPawnedItem = await this.resolveLinkedPawnedItem(tx, branchId, dtoClean);
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(
+          tx,
+          user,
+          branchId,
+          dtoClean,
+        );
 
         if (!linkedPawnedItem) {
           throw new BadRequestException(
@@ -578,7 +597,12 @@ export class TransactionsService implements OnModuleInit {
       }
 
       if (purpose === 'Renew') {
-        linkedPawnedItem = await this.resolveLinkedPawnedItem(tx, branchId, dtoClean);
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(
+          tx,
+          user,
+          branchId,
+          dtoClean,
+        );
 
         if (!linkedPawnedItem) {
           throw new BadRequestException(
@@ -592,6 +616,7 @@ export class TransactionsService implements OnModuleInit {
             pawned_item_id: linkedPawnedItem.id,
             renewal_date: this.toDbDate(manilaDateStr),
             amount_paid: amounts.cashIn,
+            ...environmentCreateFields(user),
           },
         });
 
@@ -624,7 +649,9 @@ export class TransactionsService implements OnModuleInit {
         });
 
         await tx.sale_items.deleteMany({
-          where: { original_pawn_id: linkedPawnedItem.id },
+          where: applyEnvironmentFilter(user, {
+            original_pawn_id: linkedPawnedItem.id,
+          }),
         });
       }
 
@@ -644,6 +671,7 @@ export class TransactionsService implements OnModuleInit {
           user_id: user.id ?? null,
           branch_id: branchId ?? null,
           action: 'TRANSACTION_CREATED',
+          ...environmentCreateFields(user),
           details: JSON.stringify({
             transactionId: created.id,
             transactionNo,
@@ -677,6 +705,8 @@ export class TransactionsService implements OnModuleInit {
               ? 'payment'
               : 'transaction',
         entity_id: transactionNo,
+        environment: getEnvironment(user),
+        created_by: user.authId,
       });
     } catch (e) {
       console.warn('[TransactionsService] Failed to create notification', e);
@@ -706,7 +736,7 @@ export class TransactionsService implements OnModuleInit {
     customerId?: string,
   ) {
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
-    const where: any = {};
+    const where: any = applyEnvironmentFilter(user);
 
     if (scoped) where.branch_id = scoped;
     if (!isSuperAdmin(user)) Object.assign(where, buildBranchFilter(user));
@@ -755,14 +785,14 @@ export class TransactionsService implements OnModuleInit {
     const transactions = await Promise.all(
       rows.map((row) => this.mapTransaction(row)),
     );
-    const stats = await this.buildStats(transactions, scoped, date);
+    const stats = await this.buildStats(user, transactions, scoped, date);
 
     return { transactions, stats };
   }
 
   async findOne(user: UserWithBranch, id: string) {
-    const data = await this.prisma.transactions.findUnique({
-      where: { id },
+    const data = await this.prisma.transactions.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
       select: TX_SELECT,
     });
     if (!data) throw new NotFoundException('Transaction not found');
@@ -787,6 +817,7 @@ export class TransactionsService implements OnModuleInit {
     const where: any = {
       purpose: 'Pawn',
       ...(isSuperAdmin(user) ? {} : buildBranchFilter(user)),
+      ...applyEnvironmentFilter(user),
     };
 
     if (trimmedRelatedId) {
@@ -811,8 +842,8 @@ export class TransactionsService implements OnModuleInit {
     id: string,
     dto: Partial<CreateTransactionDto>,
   ) {
-    const existing = await this.prisma.transactions.findUnique({
-      where: { id },
+    const existing = await this.prisma.transactions.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
       select: { id: true, branch_id: true },
     });
     if (!existing) throw new NotFoundException('Transaction not found');
@@ -839,8 +870,8 @@ export class TransactionsService implements OnModuleInit {
   }
 
   async remove(user: UserWithBranch, id: string) {
-    const existing = await this.prisma.transactions.findUnique({
-      where: { id },
+    const existing = await this.prisma.transactions.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
       select: { id: true, branch_id: true },
     });
     if (!existing) throw new NotFoundException('Transaction not found');
@@ -869,6 +900,7 @@ export class TransactionsService implements OnModuleInit {
   }
 
   private async buildStats(
+    user: UserWithBranch,
     rows: Array<Awaited<ReturnType<TransactionsService['mapTransaction']>>>,
     scoped: string | null,
     date?: string,
@@ -898,21 +930,19 @@ export class TransactionsService implements OnModuleInit {
 
       // Parallelize both queries
       const [balanceData, sessionRow] = await Promise.all([
-        this.prisma.daily_balances.findUnique({
+        this.prisma.daily_balances.findFirst({
           where: {
-            branch_id_record_date: {
-              branch_id: scoped,
-              record_date: balanceDate,
-            },
+            branch_id: scoped,
+            record_date: balanceDate,
+            ...applyEnvironmentFilter(user),
           },
           select: { starting_balance: true, ending_balance: true },
         }),
-        this.prisma.branch_day_sessions.findUnique({
+        this.prisma.branch_day_sessions.findFirst({
           where: {
-            branch_id_session_date: {
-              branch_id: scoped,
-              session_date: balanceDate,
-            },
+            branch_id: scoped,
+            session_date: balanceDate,
+            ...applyEnvironmentFilter(user),
           },
           select: {
             opened_at: true,
@@ -952,7 +982,10 @@ export class TransactionsService implements OnModuleInit {
         startingBalanceCalc = this.toNumber(balanceData.starting_balance);
       } else {
         const priorRow = await this.prisma.daily_balances.findFirst({
-          where: { branch_id: scoped, record_date: { lt: balanceDate } },
+          where: applyEnvironmentFilter(user, {
+            branch_id: scoped,
+            record_date: { lt: balanceDate },
+          }),
           orderBy: { record_date: 'desc' },
           select: { ending_balance: true },
         });
@@ -963,6 +996,7 @@ export class TransactionsService implements OnModuleInit {
       const net = await this.financeDailyBalance.sumOperationalNetCash(
         scoped,
         balanceDateStr,
+        { environment: getEnvironment(user) },
       );
       stats.endingBalance = Number(
         (startingBalanceCalc + net).toFixed(2),

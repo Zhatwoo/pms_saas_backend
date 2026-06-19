@@ -552,11 +552,16 @@ export class FinanceDailyBalanceService {
   async sumOperationalNetCash(
     branchId: string,
     businessDateStr: string,
-    opts?: { forStartingPersist?: boolean },
+    opts?: { forStartingPersist?: boolean; environment?: string },
   ): Promise<number> {
     const date = this.toRecordDate(businessDateStr);
     const rows = await this.db.transactions.findMany({
-      where: { branch_id: branchId, transaction_date: date, voided_at: null },
+      where: {
+        branch_id: branchId,
+        transaction_date: date,
+        voided_at: null,
+        ...(opts?.environment ? { environment: opts.environment } : {}),
+      },
       select: {
         id: true,
         branch_id: true,

@@ -22,6 +22,10 @@ import {
   isStatusIncludedInInventoryValuation,
   findInterestRateGroup,
 } from '../../../common/utils/inventory-valuation.util';
+import {
+  environmentCreateFields,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 interface QueryFilters {
   branch?: string;
@@ -142,6 +146,7 @@ export class InventoryService {
     let query = client
       .from('pawned_items')
       .select('*, customers(*), item_renewals(*)');
+    query = query.eq('environment', getEnvironment(user));
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
@@ -179,6 +184,7 @@ export class InventoryService {
       .from('shop_settings')
       .select('setting_value')
       .eq('setting_key', 'interest_rates')
+      .eq('environment', getEnvironment(user))
       .maybeSingle();
     const interestRates = (interestRatesData?.setting_value as any[]) || [];
     const today = new Date();
@@ -259,7 +265,10 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
-    let query = client.from('pawned_items').select('category');
+    let query = client
+      .from('pawned_items')
+      .select('category')
+      .eq('environment', getEnvironment(user));
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
@@ -296,7 +305,10 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
-    let query = client.from('pawned_items').select('pawn_date');
+    let query = client
+      .from('pawned_items')
+      .select('pawn_date')
+      .eq('environment', getEnvironment(user));
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
@@ -335,6 +347,7 @@ export class InventoryService {
             ...dto,
             branch_id: requireUserBranchId(user),
           };
+    Object.assign(payload, environmentCreateFields(user));
     const { data, error } = await client
       .from('pawned_items')
       .insert([payload])
@@ -362,6 +375,7 @@ export class InventoryService {
       .from('pawned_items')
       .select('*, item_renewals(*), customer:customers(*), transactions(*, users!transactions_created_by_user_id_fkey(id, full_name))')
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .single();
 
     if (error) {
@@ -415,6 +429,7 @@ export class InventoryService {
       .from('pawned_items')
       .select('*, item_renewals(*)')
       .ilike('item_id', cleanId)
+      .eq('environment', getEnvironment(user))
       .in('status', ['Active', 'Expired', 'Inventory'])
       .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false });
@@ -427,6 +442,7 @@ export class InventoryService {
       .from('sale_items')
       .select('*')
       .ilike('item_id', cleanId)
+      .eq('environment', getEnvironment(user))
       .in('status', ['Available', 'available'])
       .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false });
@@ -501,6 +517,7 @@ export class InventoryService {
             'full_name, address, barangay, city, region, contact_number, id_presented',
           )
           .eq('id', pawnedData.customer_id)
+          .eq('environment', getEnvironment(user))
           .maybeSingle();
 
         if (customerError) {
@@ -564,6 +581,7 @@ export class InventoryService {
       .from('pawned_items')
       .update(dto)
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select()
       .single();
     if (error) {
@@ -575,7 +593,11 @@ export class InventoryService {
   async deletePawned(user: UserWithBranch, id: string) {
     await this.findOnePawned(user, id);
     const client = this.supabase.getClient();
-    const { error } = await client.from('pawned_items').delete().eq('id', id);
+    const { error } = await client
+      .from('pawned_items')
+      .delete()
+      .eq('id', id)
+      .eq('environment', getEnvironment(user));
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
@@ -591,7 +613,7 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('item_renewals')
-      .insert([{ pawned_item_id: itemId, ...dto }])
+      .insert([{ pawned_item_id: itemId, ...dto, ...environmentCreateFields(user) }])
       .select()
       .single();
     if (error) {
@@ -607,6 +629,7 @@ export class InventoryService {
       .from('pawned_items')
       .update({ remarks: remark })
       .eq('id', itemId)
+      .eq('environment', getEnvironment(user))
       .select()
       .single();
     if (error) {
@@ -622,6 +645,7 @@ export class InventoryService {
       .from('pawned_items')
       .select('*')
       .eq('id', itemId)
+      .eq('environment', getEnvironment(user))
       .single();
     if (fetchErr || !pawnedItem) {
       throw new NotFoundException('Pawned item not found');
@@ -633,6 +657,7 @@ export class InventoryService {
         .from('sale_items')
         .select('*')
         .eq('original_pawn_id', pawnedItem.id)
+        .eq('environment', getEnvironment(user))
         .maybeSingle();
 
     if (existingSaleItemError) {
@@ -644,7 +669,8 @@ export class InventoryService {
         const { error: syncStatusError } = await client
           .from('pawned_items')
           .update({ status: 'Expired' })
-          .eq('id', itemId);
+          .eq('id', itemId)
+          .eq('environment', getEnvironment(user));
 
         if (syncStatusError) {
           throw new InternalServerErrorException(syncStatusError.message);
@@ -660,7 +686,8 @@ export class InventoryService {
     const { error: updateErr } = await client
       .from('pawned_items')
       .update({ status: 'Expired' })
-      .eq('id', itemId);
+      .eq('id', itemId)
+      .eq('environment', getEnvironment(user));
     if (updateErr) {
       throw new InternalServerErrorException(updateErr.message);
     }
@@ -684,6 +711,7 @@ export class InventoryService {
           price: 0,
           status: 'Available',
           original_pawn_id: pawnedItem.id,
+          ...environmentCreateFields(user),
         },
       ])
       .select()
@@ -707,6 +735,8 @@ export class InventoryService {
         event_key: `inventory-expired:${pawnedItem.id}`,
         entity_type: 'pawn_item',
         entity_id: pawnedItem.item_id,
+        environment: getEnvironment(user),
+        created_by: user.authId,
       });
     } catch (e) {
       console.warn('[InventoryService] Failed to create notification', e);
@@ -738,6 +768,7 @@ export class InventoryService {
       .from('pawned_items')
       .select('id, item_id, item_name, branch, branch_id, status')
       .eq('id', itemId)
+      .eq('environment', getEnvironment(user))
       .single();
 
     if (fetchErr || !pawnedItem) {
@@ -756,6 +787,7 @@ export class InventoryService {
       user_id: user.id,
       branch_id: pawnedItem.branch_id,
       action: 'PAWN_ITEM_EXPIRE_REQUEST',
+      ...environmentCreateFields(user),
       details: JSON.stringify({
         itemId: pawnedItem.item_id,
         itemName: pawnedItem.item_name,
@@ -802,6 +834,7 @@ export class InventoryService {
       .from('activity_logs')
       .select('id, action, details')
       .eq('id', requestId)
+      .eq('environment', getEnvironment(user))
       .maybeSingle();
 
     if (requestLogError) {
@@ -873,7 +906,8 @@ export class InventoryService {
         action: reviewedAction,
         details: JSON.stringify(reviewDetails),
       })
-      .eq('id', requestId);
+      .eq('id', requestId)
+      .eq('environment', getEnvironment(user));
 
     if (updateErr) {
       throw new InternalServerErrorException(updateErr.message);
@@ -908,6 +942,7 @@ export class InventoryService {
         .from('sale_items')
         .select('item_id, item_name, category')
         .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
         .in('status', ['Available', 'available']);
       if (saleError) {
         throw new InternalServerErrorException(saleError.message);
@@ -919,6 +954,7 @@ export class InventoryService {
         .from('pawned_items')
         .select('item_id, item_name, category, status')
         .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
         .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
       if (pawnedError) {
         throw new InternalServerErrorException(pawnedError.message);
@@ -928,6 +964,7 @@ export class InventoryService {
         .from('transactions')
         .select('related_pawned_item_id')
         .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
         .in('purpose', ['Redeem', 'Buy Back']);
       if (redeemedError) {
         throw new InternalServerErrorException(redeemedError.message);
@@ -951,6 +988,7 @@ export class InventoryService {
         .from('pawned_items')
         .select('item_id, item_name, category, status')
         .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
         .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
       if (pawnedError) {
         throw new InternalServerErrorException(pawnedError.message);
@@ -960,6 +998,7 @@ export class InventoryService {
         .from('transactions')
         .select('related_pawned_item_id')
         .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
         .in('purpose', ['Redeem', 'Buy Back']);
       if (redeemedError) {
         throw new InternalServerErrorException(redeemedError.message);
@@ -975,6 +1014,7 @@ export class InventoryService {
         .from('sale_items')
         .select('item_id, item_name, category')
         .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
         .in('status', ['Available', 'available']);
       if (saleError) {
         throw new InternalServerErrorException(saleError.message);
@@ -1105,6 +1145,7 @@ export class InventoryService {
         .from('branches')
         .select('name')
         .eq('id', branchId)
+        .eq('environment', getEnvironment(user))
         .single();
       branchName = branchData?.name || 'Unknown';
     }
@@ -1128,6 +1169,7 @@ export class InventoryService {
           price: dto.price || 0,
           status: dto.status || 'Available',
           image_url: imageUrl || null,
+          ...environmentCreateFields(user),
         },
       ])
       .select()
@@ -1154,6 +1196,7 @@ export class InventoryService {
     let query = client
       .from('sale_items')
       .select('*', { count: 'exact' })
+      .eq('environment', getEnvironment(user))
       .order('created_at', { ascending: false });
 
     if (branchId) {
@@ -1227,7 +1270,8 @@ export class InventoryService {
 
     let query = client
       .from('sale_items')
-      .select('status, price, available_date');
+      .select('status, price, available_date')
+      .eq('environment', getEnvironment(user));
     if (branchId) query = query.eq('branch_id', branchId);
     else if (branchNameIlike)
       query = query.ilike('branch', `%${branchNameIlike}%`);
@@ -1288,10 +1332,14 @@ export class InventoryService {
         .select(
           'id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url, created_at',
         )
+        .eq('environment', 'production')
         .eq('status', 'Available')
         .gt('price', 0)
         .order('created_at', { ascending: false }),
-      client.from('branches').select('id, name, location'),
+      client
+        .from('branches')
+        .select('id, name, location')
+        .eq('environment', 'production'),
     ]);
 
     if (saleResult.error) {
@@ -1343,7 +1391,10 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
-    let query = client.from('sale_items').select('category');
+    let query = client
+      .from('sale_items')
+      .select('category')
+      .eq('environment', getEnvironment(user));
     if (branchId) query = query.eq('branch_id', branchId);
     else if (branchNameIlike)
       query = query.ilike('branch', `%${branchNameIlike}%`);
@@ -1369,7 +1420,10 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
-    let query = client.from('sale_items').select('available_date, status');
+    let query = client
+      .from('sale_items')
+      .select('available_date, status')
+      .eq('environment', getEnvironment(user));
     if (branchId) query = query.eq('branch_id', branchId);
     else if (branchNameIlike)
       query = query.ilike('branch', `%${branchNameIlike}%`);
@@ -1424,7 +1478,8 @@ export class InventoryService {
         price: soldPrice,
         customer_id: customerId || null,
       })
-      .eq('id', itemId);
+      .eq('id', itemId)
+      .eq('environment', getEnvironment(user));
     if (updateErr) {
       throw new InternalServerErrorException(updateErr.message);
     }
@@ -1446,6 +1501,7 @@ export class InventoryService {
         details: `Item sold: ${item.item_name ?? 'Unknown'} for ₱${soldPrice.toLocaleString()}`,
         related_sale_item_id: itemId,
         customer_id: customerId || null,
+        ...environmentCreateFields(user),
       },
     ]);
     if (txErr) {
@@ -1472,6 +1528,7 @@ export class InventoryService {
       .from('sale_items')
       .select('*')
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .single();
     if (error) {
       throw new NotFoundException('Item not found');
@@ -1487,6 +1544,7 @@ export class InventoryService {
       .from('sale_items')
       .update(dto)
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select()
       .single();
     if (error) {
@@ -1507,6 +1565,7 @@ export class InventoryService {
       .from('pawned_items')
       .select('id, item_id, item_name, branch, branch_id')
       .eq('id', itemId)
+      .eq('environment', getEnvironment(user))
       .single();
 
     if (fetchErr || !pawnedItem) {
@@ -1519,6 +1578,7 @@ export class InventoryService {
       user_id: user.id,
       branch_id: pawnedItem.branch_id,
       action: 'QR_REPLACEMENT_REQUEST',
+      ...environmentCreateFields(user),
       details: JSON.stringify({
         itemId: pawnedItem.item_id,
         itemName: pawnedItem.item_name,
@@ -1556,6 +1616,7 @@ export class InventoryService {
       .from('activity_logs')
       .select('*')
       .eq('id', requestId)
+      .eq('environment', getEnvironment(user))
       .single();
 
     if (requestLogError || !requestLog) {
@@ -1586,7 +1647,8 @@ export class InventoryService {
         action: reviewedAction,
         details: JSON.stringify(updatedDetails),
       })
-      .eq('id', requestId);
+      .eq('id', requestId)
+      .eq('environment', getEnvironment(user));
 
     if (updateErr) {
       throw new InternalServerErrorException(updateErr.message);
@@ -1600,7 +1662,11 @@ export class InventoryService {
   async deleteForSale(user: UserWithBranch, id: string) {
     await this.findOneForSale(user, id);
     const client = this.supabase.getClient();
-    const { error } = await client.from('sale_items').delete().eq('id', id);
+    const { error } = await client
+      .from('sale_items')
+      .delete()
+      .eq('id', id)
+      .eq('environment', getEnvironment(user));
     if (error) {
       throw new InternalServerErrorException(error.message);
     }

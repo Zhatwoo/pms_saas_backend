@@ -18,6 +18,11 @@ import { CreateCustomerDto } from '../dto/create-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { ListCustomersDto } from '../dto/list-customers.dto';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
+import {
+  applyEnvironmentFilter,
+  environmentCreateFields,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 type CustomerRow = {
   id: string;
@@ -86,7 +91,9 @@ export class CustomersService {
     user: UserWithBranch,
     branchId?: string,
   ): Prisma.customersWhereInput {
-    const where: Prisma.customersWhereInput = { deleted_at: null };
+    const where: Prisma.customersWhereInput = applyEnvironmentFilter(user, {
+      deleted_at: null,
+    });
 
     if (user.role === Role.SUPER_ADMIN) {
       if (branchId) {
@@ -186,9 +193,14 @@ export class CustomersService {
     };
   }
 
-  private async resolveCustomerVisuals(customerIds: string[]) {
+  private async resolveCustomerVisuals(
+    user: UserWithBranch,
+    customerIds: string[],
+  ) {
     const pawnedItems = await this.prisma.pawned_items.findMany({
-      where: { customer_id: { in: customerIds } },
+      where: applyEnvironmentFilter(user, {
+        customer_id: { in: customerIds },
+      }),
       select: {
         id: true,
         profile_photo: true,
@@ -204,7 +216,9 @@ export class CustomersService {
     const transactions =
       pawnedItemIds.length > 0
         ? await this.prisma.transactions.findMany({
-            where: { related_pawned_item_id: { in: pawnedItemIds } },
+            where: applyEnvironmentFilter(user, {
+              related_pawned_item_id: { in: pawnedItemIds },
+            }),
             select: {
               profile_photo: true,
               id_photo: true,
@@ -283,6 +297,7 @@ export class CustomersService {
       email: dto.email?.trim().toLowerCase() || null,
       id_presented: dto.id_presented?.trim() || null,
       branch_id: branchId,
+      ...environmentCreateFields(user),
     };
     this.encryption.applyCustomerFieldsForWrite(payload);
 
@@ -366,7 +381,7 @@ export class CustomersService {
     ) as NonNullable<typeof customer>;
 
     const group = await this.resolveCustomerNameGroup(user, decrypted);
-    const visuals = await this.resolveCustomerVisuals(group.matchingIds);
+    const visuals = await this.resolveCustomerVisuals(user, group.matchingIds);
 
     return {
       ...decrypted,
@@ -389,8 +404,10 @@ export class CustomersService {
     const logs = await this.prisma.activity_logs.findMany({
       where:
         user.role === Role.SUPER_ADMIN
-          ? {}
-          : { branch_id: requireUserBranchId(user) },
+          ? applyEnvironmentFilter(user)
+          : applyEnvironmentFilter(user, {
+              branch_id: requireUserBranchId(user),
+            }),
       select: {
         id: true,
         action: true,
@@ -450,6 +467,7 @@ export class CustomersService {
         user_id: user.id,
         branch_id: customer.branch_id || null,
         action: 'CUSTOMER_NOTE_ADDED',
+        ...environmentCreateFields(user),
         details: JSON.stringify({
           customerId,
           title: title?.trim() || 'Manual Note',
@@ -532,6 +550,7 @@ export class CustomersService {
 
     if (requestingEmployeeId) {
       await this.notifyEmployeeOfProcessedEdit(
+        user,
         requestingEmployeeId,
         id,
         existing.full_name,
@@ -566,6 +585,7 @@ export class CustomersService {
         user_id: user.id,
         branch_id: customer.branch_id || null,
         action: 'CUSTOMER_EDIT_REQUESTED',
+        ...environmentCreateFields(user),
         details: JSON.stringify({
           customerId: id,
           customerName: customer.full_name,
@@ -582,7 +602,11 @@ export class CustomersService {
     const branchId = user.branchId || customer.branch_id;
     if (branchId) {
       const admins = await this.prisma.users.findMany({
-        where: { branch_id: branchId, role: 'admin', account_status: 'active' },
+        where: applyEnvironmentFilter(user, {
+          branch_id: branchId,
+          role: 'admin',
+          account_status: 'active',
+        }),
         select: { id: true },
       });
 
@@ -598,6 +622,8 @@ export class CustomersService {
             event_key: `customer-edit-request:${requestLog.id}:admin:${admin.id}`,
             entity_type: 'customer',
             entity_id: id,
+            environment: getEnvironment(user),
+            created_by: user.authId,
           }),
         ),
       );
@@ -630,7 +656,10 @@ export class CustomersService {
 
     await this.prisma.$transaction([
       this.prisma.notifications.deleteMany({
-        where: { category: 'Requests', log_id: logId },
+        where: applyEnvironmentFilter(user, {
+          category: 'Requests',
+          log_id: logId,
+        }),
       }),
       this.prisma.activity_logs.delete({ where: { id: logId } }),
     ]);
@@ -644,7 +673,10 @@ export class CustomersService {
   ) {
     const targetBranchId = this.resolveMergeBranchId(user, branchId);
     const customers = await this.prisma.customers.findMany({
-      where: { branch_id: targetBranchId, deleted_at: null },
+      where: applyEnvironmentFilter(user, {
+        branch_id: targetBranchId,
+        deleted_at: null,
+      }),
       select: { id: true, full_name: true, branch_id: true, created_at: true },
       orderBy: { created_at: 'asc' },
     });
@@ -658,7 +690,7 @@ export class CustomersService {
     }
 
     const activityLogs = await this.prisma.activity_logs.findMany({
-      where: { branch_id: targetBranchId },
+      where: applyEnvironmentFilter(user, { branch_id: targetBranchId }),
       select: { id: true, details: true },
       orderBy: { created_at: 'asc' },
     });
@@ -680,7 +712,9 @@ export class CustomersService {
       const duplicateIdSet = new Set(duplicateIds);
 
       const pawnedUpdate = await this.prisma.pawned_items.updateMany({
-        where: { customer_id: { in: duplicateIds } },
+        where: applyEnvironmentFilter(user, {
+          customer_id: { in: duplicateIds },
+        }),
         data: { customer_id: canonicalCustomer.id },
       });
 
@@ -723,7 +757,10 @@ export class CustomersService {
       }
 
       await this.prisma.customers.updateMany({
-        where: { id: { in: duplicateIds }, branch_id: targetBranchId },
+        where: applyEnvironmentFilter(user, {
+          id: { in: duplicateIds },
+          branch_id: targetBranchId,
+        }),
         data: { deleted_at: new Date() },
       });
 
@@ -741,6 +778,7 @@ export class CustomersService {
           user_id: user.id,
           branch_id: targetBranchId,
           action: 'CUSTOMER_DUPLICATES_MERGED',
+          ...environmentCreateFields(user),
           details: JSON.stringify({
             normalizedName,
             canonicalCustomerId: canonicalCustomer.id,
@@ -798,7 +836,10 @@ export class CustomersService {
     try {
       if (logId) {
         const updated = await this.prisma.activity_logs.updateMany({
-          where: { id: logId, action: 'CUSTOMER_EDIT_REQUESTED' },
+          where: applyEnvironmentFilter(user, {
+            id: logId,
+            action: 'CUSTOMER_EDIT_REQUESTED',
+          }),
           data: {
             action: 'CUSTOMER_EDIT_PROCESSED',
             details: JSON.stringify(details),
@@ -812,6 +853,7 @@ export class CustomersService {
           user_id: user.id,
           branch_id: user.branchId || customer.branch_id || null,
           action: 'CUSTOMER_EDIT_PROCESSED',
+          ...environmentCreateFields(user),
           details: JSON.stringify(details),
         },
       });
@@ -824,6 +866,7 @@ export class CustomersService {
   }
 
   private async notifyEmployeeOfProcessedEdit(
+    user: AuthenticatedUserProfile,
     employeeId: string,
     customerId: string,
     customerName: string,
@@ -853,6 +896,8 @@ export class CustomersService {
         event_key: `customer-edit-review:${hasLogId ? logId : customerId}:employee:${employeeId}`,
         entity_type: 'customer',
         entity_id: customerId,
+        environment: getEnvironment(user),
+        created_by: user.authId,
       });
     } catch (error) {
       this.logger.warn(
