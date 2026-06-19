@@ -214,6 +214,7 @@ export class FinanceDailyBalanceService {
   >(
     rows: T[],
     pendingLinksByBranch?: Map<string, Set<string>>,
+    opts?: { environment?: string },
   ): Promise<T[]> {
     const branchIds = [
       ...new Set(
@@ -232,6 +233,7 @@ export class FinanceDailyBalanceService {
         where: {
           branch_id: { in: branchIds },
           status: { not: 'transferred' },
+          ...(opts?.environment ? { environment: opts.environment } : {}),
         },
         select: { branch_id: true, request_no: true },
       });
@@ -488,9 +490,13 @@ export class FinanceDailyBalanceService {
     branchId: string,
     sessionDate: Date,
     client: PrismaService | Tx,
-    opts?: { forStartingPersist?: boolean },
+    opts?: { forStartingPersist?: boolean; environment?: string },
   ): Promise<T[]> {
-    const out = await this.excludeInboundFundTransfersAwaitingReceiptRows(rows);
+    const out = await this.excludeInboundFundTransfersAwaitingReceiptRows(
+      rows,
+      undefined,
+      opts,
+    );
     if (opts?.forStartingPersist) {
       return [];
     }
