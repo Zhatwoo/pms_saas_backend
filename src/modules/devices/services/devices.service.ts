@@ -8,6 +8,11 @@ import {
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { Role } from '../../../common/enums';
+import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import {
+  applyEnvironmentFilter,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 import { AuthorizeDeviceDto } from '../dto/authorize-device.dto';
 import { UpdateDeviceDto } from '../dto/update-device.dto';
 import { RequestAuthorizationDto } from '../dto/request-authorization.dto';
@@ -30,19 +35,20 @@ export class DevicesService {
   }
 
   /** List all devices with employee + branch info + recent users. Super admin sees all; admin sees own branch only. */
-  async findAll(actorRole: string, actorBranchId: string | null) {
-    if (actorRole === Role.ADMIN && !actorBranchId) {
+  async findAll(actor: AuthenticatedUserProfile) {
+    if (actor.role === Role.ADMIN && !actor.branchId) {
       throw new ForbiddenException('Branch scope is required');
     }
 
     const where =
-      actorRole === Role.SUPER_ADMIN || actorRole === Role.ADMIN
-        ? actorRole === Role.SUPER_ADMIN
-          ? {}
+      actor.role === Role.SUPER_ADMIN || actor.role === Role.ADMIN
+        ? actor.role === Role.SUPER_ADMIN
+          ? applyEnvironmentFilter(actor)
           : {
+              ...applyEnvironmentFilter(actor),
               OR: [
-                { branch_id: actorBranchId ?? undefined },
-                { employee: { branch_id: actorBranchId ?? undefined } },
+                { branch_id: actor.branchId ?? undefined },
+                { employee: { branch_id: actor.branchId ?? undefined } },
               ],
             }
         : undefined;
@@ -87,6 +93,7 @@ export class DevicesService {
               device_fingerprint: device.device_fingerprint,
               login_status: 'SUCCESS',
               employee_id: { not: null },
+              environment: getEnvironment(actor),
             },
             include: {
               employee: { select: { id: true, full_name: true, email: true, role: true } },
@@ -131,9 +138,9 @@ export class DevicesService {
     return enriched;
   }
 
-  async findOne(id: string) {
-    const device = await this.prisma.authorized_devices.findUnique({
-      where: { id },
+  async findOne(actor: AuthenticatedUserProfile, id: string) {
+    const device = await this.prisma.authorized_devices.findFirst({
+      where: applyEnvironmentFilter(actor, { id }),
       include: {
         employee: {
           select: {
@@ -157,22 +164,41 @@ export class DevicesService {
   }
 
   /** Called by super admin to authorize a pending/unknown device. */
-  async authorize(dto: AuthorizeDeviceDto) {
-    const employee = await this.prisma.users.findUnique({
-      where: { id: dto.employeeId },
-      select: { id: true, role: true, branch_id: true },
+  async authorize(actor: AuthenticatedUserProfile, dto: AuthorizeDeviceDto) {
+    const employee = await this.prisma.users.findFirst({
+      where: applyEnvironmentFilter(actor, { id: dto.employeeId }),
+      select: { id: true, role: true, branch_id: true, auth_id: true },
     });
     if (!employee) throw new NotFoundException('Employee not found');
     const effectiveBranchId = dto.branchId ?? employee.branch_id ?? null;
 
-    return this.prisma.authorized_devices.upsert({
+    const existing = await this.prisma.authorized_devices.findFirst({
       where: {
-        employee_id_device_fingerprint: {
-          employee_id: dto.employeeId,
-          device_fingerprint: dto.deviceFingerprint,
-        },
+        device_fingerprint: dto.deviceFingerprint,
+        environment: getEnvironment(actor),
       },
-      create: {
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (existing) {
+      return this.prisma.authorized_devices.update({
+        where: { id: existing.id },
+        data: {
+          employee_id: dto.employeeId,
+          status: 'AUTHORIZED',
+          device_name: dto.deviceName,
+          device_type: dto.deviceType ?? 'DESKTOP',
+          branch_id: effectiveBranchId,
+          ip_address: dto.ipAddress ?? existing.ip_address,
+          updated_at: new Date(),
+          environment: getEnvironment(actor),
+          created_by: existing.created_by ?? actor.authId,
+        },
+      });
+    }
+
+    return this.prisma.authorized_devices.create({
+      data: {
         employee_id: dto.employeeId,
         branch_id: effectiveBranchId,
         device_name: dto.deviceName,
@@ -180,14 +206,8 @@ export class DevicesService {
         device_fingerprint: dto.deviceFingerprint,
         ip_address: dto.ipAddress ?? null,
         status: 'AUTHORIZED',
-      },
-      update: {
-        employee_id: dto.employeeId,
-        status: 'AUTHORIZED',
-        device_name: dto.deviceName,
-        device_type: dto.deviceType ?? 'DESKTOP',
-        branch_id: effectiveBranchId,
-        updated_at: new Date(),
+        environment: getEnvironment(actor),
+        created_by: actor.authId,
       },
     });
   }
@@ -202,21 +222,48 @@ export class DevicesService {
     // Resolve employee id from email when called from the unauthenticated login screen
     let resolvedEmployeeId = employeeId;
     let resolvedBranchId: string | null = null;
+    let resolvedAuthId: string | null = null;
+    let resolvedEnvironment: 'production' | 'development' = 'production';
     if (!resolvedEmployeeId && dto.email) {
       const user = await this.prisma.users.findUnique({
         where: { email: dto.email.trim().toLowerCase() },
-        select: { id: true, branch_id: true },
+        select: {
+          id: true,
+          auth_id: true,
+          branch_id: true,
+          email: true,
+          is_developer: true,
+        },
       });
       resolvedEmployeeId = user?.id ?? null;
       resolvedBranchId = user?.branch_id ?? null;
+      resolvedAuthId = user?.auth_id ?? null;
+      resolvedEnvironment = user
+        ? getEnvironment({
+            email: user.email,
+            isDeveloper: user.is_developer,
+          })
+        : 'production';
     }
 
     if (resolvedEmployeeId && !resolvedBranchId) {
       const user = await this.prisma.users.findUnique({
         where: { id: resolvedEmployeeId },
-        select: { branch_id: true },
+        select: {
+          auth_id: true,
+          branch_id: true,
+          email: true,
+          is_developer: true,
+        },
       });
       resolvedBranchId = user?.branch_id ?? null;
+      resolvedAuthId = user?.auth_id ?? null;
+      resolvedEnvironment = user
+        ? getEnvironment({
+            email: user.email,
+            isDeveloper: user.is_developer,
+          })
+        : resolvedEnvironment;
     }
 
     if (!resolvedEmployeeId) {
@@ -229,6 +276,7 @@ export class DevicesService {
       where: {
         employee_id: resolvedEmployeeId,
         device_fingerprint: dto.deviceFingerprint,
+        environment: resolvedEnvironment,
       },
     });
 
@@ -242,6 +290,34 @@ export class DevicesService {
       return existing;
     }
 
+    const existingFingerprint = await this.prisma.authorized_devices.findFirst({
+      where: {
+        device_fingerprint: dto.deviceFingerprint,
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (existingFingerprint) {
+      if (existingFingerprint.status === 'BLOCKED') {
+        throw new ForbiddenException('Device is blocked');
+      }
+
+      return this.prisma.authorized_devices.update({
+        where: { id: existingFingerprint.id },
+        data: {
+          employee_id: resolvedEmployeeId,
+          branch_id: resolvedBranchId ?? undefined,
+          device_name: dto.deviceName ?? existingFingerprint.device_name,
+          device_type: dto.deviceType ?? existingFingerprint.device_type,
+          ip_address: dto.ipAddress ?? clientIp,
+          status: 'PENDING',
+          environment: resolvedEnvironment,
+          created_by: resolvedAuthId ?? existingFingerprint.created_by,
+          updated_at: new Date(),
+        },
+      });
+    }
+
     return this.prisma.authorized_devices.create({
       data: {
         employee_id: resolvedEmployeeId,
@@ -251,12 +327,14 @@ export class DevicesService {
         device_fingerprint: dto.deviceFingerprint,
         ip_address: dto.ipAddress ?? clientIp,
         status: 'PENDING',
+        environment: resolvedEnvironment,
+        created_by: resolvedAuthId,
       },
     });
   }
 
-  async update(id: string, dto: UpdateDeviceDto) {
-    await this.findOne(id);
+  async update(actor: AuthenticatedUserProfile, id: string, dto: UpdateDeviceDto) {
+    await this.findOne(actor, id);
     return this.prisma.authorized_devices.update({
       where: { id },
       data: {
@@ -267,15 +345,15 @@ export class DevicesService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(actor: AuthenticatedUserProfile, id: string) {
+    await this.findOne(actor, id);
     await this.prisma.authorized_devices.delete({ where: { id } });
     return { success: true };
   }
 
   /** Block a device instantly (e.g. stolen). */
-  async block(id: string) {
-    await this.findOne(id);
+  async block(actor: AuthenticatedUserProfile, id: string) {
+    await this.findOne(actor, id);
     return this.prisma.authorized_devices.update({
       where: { id },
       data: { status: 'BLOCKED', updated_at: new Date() },
@@ -284,22 +362,21 @@ export class DevicesService {
 
   /** All login log entries. Super admin sees all; admin sees own branch. */
   async findLogs(
-    actorRole: string,
-    actorBranchId: string | null,
+    actor: AuthenticatedUserProfile,
     limit = 200,
   ) {
-    if (actorRole !== Role.SUPER_ADMIN && actorRole !== Role.ADMIN) {
+    if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
       throw new ForbiddenException('Access denied');
     }
 
     const branchFilter =
-      actorRole === Role.ADMIN && actorBranchId
-        ? { employee: { branch_id: actorBranchId } }
+      actor.role === Role.ADMIN && actor.branchId
+        ? { employee: { branch_id: actor.branchId } }
         : {};
 
     try {
       const logs = await this.prisma.login_logs.findMany({
-        where: branchFilter,
+        where: applyEnvironmentFilter(actor, branchFilter),
         include: {
           employee: {
             select: { id: true, full_name: true, email: true, role: true, avatar_url: true },
@@ -330,13 +407,14 @@ export class DevicesService {
 
   /** Validate that this employee is authorized on this specific device fingerprint. */
   async validateAndUpdateLastLogin(
+    user: AuthenticatedUserProfile,
     deviceFingerprint: string,
-    employeeId: string,
   ): Promise<{ authorized: boolean; reason?: string }> {
     const device = await this.prisma.authorized_devices.findFirst({
       where: {
-        employee_id: employeeId,
+        employee_id: user.id,
         device_fingerprint: deviceFingerprint,
+        environment: getEnvironment(user),
       },
     });
 
@@ -367,10 +445,12 @@ export class DevicesService {
   /** Write a login log entry. */
   async writeLoginLog(data: {
     employeeId?: string;
+    authId?: string;
     deviceFingerprint?: string;
     ipAddress?: string;
     loginStatus: string;
     failureReason?: string;
+    environment?: 'production' | 'development';
   }) {
     try {
       await this.prisma.login_logs.create({
@@ -380,6 +460,8 @@ export class DevicesService {
           ip_address: data.ipAddress ?? null,
           login_status: data.loginStatus,
           failure_reason: data.failureReason ?? null,
+          environment: data.environment ?? 'production',
+          created_by: data.authId ?? null,
         },
       });
     } catch (err) {

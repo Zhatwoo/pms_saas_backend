@@ -22,8 +22,11 @@ export class BranchesController {
 
   @Roles(Role.SUPER_ADMIN)
   @Post()
-  create(@Body() createBranchDto: CreateBranchDto) {
-    return this.branchesService.create(createBranchDto);
+  create(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() createBranchDto: CreateBranchDto,
+  ) {
+    return this.branchesService.create(createBranchDto, req.user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -34,8 +37,8 @@ export class BranchesController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get('overview-stats')
-  getOverviewStats() {
-    return this.branchesService.getOverviewStats();
+  getOverviewStats(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.branchesService.getOverviewStats(req.user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -45,7 +48,7 @@ export class BranchesController {
     @Param('id') id: string,
   ) {
     assertBranchRowAccess(req.user, id);
-    return this.branchesService.findOne(id);
+    return this.branchesService.findOne(id, req.user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
@@ -58,12 +61,15 @@ export class BranchesController {
     if (req.user.role === Role.ADMIN) {
       assertBranchRowAccess(req.user, id);
     }
-    return this.branchesService.update(id, updateBranchDto);
+    return this.branchesService.update(id, updateBranchDto, req.user);
   }
 
   @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.branchesService.remove(id);
+  remove(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.branchesService.remove(id, req.user);
   }
 }

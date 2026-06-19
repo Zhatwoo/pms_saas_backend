@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
+import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import {
+  environmentCreateFields,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 @Injectable()
 export class ShopSettingsService {
@@ -13,9 +18,10 @@ export class ShopSettingsService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async getSetting(key: string) {
-    const data = await this.prisma.shop_settings.findUnique({
-      where: { setting_key: key },
+  async getSetting(key: string, user: AuthenticatedUserProfile) {
+    const environment = getEnvironment(user);
+    const data = await this.prisma.shop_settings.findFirst({
+      where: { setting_key: key, environment },
       select: { setting_value: true },
     });
 
@@ -120,7 +126,8 @@ export class ShopSettingsService {
           data: {
             setting_key: key,
             setting_value: defaultValue,
-            updated_at: new Date()
+            updated_at: new Date(),
+            ...environmentCreateFields(user),
           },
           select: { setting_value: true }
         });
@@ -133,16 +140,29 @@ export class ShopSettingsService {
     return data.setting_value;
   }
 
-  async setSetting(key: string, value: any) {
+  async setSetting(key: string, value: any, user: AuthenticatedUserProfile) {
     try {
-      return await this.prisma.shop_settings.upsert({
-        where: { setting_key: key },
-        create: {
+      const environment = getEnvironment(user);
+      const existing = await this.prisma.shop_settings.findFirst({
+        where: { setting_key: key, environment },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return await this.prisma.shop_settings.create({
+          data: {
+            setting_key: key,
+            setting_value: value,
+            updated_at: new Date(),
+            ...environmentCreateFields(user),
+          },
+        });
+      }
+
+      return await this.prisma.shop_settings.update({
+        where: { id: existing.id },
+        data: {
           setting_key: key,
-          setting_value: value,
-          updated_at: new Date(),
-        },
-        update: {
           setting_value: value,
           updated_at: new Date(),
         },

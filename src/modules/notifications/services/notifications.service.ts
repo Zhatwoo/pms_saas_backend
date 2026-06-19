@@ -11,6 +11,10 @@ import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationEventsService } from './notification-events.service';
 import {
+  getEnvironment,
+  isDeveloper,
+} from '../../../common/utils/authorization.util';
+import {
   NotificationCreateInput,
   NotificationDto,
   NotificationEntityType,
@@ -141,6 +145,8 @@ export class NotificationsService {
         target_url: payload.target_url ?? this.buildTargetUrl(payload),
         entity_type: payload.entity_type ?? null,
         entity_id: payload.entity_id ?? null,
+        environment: payload.environment ?? 'production',
+        created_by: payload.created_by ?? null,
       };
 
       const row = await this.prisma.notifications.create({ data });
@@ -169,8 +175,18 @@ export class NotificationsService {
   }
 
   private buildVisibilityWhere(user: AuthenticatedUserProfile) {
+    const environment = getEnvironment(user);
+
+    if (isDeveloper(user)) {
+      return {
+        environment,
+        created_by: user.authId,
+      };
+    }
+
     if (user.role === Role.SUPER_ADMIN) {
       return {
+        environment,
         OR: [
           { user_id: user.id },
           {
@@ -190,12 +206,22 @@ export class NotificationsService {
       });
     }
 
-    return { OR: scoped };
+    return { environment, OR: scoped };
   }
 
   private buildMutableWhere(user: AuthenticatedUserProfile) {
+    const environment = getEnvironment(user);
+
+    if (isDeveloper(user)) {
+      return {
+        environment,
+        created_by: user.authId,
+      };
+    }
+
     if (user.role === Role.SUPER_ADMIN) {
       return {
+        environment,
         OR: [
           { user_id: user.id },
           {
@@ -215,7 +241,7 @@ export class NotificationsService {
       });
     }
 
-    return { OR: scoped };
+    return { environment, OR: scoped };
   }
 
   private canMutate(

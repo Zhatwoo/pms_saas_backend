@@ -11,6 +11,9 @@ export type UserWithBranch = {
   role: Role;
   branchId: string | null;
   id?: string | null;
+  authId?: string | null;
+  email?: string | null;
+  isDeveloper?: boolean | null;
 };
 
 export function isUuid(value: string): boolean {

@@ -31,6 +31,8 @@ export type NotificationCreateInput = {
   target_url?: string | null;
   entity_type?: NotificationEntityType | string | null;
   entity_id?: string | null;
+  environment?: string | null;
+  created_by?: string | null;
 };
 
 export type NotificationDto = {
@@ -53,6 +55,8 @@ export type NotificationDto = {
   log_id: string | null;
   event_key: string | null;
   target_role: string | null;
+  environment: string;
+  created_by: string | null;
 };
 
 export function toNotificationDto(row: notifications): NotificationDto {
@@ -76,5 +80,7 @@ export function toNotificationDto(row: notifications): NotificationDto {
     log_id: row.log_id ?? null,
     event_key: row.event_key ?? null,
     target_role: row.target_role ?? null,
+    environment: row.environment,
+    created_by: row.created_by ?? null,
   };
 }

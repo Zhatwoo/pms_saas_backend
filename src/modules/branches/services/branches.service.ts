@@ -19,6 +19,11 @@ import {
   type InventoryValuationMode,
 } from '../../../common/utils/inventory-valuation.util';
 import { NotificationsService } from '../../notifications/services/notifications.service';
+import {
+  applyEnvironmentFilter,
+  environmentCreateFields,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 @Injectable()
 export class BranchesService {
@@ -42,6 +47,7 @@ export class BranchesService {
     location: true,
     contact_number: true,
     status: true,
+    environment: true,
   } as const;
 
   /** Narrow Supabase error shape — keeps eslint strict mode happy vs `single()` payloads. */
@@ -130,7 +136,7 @@ export class BranchesService {
     throw new InternalServerErrorException('No available branch code slots');
   }
 
-  async create(createBranchDto: CreateBranchDto) {
+  async create(createBranchDto: CreateBranchDto, user: UserWithBranch) {
     let payload = {
       name: this.normalizeBranchName(createBranchDto.name),
       branch_code: createBranchDto.branch_code.trim(),
@@ -142,6 +148,7 @@ export class BranchesService {
         ),
       ),
       status: createBranchDto.status,
+      ...environmentCreateFields(user),
     };
 
     const firstResp = await this.supabaseService
@@ -184,14 +191,16 @@ export class BranchesService {
       event_key: `branch-created:${String(data.id)}`,
       entity_type: 'branch',
       entity_id: String(data.branch_code),
+      ...environmentCreateFields(user),
     });
 
     return this.mapBranchFromDb(data);
   }
 
-  async findAll() {
+  async findAll(user: UserWithBranch) {
     try {
       const rows = await this.prisma.branches.findMany({
+        where: applyEnvironmentFilter(user),
         select: this.branchCardSelect,
         orderBy: { created_at: 'desc' },
       });
@@ -218,12 +227,12 @@ export class BranchesService {
   async findAllForActor(user: UserWithBranch) {
     try {
       if (user.role === Role.SUPER_ADMIN) {
-        return await this.findAll();
+        return await this.findAll(user);
       }
 
       const branchId = requireUserBranchId(user);
       const rows = await this.prisma.branches.findMany({
-        where: { id: branchId },
+        where: applyEnvironmentFilter(user, { id: branchId }),
         select: this.branchCardSelect,
         orderBy: { created_at: 'desc' },
       });
@@ -258,7 +267,7 @@ export class BranchesService {
   async findActiveSummaries() {
     try {
       const rows = await this.prisma.branches.findMany({
-        where: { status: 'Active' },
+        where: { status: 'Active', environment: 'production' },
         select: { id: true, branch_code: true, name: true, location: true },
         orderBy: { name: 'asc' },
       });
@@ -270,9 +279,9 @@ export class BranchesService {
     }
   }
 
-  async findOne(id: string) {
-    const data = await this.prisma.branches.findUnique({
-      where: { id },
+  async findOne(id: string, user: UserWithBranch) {
+    const data = await this.prisma.branches.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
     });
 
     if (!data) {
@@ -282,7 +291,20 @@ export class BranchesService {
     return this.mapBranchFromDb(data);
   }
 
-  async update(id: string, updateBranchDto: UpdateBranchDto) {
+  async update(
+    id: string,
+    updateBranchDto: UpdateBranchDto,
+    user: UserWithBranch,
+  ) {
+    const existing = await this.prisma.branches.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Branch not found');
+    }
+
     const payload = {
       ...(updateBranchDto.name
         ? { name: this.normalizeBranchName(updateBranchDto.name) }
@@ -308,6 +330,7 @@ export class BranchesService {
       .from('branches')
       .update(payload)
       .eq('id', id)
+      .eq('environment', getEnvironment(user))
       .select()
       .single();
 
@@ -324,12 +347,13 @@ export class BranchesService {
     return this.mapBranchFromDb(data);
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: UserWithBranch) {
     const rmResp = await this.supabaseService
       .getClient()
       .from('branches')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('environment', getEnvironment(user));
 
     const { error } = BranchesService.unwrapSupabaseRow(rmResp);
 
@@ -340,12 +364,14 @@ export class BranchesService {
     return { deleted: true };
   }
 
-  async getOverviewStats() {
+  async getOverviewStats(user: UserWithBranch) {
     const [branchesMeta, pawnedResult, saleResult] = await Promise.all([
       this.prisma.branches.findMany({
+        where: applyEnvironmentFilter(user),
         select: { id: true, inventory_valuation_mode: true },
       }),
       this.prisma.pawned_items.findMany({
+        where: applyEnvironmentFilter(user),
         select: {
           branch_id: true,
           amount: true,
@@ -355,6 +381,7 @@ export class BranchesService {
         },
       }),
       this.prisma.sale_items.findMany({
+        where: applyEnvironmentFilter(user),
         select: { branch_id: true, price: true, status: true },
       }),
     ]);

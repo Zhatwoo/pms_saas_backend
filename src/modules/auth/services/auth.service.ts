@@ -16,6 +16,11 @@ import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { BranchDaySessionService } from '../../branch-finance/services/branch-day-session.service';
 import { DevicesService } from '../../devices/services/devices.service';
+import {
+  environmentCreateFields,
+  isDeveloper,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 
@@ -58,6 +63,7 @@ export class AuthService {
     const email = registerDto.email.trim().toLowerCase();
     const fullName = registerDto.fullName.trim();
     const normalizedRole = registerDto.role === 'admin' ? 'admin' : 'employee';
+    const developer = isDeveloper({ email });
 
     const branch = await this.prisma.branches.findUnique({
       where: { id: registerDto.branchId },
@@ -97,6 +103,9 @@ export class AuthService {
       role: normalizedRole,
       branch_id: registerDto.branchId,
       account_status: 'pending' as const,
+      is_developer: developer,
+      environment: getEnvironment({ email, isDeveloper: developer }),
+      created_by: authId,
     };
 
     // Upsert: DB triggers (or prior inserts) may already create a users row for new auth users.
@@ -163,9 +172,22 @@ export class AuthService {
     const user = await this.supabaseService.assertSessionUserByAuthId(
       data.user.id,
     );
+    const effectiveIsDeveloper =
+      user.isDeveloper ||
+      isDeveloper({ email: loginDto.email }) ||
+      isDeveloper({ email: data.user.email ?? null });
+    const userEnvironment = getEnvironment({
+      email: user.email,
+      isDeveloper: effectiveIsDeveloper,
+    });
 
     // ── Branch IP restriction ─────────────────────────────────────────────────
-    if (user.branchId && user.role !== Role.SUPER_ADMIN && clientIp) {
+    if (
+      !effectiveIsDeveloper &&
+      user.branchId &&
+      user.role !== Role.SUPER_ADMIN &&
+      clientIp
+    ) {
       const branch = await this.prisma.branches.findUnique({
         where: { id: user.branchId },
         select: { allowed_ip: true },
@@ -184,6 +206,8 @@ export class AuthService {
             ipAddress: clientIp,
             loginStatus: 'BLOCKED',
             failureReason: 'OUTSIDE_BRANCH_NETWORK',
+            authId: user.authId,
+            environment: userEnvironment,
           });
           throw new UnauthorizedException(
             'Outside Branch Network. Login is only allowed from the branch WiFi.',
@@ -193,7 +217,7 @@ export class AuthService {
     }
 
     // ── Device fingerprint restriction ────────────────────────────────────────
-    if (user.role !== Role.SUPER_ADMIN) {
+    if (!effectiveIsDeveloper && user.role !== Role.SUPER_ADMIN) {
       const fingerprint = loginDto.deviceFingerprint?.trim();
       if (!fingerprint) {
         await this.devicesService.writeLoginLog({
@@ -201,6 +225,8 @@ export class AuthService {
           ipAddress: clientIp,
           loginStatus: 'BLOCKED',
           failureReason: 'MISSING_DEVICE_FINGERPRINT',
+          authId: user.authId,
+          environment: userEnvironment,
         });
         throw new ForbiddenException({
           message: 'Device fingerprint is required.',
@@ -209,8 +235,8 @@ export class AuthService {
       }
 
       const deviceCheck = await this.devicesService.validateAndUpdateLastLogin(
+        user,
         fingerprint,
-        user.id,
       );
 
       if (!deviceCheck.authorized) {
@@ -220,6 +246,8 @@ export class AuthService {
           ipAddress: clientIp,
           loginStatus: 'BLOCKED',
           failureReason: deviceCheck.reason,
+          authId: user.authId,
+          environment: userEnvironment,
         });
 
         const messages: Record<string, string> = {
@@ -242,6 +270,8 @@ export class AuthService {
       deviceFingerprint: loginDto.deviceFingerprint,
       ipAddress: clientIp,
       loginStatus: 'SUCCESS',
+      authId: user.authId,
+      environment: userEnvironment,
     });
 
     let requiresStartingBalance = false;
@@ -263,6 +293,8 @@ export class AuthService {
         branchId: user.branchId,
         avatarUrl: user.avatarUrl,
         notificationSound: user.notificationSound,
+        isDeveloper: effectiveIsDeveloper,
+        environment: userEnvironment,
       },
     };
   }
@@ -279,6 +311,8 @@ export class AuthService {
       branchId: user.branchId,
       avatarUrl: user.avatarUrl,
       notificationSound: user.notificationSound,
+      isDeveloper: user.isDeveloper,
+      environment: getEnvironment(user),
     };
   }
 
@@ -381,6 +415,7 @@ export class AuthService {
         user_id: user.id,
         branch_id: user.branchId || null,
         action: 'PASSWORD_CHANGE_REQUEST',
+        ...environmentCreateFields(user),
         details: JSON.stringify({
           requestStatus: 'pending',
           requestedByUserId: user.id,
@@ -443,6 +478,7 @@ export class AuthService {
       .eq('action', 'PASSWORD_CHANGE_REQUEST')
       .order('created_at', { ascending: false })
       .limit(200);
+    query = query.eq('environment', getEnvironment(user));
 
     if (user.role === Role.ADMIN) {
       if (!user.branchId) {
@@ -578,6 +614,7 @@ export class AuthService {
       .from('activity_logs')
       .select('id, user_id, branch_id, action, details, created_at')
       .eq('id', requestId)
+      .eq('environment', getEnvironment(reviewer))
       .eq('action', 'PASSWORD_CHANGE_REQUEST')
       .maybeSingle();
 
@@ -658,6 +695,7 @@ export class AuthService {
         user_id: reviewer.id,
         branch_id: logRow.branch_id || null,
         action: reviewAction,
+        ...environmentCreateFields(reviewer),
         details: JSON.stringify({
           requestId,
           requestedByUserId:

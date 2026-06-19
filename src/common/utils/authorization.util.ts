@@ -5,15 +5,49 @@ export type AuthorizedUser = {
   id?: string | null;
   authId?: string | null;
   email?: string | null;
+  isDeveloper?: boolean | null;
   role: Role;
   branchId: string | null;
 };
 
 type BranchField = 'branch_id' | 'branchId';
+export type DataEnvironment = 'production' | 'development';
 
 export function isSuperAdmin(user: AuthorizedUser): boolean {
   return user.role === Role.SUPER_ADMIN;
 }
+
+export function isDeveloper(user: Pick<AuthorizedUser, 'email' | 'isDeveloper'>): boolean {
+  return Boolean(user.isDeveloper) || (user.email ?? '').trim().toLowerCase().endsWith('@dev.com');
+}
+
+export function getEnvironment(user: Pick<AuthorizedUser, 'email' | 'isDeveloper'>): DataEnvironment {
+  return isDeveloper(user) ? 'development' : 'production';
+}
+
+export function applyEnvironmentFilter<T extends Record<string, unknown>>(
+  user: Pick<AuthorizedUser, 'email' | 'isDeveloper'>,
+  where: T = {} as T,
+): T & { environment: DataEnvironment } {
+  return { ...where, environment: getEnvironment(user) };
+}
+
+export function applyDeveloperIsolation<T extends Record<string, unknown>>(
+  user: Pick<AuthorizedUser, 'email' | 'isDeveloper'> & { id?: string | null },
+  where: T = {} as T,
+): T & { environment: DataEnvironment } {
+  return applyEnvironmentFilter(user, where);
+}
+
+export function environmentCreateFields(
+  user: Pick<AuthorizedUser, 'email' | 'isDeveloper'> & { authId?: string | null },
+): { environment: DataEnvironment; created_by?: string | null } {
+  return {
+    environment: getEnvironment(user),
+    created_by: user.authId ?? null,
+  };
+}
+
 
 export function checkRole(user: AuthorizedUser, allowedRoles: Role[]): void {
   if (!allowedRoles.includes(user.role)) {

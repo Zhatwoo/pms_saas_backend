@@ -36,6 +36,7 @@ export class ExpirationCronService {
         .from('shop_settings')
         .select('setting_value')
         .eq('setting_key', 'interest_rates')
+        .eq('environment', 'production')
         .maybeSingle();
       const interestRates = (settingsData?.setting_value as any[]) || [];
 
