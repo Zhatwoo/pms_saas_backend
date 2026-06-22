@@ -6,9 +6,16 @@ import {
 import { PrismaService } from '../../infrastructure/prisma';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { EncryptionService } from '../../common/encryption/encryption.service';
+import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
+import {
+  type DataEnvironment,
+  getEnvironment,
+} from '../../common/utils/authorization.util';
 
 export interface CreateActivityLogDto {
   userId: string;
+  authId?: string | null;
+  environment?: DataEnvironment;
   branchId?: string | null;
   action: string;
   details?: string | Record<string, any> | null;
@@ -35,12 +42,30 @@ export class ActivityLogsService {
 
   async createLog(dto: CreateActivityLogDto) {
     const client = this.supabaseService.getClient();
+    let environment = dto.environment;
+    let createdBy = dto.authId ?? null;
+
+    if (!environment || !createdBy) {
+      const actor = await this.prisma.users.findUnique({
+        where: { id: dto.userId },
+        select: { auth_id: true, email: true, is_developer: true },
+      });
+      environment ??= actor
+        ? getEnvironment({
+            email: actor.email,
+            isDeveloper: actor.is_developer,
+          })
+        : 'production';
+      createdBy ??= actor?.auth_id ?? null;
+    }
 
     // We do this silently to not interrupt main business flows
     const { error } = await client.from('activity_logs').insert({
       user_id: dto.userId,
       branch_id: dto.branchId || null,
       action: dto.action,
+      environment,
+      created_by: createdBy,
       details: dto.details
         ? typeof dto.details === 'string'
           ? dto.details
@@ -54,6 +79,7 @@ export class ActivityLogsService {
   }
 
   async getLogs(
+    viewer: AuthenticatedUserProfile,
     branchId?: string,
     role?: string,
     startDate?: string,
@@ -63,7 +89,7 @@ export class ActivityLogsService {
     userId?: string,
   ) {
     try {
-      const where: any = {};
+      const where: any = { environment: getEnvironment(viewer) };
 
       if (role === 'admin' || role === 'employee' || role === 'branch') {
         if (!branchId) {

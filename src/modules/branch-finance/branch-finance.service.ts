@@ -25,6 +25,7 @@ import { FinanceAuditService } from './services/finance-audit.service';
 import { FinanceDailyBalanceService } from './services/finance-daily-balance.service';
 import { BranchDaySessionService } from './services/branch-day-session.service';
 import { OpeningChecklistGateService } from './services/opening-checklist-gate.service';
+import { getEnvironment } from '../../common/utils/authorization.util';
 
 interface TransactionRow {
   id: string;
@@ -591,8 +592,9 @@ export class BranchFinanceService {
         ? effectiveBranchIdForQuery(user, branchQuery)
         : requireUserBranchId(user);
 
+    const environment = getEnvironment(user);
     const branches = await this.prisma.branches.findMany({
-      where: branchId ? { id: branchId } : undefined,
+      where: branchId ? { id: branchId, environment } : { environment },
       select: {
         id: true,
         name: true,
@@ -615,6 +617,7 @@ export class BranchFinanceService {
       where: {
         branch_id: { in: branchIds },
         status: { not: 'transferred' },
+        environment,
       },
       select: { branch_id: true, request_no: true },
     });
@@ -646,7 +649,8 @@ export class BranchFinanceService {
         'branch_id, record_date, starting_balance, ending_balance, updated_at',
       )
       .in('branch_id', branchIds)
-      .eq('record_date', today);
+      .eq('record_date', today)
+      .eq('environment', environment);
 
     const todayTxQuery = client
       .from('transactions')
@@ -655,12 +659,14 @@ export class BranchFinanceService {
       )
       .in('branch_id', branchIds)
       .eq('transaction_date', today)
+      .eq('environment', environment)
       .is('voided_at', null);
 
     const fundReqQuery = client
       .from('fund_requests')
       .select('branch_id, status')
       .in('branch_id', branchIds)
+      .eq('environment', environment)
       .in('status', ['pending', 'approved', 'transferred']);
 
     const [balancesResult, todayTxResult, fundReqResult] = await Promise.all([
@@ -785,6 +791,7 @@ export class BranchFinanceService {
           await this.financeDailyBalance.excludeInboundFundTransfersAwaitingReceiptRows(
             operationalTx,
             pendingFundTransfersByBranch,
+            { environment },
           );
 
         for (const tx of operationalForTotals) {
@@ -901,6 +908,7 @@ export class BranchFinanceService {
     let dbQuery = client
       .from('transactions')
       .select('*', { count: 'exact' })
+      .eq('environment', getEnvironment(user))
       .order('transaction_date', { ascending: true })
       .order('transaction_time', { ascending: true })
       .order('created_at', { ascending: true });
@@ -925,6 +933,8 @@ export class BranchFinanceService {
     const filteredRows =
       await this.financeDailyBalance.excludeInboundFundTransfersAwaitingReceiptRows(
         (data ?? []) as TransactionRow[],
+        undefined,
+        { environment: getEnvironment(user) },
       );
 
     let entries = filteredRows.map((row: TransactionRow) =>

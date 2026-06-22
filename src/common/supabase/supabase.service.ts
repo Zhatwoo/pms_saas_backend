@@ -21,6 +21,7 @@ interface UserRecord {
   avatar_url: string | null;
   notification_sound: string | null;
   account_status: AccountStatus | null;
+  is_developer: boolean | null;
   branches?: { name: string } | null;
 }
 
@@ -34,6 +35,7 @@ export interface AuthenticatedUserProfile {
   branchName: string | null;
   avatarUrl: string | null;
   notificationSound: string | null;
+  isDeveloper: boolean;
 }
 
 @Injectable()
@@ -114,6 +116,9 @@ export class SupabaseService {
       branchName: user.branches?.name ?? null,
       avatarUrl: user.avatar_url,
       notificationSound: user.notification_sound ?? 'sound8.mp3',
+      isDeveloper:
+        Boolean(user.is_developer) ||
+        user.email.trim().toLowerCase().endsWith('@dev.com'),
     };
   }
 
@@ -150,6 +155,7 @@ export class SupabaseService {
           avatar_url: true,
           notification_sound: true,
           account_status: true,
+          is_developer: true,
           branches: { select: { name: true } },
         },
       });

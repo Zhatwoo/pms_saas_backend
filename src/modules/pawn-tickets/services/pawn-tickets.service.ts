@@ -12,7 +12,10 @@ import {
   requireUserBranchId,
   effectiveBranchIdForQuery,
 } from '../../../common/utils/branch-scope.util';
-import { assertBranchAccess } from '../../../common/utils/authorization.util';
+import {
+  assertBranchAccess,
+  environmentCreateFields,
+} from '../../../common/utils/authorization.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
 import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
 
@@ -634,6 +637,7 @@ export class PawnTicketsService {
               user_id: user.id,
               branch_id: branchId,
               action: 'PAWN_TICKET_CREATED',
+              ...environmentCreateFields(user),
               details: JSON.stringify({
                 pawnedItemId: (pawnedItem as any)?.id ?? null,
                 transactionId: transaction.id,

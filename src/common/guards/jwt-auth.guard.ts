@@ -12,6 +12,7 @@ import { PrismaService } from '../../infrastructure/prisma';
 import { Role } from '../enums';
 import { parseCookieHeader } from '../utils/cookie.util';
 import { EncryptionService } from '../encryption/encryption.service';
+import { isDeveloper } from '../utils/authorization.util';
 import type { Request } from 'express';
 import * as crypto from 'node:crypto';
 
@@ -24,6 +25,7 @@ type UserRow = {
   branch_id: string | null;
   avatar_url: string | null;
   account_status: string | null;
+  is_developer: boolean | null;
   branches?: { name: string } | null;
 };
 
@@ -36,6 +38,7 @@ type RequestUser = {
   branchId: string | null;
   branchName: string | null;
   avatarUrl: string | null;
+  isDeveloper: boolean;
 };
 
 type AuthenticatedRequest = Request & { user?: RequestUser };
@@ -69,7 +72,7 @@ export class JwtAuthGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (isPublic) {
+    if (isPublic || this.isKnownPublicRoute(request)) {
       return true;
     }
 
@@ -111,6 +114,7 @@ export class JwtAuthGuard implements CanActivate {
         branch_id: true,
         avatar_url: true,
         account_status: true,
+        is_developer: true,
         branches: { select: { name: true } },
       },
     });
@@ -123,7 +127,30 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     request.user = this.toRequestUser(user);
+    request.user.isDeveloper =
+      request.user.isDeveloper || isDeveloper({ email: authUser.email });
     return true;
+  }
+
+  private isKnownPublicRoute(request: Request): boolean {
+    const method = (request.method ?? '').toUpperCase();
+    const path = String(
+      request.originalUrl ?? request.url ?? request.path ?? '',
+    ).split('?')[0];
+    const normalizedPath = path.replace(/^\/api(?=\/)/, '');
+
+    if (method === 'OPTIONS') {
+      return true;
+    }
+
+    return (
+      (method === 'POST' &&
+        ['/auth/login', '/auth/register', '/auth/logout'].includes(
+          normalizedPath,
+        )) ||
+      (method === 'GET' && normalizedPath === '/auth/signup/branches') ||
+      (method === 'POST' && normalizedPath === '/devices/request-authorization')
+    );
   }
 
   private extractCredential(request: Request): AuthCredential | null {
@@ -202,6 +229,7 @@ export class JwtAuthGuard implements CanActivate {
       branchId: process.env.API_KEY_BRANCH_ID || null,
       branchName: null,
       avatarUrl: null,
+      isDeveloper: false,
     };
   }
 
@@ -252,6 +280,9 @@ export class JwtAuthGuard implements CanActivate {
       branchId: user.branch_id,
       branchName: user.branches?.name ?? null,
       avatarUrl: user.avatar_url,
+      isDeveloper:
+        Boolean(user.is_developer) ||
+        user.email.trim().toLowerCase().endsWith('@dev.com'),
     };
   }
 
