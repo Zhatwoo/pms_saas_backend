@@ -930,7 +930,11 @@ export class FinanceDailyBalanceService {
     businessDateStr: string,
     netChange: number,
     tx?: Tx,
-    options?: { bypassOperationalSessionGate?: boolean },
+    options?: {
+      bypassOperationalSessionGate?: boolean;
+      environment?: string;
+      createdBy?: string | null;
+    },
   ): Promise<void> {
     if (!branchId || !Number.isFinite(netChange) || netChange === 0) {
       return;
@@ -945,7 +949,11 @@ export class FinanceDailyBalanceService {
           branchId,
           businessDateStr,
           delta,
-          { ...options, useIncrementalBaseline: true },
+          {
+            bypassOperationalSessionGate:
+              options?.bypassOperationalSessionGate,
+            useIncrementalBaseline: true,
+          },
         );
 
       this.throwIfNegativeEnding(
@@ -973,6 +981,12 @@ export class FinanceDailyBalanceService {
           record_date: date,
           starting_balance: carriedForCreate,
           ending_balance: next,
+          ...(options?.environment
+            ? { environment: options.environment }
+            : {}),
+          ...(options?.createdBy !== undefined
+            ? { created_by: options.createdBy }
+            : {}),
         },
       });
     };

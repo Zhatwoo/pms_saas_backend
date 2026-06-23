@@ -89,7 +89,7 @@ export class ShopSettingsService {
           {
             id: "group-1",
             name: "Gadgets",
-            categories: ["Smartphone", "Laptop & PC", "Gaming Console"],
+            categories: [],
             first5Days: 5,
             first5DaysLimit: 5,
             day10: 10,
@@ -105,7 +105,7 @@ export class ShopSettingsService {
           {
             id: "group-2",
             name: "General & Appliances",
-            categories: ["Appliances", "Cameras", "Smartwatches", "Audio & Earphones", "Other Items"],
+            categories: [],
             first5Days: 7,
             first5DaysLimit: 5,
             day10: 12,

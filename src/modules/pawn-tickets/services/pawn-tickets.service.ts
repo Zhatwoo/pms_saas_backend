@@ -13,8 +13,10 @@ import {
   effectiveBranchIdForQuery,
 } from '../../../common/utils/branch-scope.util';
 import {
+  applyEnvironmentFilter,
   assertBranchAccess,
   environmentCreateFields,
+  getEnvironment,
 } from '../../../common/utils/authorization.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
 import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
@@ -276,7 +278,7 @@ export class PawnTicketsService {
     query: { branch?: string; status?: string; search?: string },
   ) {
     const branchId = effectiveBranchIdForQuery(user, query.branch);
-    const where: any = {};
+    const where: any = applyEnvironmentFilter(user);
     if (branchId) where.branch_id = branchId;
     if (query.status) where.status = query.status;
 
@@ -334,14 +336,16 @@ export class PawnTicketsService {
   }
 
   async create(user: AuthenticatedUserProfile, dto: CreatePawnTicketDto) {
+    const environmentFields = environmentCreateFields(user);
+    const environment = getEnvironment(user);
     const branchId =
       user.role === Role.SUPER_ADMIN
         ? (dto.branchId ?? requireUserBranchId(user))
         : requireUserBranchId(user);
     assertBranchAccess(user, branchId);
 
-    const branch = await this.prisma.branches.findUnique({
-      where: { id: branchId },
+    const branch = await this.prisma.branches.findFirst({
+      where: { id: branchId, environment },
       select: { name: true, status: true, branch_code: true },
     });
     if (!branch || branch.status?.trim().toLowerCase() !== 'active') {
@@ -475,6 +479,7 @@ export class PawnTicketsService {
       email: dto.customer.email?.trim() ?? null,
       id_presented: dto.customer.idPresented?.trim() ?? null,
       branch_id: branchId,
+      ...environmentFields,
     };
 
     const pawnedItemSelect = {
@@ -533,6 +538,7 @@ export class PawnTicketsService {
               where: {
                 id: selectedCustomerId,
                 branch_id: branchId,
+                environment,
                 deleted_at: null,
               },
             });
@@ -583,6 +589,7 @@ export class PawnTicketsService {
           const pawnedItem = await tx.pawned_items.create({
             data: {
               ...itemPayload,
+              ...environmentFields,
               pawn_date: this.toDbDate(itemPayload.pawn_date),
               amount: itemPayload.amount,
             },
@@ -614,6 +621,7 @@ export class PawnTicketsService {
             profile_photo: profilePhotoUrl,
             id_photo: idPhotoUrl,
             id_back_photo: idBackPhotoUrl,
+            ...environmentFields,
           };
 
           const transaction = await tx.transactions.create({
@@ -629,6 +637,10 @@ export class PawnTicketsService {
               getPhCalendarDateString(),
               netChange,
               tx,
+              {
+                environment: environmentFields.environment,
+                createdBy: environmentFields.created_by,
+              },
             );
           }
 
@@ -637,7 +649,7 @@ export class PawnTicketsService {
               user_id: user.id,
               branch_id: branchId,
               action: 'PAWN_TICKET_CREATED',
-              ...environmentCreateFields(user),
+              ...environmentFields,
               details: JSON.stringify({
                 pawnedItemId: (pawnedItem as any)?.id ?? null,
                 transactionId: transaction.id,

@@ -2,20 +2,26 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { PrismaService } from '../../../infrastructure/prisma';
 import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
+import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import {
+  environmentCreateFields,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 @Injectable()
 export class CategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  async findAll(user: AuthenticatedUserProfile) {
     return this.prisma.categories.findMany({
+      where: { environment: getEnvironment(user) },
       orderBy: { name: 'asc' },
     });
   }
 
-  async findOne(id: string) {
-    const category = await this.prisma.categories.findUnique({
-      where: { id },
+  async findOne(user: AuthenticatedUserProfile, id: string) {
+    const category = await this.prisma.categories.findFirst({
+      where: { id, environment: getEnvironment(user) },
     });
     if (!category) {
       throw new NotFoundException(`Category with ID "${id}" not found`);
@@ -23,9 +29,10 @@ export class CategoriesService {
     return category;
   }
 
-  async create(dto: CreateCategoryDto) {
-    const existing = await this.prisma.categories.findUnique({
-      where: { name: dto.name },
+  async create(user: AuthenticatedUserProfile, dto: CreateCategoryDto) {
+    const environment = getEnvironment(user);
+    const existing = await this.prisma.categories.findFirst({
+      where: { name: dto.name, environment },
     });
     if (existing) {
       throw new ConflictException(`Category name "${dto.name}" already exists`);
@@ -35,17 +42,24 @@ export class CategoriesService {
       data: {
         name: dto.name,
         description: dto.description,
+        ...environmentCreateFields(user),
       },
     });
   }
 
-  async update(id: string, dto: UpdateCategoryDto) {
-    await this.findOne(id);
+  async update(
+    user: AuthenticatedUserProfile,
+    id: string,
+    dto: UpdateCategoryDto,
+  ) {
+    const environment = getEnvironment(user);
+    await this.findOne(user, id);
 
     if (dto.name) {
       const existing = await this.prisma.categories.findFirst({
         where: {
           name: dto.name,
+          environment,
           id: { not: id },
         },
       });
@@ -63,8 +77,8 @@ export class CategoriesService {
     });
   }
 
-  async delete(id: string) {
-    await this.findOne(id);
+  async delete(user: AuthenticatedUserProfile, id: string) {
+    await this.findOne(user, id);
     return this.prisma.categories.delete({
       where: { id },
     });
