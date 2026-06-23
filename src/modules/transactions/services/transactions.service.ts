@@ -716,6 +716,7 @@ export class TransactionsService implements OnModuleInit {
     if (branchId && dtoClean.customer_id) {
       this.rewardsService
         .evaluateRewardsAfterTransaction(
+          user,
           dtoClean.customer_id,
           branchId,
           purpose,

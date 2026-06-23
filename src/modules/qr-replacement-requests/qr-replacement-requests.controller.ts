@@ -33,29 +33,39 @@ export class QRReplacementRequestsController {
     @Body() dto: CreateQRReplacementRequestDto,
   ) {
     return this.qrReplacementService.createRequest(
-      req.user.id,
-      req.user.branchId!,
+      req.user,
       dto.pawnedItemId,
       dto,
     );
   }
 
   @Get('branch/:branchId')
-  async getByBranch(@Param('branchId') branchId: string) {
-    return this.qrReplacementService.getRequestsByBranch(branchId);
+  async getByBranch(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('branchId') branchId: string,
+  ) {
+    return this.qrReplacementService.getRequestsByBranch(req.user, branchId);
   }
 
   @Get('branch/:branchId/status/:status')
   async getByStatus(
+    @Req() req: { user: AuthenticatedUserProfile },
     @Param('branchId') branchId: string,
     @Param('status') status: string,
   ) {
-    return this.qrReplacementService.getRequestsByStatus(branchId, status);
+    return this.qrReplacementService.getRequestsByStatus(
+      req.user,
+      branchId,
+      status,
+    );
   }
 
   @Get(':requestId')
-  async getById(@Param('requestId') requestId: string) {
-    return this.qrReplacementService.getRequestById(requestId);
+  async getById(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('requestId') requestId: string,
+  ) {
+    return this.qrReplacementService.getRequestById(req.user, requestId);
   }
 
   @Put(':requestId/approve')
@@ -68,7 +78,7 @@ export class QRReplacementRequestsController {
   ) {
     return this.qrReplacementService.approveRequest(
       requestId,
-      req.user.id,
+      req.user,
       dto,
     );
   }
@@ -81,6 +91,6 @@ export class QRReplacementRequestsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Body() dto: RejectQRReplacementRequestDto,
   ) {
-    return this.qrReplacementService.rejectRequest(requestId, req.user.id, dto);
+    return this.qrReplacementService.rejectRequest(requestId, req.user, dto);
   }
 }
