@@ -257,9 +257,33 @@ export class AuthService {
         };
 
         const reason = deviceCheck.reason ?? 'UNKNOWN_DEVICE';
+        let autoRequested = false;
+
+        if (reason === 'UNKNOWN_DEVICE') {
+          try {
+            await this.devicesService.requestAuthorization(
+              user.id,
+              {
+                deviceFingerprint: fingerprint,
+                deviceType: 'DESKTOP',
+                email: loginDto.email,
+              },
+              clientIp ?? '',
+            );
+            autoRequested = true;
+          } catch (reqErr) {
+            this.logger.warn(
+              `Auto device authorization request failed for ${user.id}: ${
+                reqErr instanceof Error ? reqErr.message : String(reqErr)
+              }`,
+            );
+          }
+        }
+
         throw new ForbiddenException({
           message: messages[reason] ?? 'Device not authorized.',
           code: reason,
+          autoRequested,
         });
       }
     }

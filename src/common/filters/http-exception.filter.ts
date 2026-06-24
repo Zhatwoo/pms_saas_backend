@@ -163,6 +163,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         const passthrough = [
           'error',
           'code',
+          'autoRequested',
           'available_balance',
           'required_amount',
           'branch_id',

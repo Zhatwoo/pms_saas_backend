@@ -9,6 +9,7 @@ import { addManilaCalendarDays } from '../../../common/utils/branch-calendar-dat
 import { TransactionPurpose } from '../../../common/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import {
+  isFundTransferBookRow,
   isInboundBranchCashFundTransferRow,
   isJournalPurposeStartEnd,
   operationalNetFromRows,
@@ -232,7 +233,9 @@ export class FinanceDailyBalanceService {
       const pendingLinks = await this.db.fund_requests.findMany({
         where: {
           branch_id: { in: branchIds },
-          status: { not: 'transferred' },
+          status: {
+            in: ['pending_confirmation', 'pending_source_confirmation'],
+          },
           ...(opts?.environment ? { environment: opts.environment } : {}),
         },
         select: { branch_id: true, request_no: true },
@@ -549,9 +552,156 @@ export class FinanceDailyBalanceService {
       .filter(
         (r) =>
           !isJournalPurposeStartEnd(r.purpose) &&
+          !isFundTransferBookRow(r) &&
           this.txCreatedAtMs(r.created_at) < cutoffMs,
       )
       .map((r) => r.id);
+  }
+
+  private async priorBookEndingBeforeDateInTx(
+    client: Tx,
+    branchId: string,
+    sessionDate: Date,
+  ): Promise<number> {
+    const prior = await client.daily_balances.findFirst({
+      where: { branch_id: branchId, record_date: { lt: sessionDate } },
+      orderBy: { record_date: 'desc' },
+      select: { ending_balance: true },
+    });
+    if (prior?.ending_balance != null) {
+      return Number(this.dec(prior.ending_balance).toFixed(2));
+    }
+    const branch = await client.branches.findUnique({
+      where: { id: branchId },
+      select: { opening_cash_balance: true },
+    });
+    return Number(this.dec(branch?.opening_cash_balance).toFixed(2));
+  }
+
+  /** Fund-transfer cash posted before the current shift cutoff (e.g. received before Start Day). */
+  private async sumPreOpenFundTransferNetInTx(
+    client: Tx,
+    branchId: string,
+    businessDateStr: string,
+    opts?: { environment?: string },
+  ): Promise<number> {
+    const date = this.toRecordDate(businessDateStr);
+    const cutoffMs = await this.resolveOperationalCutoffMs(
+      branchId,
+      date,
+      client,
+    );
+    if (cutoffMs <= 0) {
+      return 0;
+    }
+
+    const rows = await client.transactions.findMany({
+      where: {
+        branch_id: branchId,
+        transaction_date: date,
+        voided_at: null,
+        ...(opts?.environment ? { environment: opts.environment } : {}),
+      },
+      select: {
+        id: true,
+        purpose: true,
+        unit: true,
+        unit_code: true,
+        cash_in: true,
+        cash_out: true,
+        created_at: true,
+        branch_id: true,
+      },
+    });
+    const preOpen = rows.filter(
+      (r) =>
+        isFundTransferBookRow(r) &&
+        this.txCreatedAtMs(r.created_at) < cutoffMs,
+    );
+    const confirmedPreOpen = await this.excludeInboundFundTransfersAwaitingReceiptRows(
+      preOpen,
+      undefined,
+      opts,
+    );
+    return Number(operationalNetFromRows(confirmedPreOpen).toFixed(2));
+  }
+
+  /**
+   * Book ending for an open branch day session. Adds pre-open fund transfers when the
+   * confirmed starting balance does not already include them (e.g. starting ₱0 but fund
+   * transfer received before Start Day).
+   */
+  async computeOpenSessionBookEnding(
+    branchId: string,
+    businessDateStr: string,
+    existingClient?: Tx,
+  ): Promise<number> {
+    const run = async (client: Tx) => {
+      const date = this.toRecordDate(businessDateStr);
+      const daySession = await client.branch_day_sessions.findUnique({
+        where: {
+          branch_id_session_date: {
+            branch_id: branchId,
+            session_date: date,
+          },
+        },
+        select: { starting_balance: true, is_closed: true },
+      });
+      if (
+        !daySession ||
+        daySession.is_closed ||
+        daySession.starting_balance == null
+      ) {
+        return null;
+      }
+
+      const start = Number(this.dec(daySession.starting_balance).toFixed(2));
+      const shiftNet = await this.sumOperationalNetCashInTx(
+        client,
+        branchId,
+        businessDateStr,
+      );
+      const preOpenFundNet = await this.sumPreOpenFundTransferNetInTx(
+        client,
+        branchId,
+        businessDateStr,
+      );
+
+      let ending = Number((start + shiftNet).toFixed(2));
+      if (preOpenFundNet > 0) {
+        const priorClose = await this.priorBookEndingBeforeDateInTx(
+          client,
+          branchId,
+          date,
+        );
+        const startCoversPreOpenFund =
+          start >= priorClose + preOpenFundNet - 0.01;
+        if (!startCoversPreOpenFund) {
+          ending = Number((ending + preOpenFundNet).toFixed(2));
+        }
+      }
+
+      const row = await client.daily_balances.findUnique({
+        where: {
+          branch_id_record_date: { branch_id: branchId, record_date: date },
+        },
+        select: { ending_balance: true },
+      });
+      if (row?.ending_balance != null) {
+        ending = Math.max(
+          ending,
+          Number(this.dec(row.ending_balance).toFixed(2)),
+        );
+      }
+      return ending;
+    };
+
+    if (existingClient) {
+      const result = await run(existingClient);
+      return result ?? 0;
+    }
+    const result = await this.db.$transaction(run);
+    return result ?? 0;
   }
 
   /** Operational cash movement for a Manila business date (excludes Start/End markers and voided rows). */
@@ -603,17 +753,31 @@ export class FinanceDailyBalanceService {
   async fullDayOperationalNetCash(
     branchId: string,
     businessDateStr: string,
+    opts?: { environment?: string },
   ): Promise<number> {
     const date = this.toRecordDate(businessDateStr);
     const rows = await this.db.transactions.findMany({
-      where: { branch_id: branchId, transaction_date: date, voided_at: null },
+      where: {
+        branch_id: branchId,
+        transaction_date: date,
+        voided_at: null,
+        ...(opts?.environment ? { environment: opts.environment } : {}),
+      },
       select: {
+        branch_id: true,
         purpose: true,
+        unit: true,
+        unit_code: true,
         cash_in: true,
         cash_out: true,
       },
     });
-    const net = Number(operationalNetFromRows(rows).toFixed(2));
+    const filtered = await this.excludeInboundFundTransfersAwaitingReceiptRows(
+      rows,
+      undefined,
+      opts,
+    );
+    const net = Number(operationalNetFromRows(filtered).toFixed(2));
     this.logger.warn(
       `[FullDayNet] branch=${branchId} date=${businessDateStr} rowCount=${rows.length} net=${net} rows=${JSON.stringify(rows)}`,
     );
@@ -681,9 +845,20 @@ export class FinanceDailyBalanceService {
       where: {
         branch_id_record_date: { branch_id: branchId, record_date: date },
       },
-      select: { starting_balance: true },
+      select: { starting_balance: true, ending_balance: true },
     });
-    const net = await this.sumOperationalNetCash(branchId, businessDateStr);
+
+    const openSession =
+      daySession &&
+      !daySession.is_closed &&
+      daySession.starting_balance != null;
+
+    if (openSession) {
+      return this.computeOpenSessionBookEnding(branchId, businessDateStr);
+    }
+
+    const net = await this.fullDayOperationalNetCash(branchId, businessDateStr);
+
     let start: number;
     if (daySession?.starting_balance != null) {
       start = Number(this.dec(daySession.starting_balance).toFixed(2));
@@ -696,7 +871,17 @@ export class FinanceDailyBalanceService {
       });
       start = Number(this.dec(b?.opening_cash_balance).toFixed(2));
     }
-    return Number((start + net).toFixed(2));
+
+    if (daySession?.is_closed && row?.ending_balance != null) {
+      return Number(this.dec(row.ending_balance).toFixed(2));
+    }
+
+    const computed = Number((start + net).toFixed(2));
+    if (row?.ending_balance != null) {
+      const stored = Number(this.dec(row.ending_balance).toFixed(2));
+      return Math.max(computed, stored);
+    }
+    return computed;
   }
 
   /**
@@ -730,8 +915,38 @@ export class FinanceDailyBalanceService {
           sessionDateStr,
         );
       if (confirmedClosing != null) {
+        let amount = confirmedClosing;
+        if (sessionDateStr < businessDateStr) {
+          let cursor = addManilaCalendarDays(sessionDateStr, 1);
+          while (cursor <= businessDateStr) {
+            amount = Number(
+              (
+                amount +
+                (await this.fullDayOperationalNetCash(branchId, cursor))
+              ).toFixed(2),
+            );
+            cursor = addManilaCalendarDays(cursor, 1);
+          }
+        }
+
+        const todayDb = await this.db.daily_balances.findUnique({
+          where: {
+            branch_id_record_date: {
+              branch_id: branchId,
+              record_date: bizDate,
+            },
+          },
+          select: { ending_balance: true },
+        });
+        if (todayDb?.ending_balance != null) {
+          amount = Math.max(
+            amount,
+            Number(this.dec(todayDb.ending_balance).toFixed(2)),
+          );
+        }
+
         return {
-          amount: confirmedClosing,
+          amount,
           closedSessionRecordDate: sessionDateStr,
         };
       }
@@ -885,12 +1100,11 @@ export class FinanceDailyBalanceService {
       });
 
       const starting = this.dec(session.starting_balance);
-      const net = await this.sumOperationalNetCashInTx(
-        client,
+      const ending = await this.computeOpenSessionBookEnding(
         branchId,
         businessDateStr,
+        client,
       );
-      const ending = Number((starting + net).toFixed(2));
 
       await client.daily_balances.upsert({
         where: {
