@@ -994,14 +994,11 @@ export class TransactionsService implements OnModuleInit {
       }
 
       stats.startingBalance = startingBalanceCalc;
-      const net = await this.financeDailyBalance.sumOperationalNetCash(
-        scoped,
-        balanceDateStr,
-        { environment: getEnvironment(user) },
-      );
-      stats.endingBalance = Number(
-        (startingBalanceCalc + net).toFixed(2),
-      );
+      stats.endingBalance =
+        await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
+          scoped,
+          balanceDateStr,
+        );
     }
 
     return stats;

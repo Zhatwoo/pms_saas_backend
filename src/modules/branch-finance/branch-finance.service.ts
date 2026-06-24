@@ -469,7 +469,7 @@ export class BranchFinanceService {
     const purpose = (row.purpose ?? '').toLowerCase().trim();
     const unit = (row.unit ?? '').toLowerCase().trim();
 
-    if (unit === 'fund_transfer' || purpose === 'cash transfer') {
+    if (unit === 'fund_transfer' || purpose === 'cash transfer' || purpose === 'fund transfer') {
       return 'fund_transfer_in';
     }
     if (unit === 'fund_transfer_out') {
@@ -612,22 +612,6 @@ export class BranchFinanceService {
     const branchIds = branches.map((b) => b.id);
 
     const client = this.supabaseService.getClient();
-
-    const pendingFundTransferLinks = await this.prisma.fund_requests.findMany({
-      where: {
-        branch_id: { in: branchIds },
-        status: { not: 'transferred' },
-        environment,
-      },
-      select: { branch_id: true, request_no: true },
-    });
-    const pendingFundTransfersByBranch = new Map<string, Set<string>>();
-    for (const link of pendingFundTransferLinks) {
-      if (!pendingFundTransfersByBranch.has(link.branch_id)) {
-        pendingFundTransfersByBranch.set(link.branch_id, new Set());
-      }
-      pendingFundTransfersByBranch.get(link.branch_id)!.add(link.request_no);
-    }
 
     const todaySessionDateUtc = new Date(`${today}T00:00:00.000Z`);
     const branchesWithDayClosedToday = new Set(
@@ -787,12 +771,7 @@ export class BranchFinanceService {
           return p !== 'start' && p !== 'end';
         });
 
-        const operationalForTotals =
-          await this.financeDailyBalance.excludeInboundFundTransfersAwaitingReceiptRows(
-            operationalTx,
-            pendingFundTransfersByBranch,
-            { environment },
-          );
+        const operationalForTotals = operationalTx;
 
         for (const tx of operationalForTotals) {
           const ci = this.toMoney(tx.cash_in);
@@ -830,11 +809,12 @@ export class BranchFinanceService {
 
         breakdown.startBalance = snap.startingBalance;
 
-        // Book ending from ledger movement (today in − today out), not only daily_balances.ending_balance
-        // which can lag if balance rows were not updated for every posting.
-        const ledgerEnding = Number(
-          (snap.startingBalance + todayCashIn - todayCashOut).toFixed(2),
-        );
+        // Book ending from ledger movement (today in − today out), including fund transfers.
+        const ledgerEnding =
+          await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
+            branch.id,
+            today,
+          );
 
         const dayClosedToday = branchesWithDayClosedToday.has(branch.id);
         const todayDbRow = todayByBranch.get(branch.id);
@@ -844,6 +824,11 @@ export class BranchFinanceService {
           const atRest = this.toMoney(todayDbRow.ending_balance);
           summaryStartingBalance = atRest;
           summaryCurrentBalance = atRest;
+        } else if (todayDbRow?.ending_balance != null) {
+          summaryCurrentBalance = Math.max(
+            ledgerEnding,
+            this.toMoney(todayDbRow.ending_balance),
+          );
         }
 
         const fundReqSummary = { pending: 0, approved: 0, transferred: 0 };
@@ -930,12 +915,7 @@ export class BranchFinanceService {
       throw new InternalServerErrorException(error.message);
     }
 
-    const filteredRows =
-      await this.financeDailyBalance.excludeInboundFundTransfersAwaitingReceiptRows(
-        (data ?? []) as TransactionRow[],
-        undefined,
-        { environment: getEnvironment(user) },
-      );
+    const filteredRows = (data ?? []) as TransactionRow[];
 
     let entries = filteredRows.map((row: TransactionRow) =>
       this.mapToLedgerEntry(row),

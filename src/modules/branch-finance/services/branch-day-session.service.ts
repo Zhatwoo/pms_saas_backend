@@ -290,11 +290,11 @@ export class BranchDaySessionService {
       // Confirmed physical count lives on branch_day_sessions; use it for projections
       // so we never show a stale daily_balances.starting_balance (e.g. carry-forward) after opening.
       const startNum = Number(this.dec(dayRow.starting_balance).toFixed(2));
-      const net = await this.financeDailyBalance.sumOperationalNetCash(
-        branchId,
-        manilaCalendarDate,
-      );
-      systemEndingBalanceToday = Number((startNum + net).toFixed(2));
+      systemEndingBalanceToday =
+        await this.financeDailyBalance.computeOpenSessionBookEnding(
+          branchId,
+          manilaCalendarDate,
+        );
     }
 
     const lastEnd = await this.prisma.branch_day_sessions.findFirst({

@@ -25,7 +25,28 @@ export function isInboundBranchCashFundTransferRow(row: {
   }
   const unit = (row.unit ?? '').toLowerCase().trim();
   const purpose = (row.purpose ?? '').toLowerCase().trim();
-  return unit === 'fund_transfer' || purpose === 'cash transfer';
+  return unit === 'fund_transfer' || purpose === 'cash transfer' || purpose === 'fund transfer';
+}
+
+/** Any posted fund-transfer journal row (inbound or outbound branch cash). */
+export function isFundTransferBookRow(row: {
+  purpose?: string | null;
+  unit?: string | null;
+  cash_in?: unknown;
+  cash_out?: unknown;
+  voided_at?: unknown;
+}): boolean {
+  if (row.voided_at != null && row.voided_at !== '') {
+    return false;
+  }
+  const unit = (row.unit ?? '').toLowerCase().trim();
+  const purpose = (row.purpose ?? '').toLowerCase().trim();
+  return (
+    unit === 'fund_transfer' ||
+    unit === 'fund_transfer_out' ||
+    purpose === 'cash transfer' ||
+    purpose === 'fund transfer'
+  );
 }
 
 /**
