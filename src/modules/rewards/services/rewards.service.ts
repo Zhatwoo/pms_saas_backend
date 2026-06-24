@@ -10,7 +10,9 @@ import { PrismaService } from '../../../infrastructure/prisma';
 import { Role } from '../../../common/enums';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
+  applyEnvironmentFilter,
   buildBranchFilter,
+  environmentCreateFields,
   isSuperAdmin,
 } from '../../../common/utils/authorization.util';
 import { CreateRewardDto } from '../dto/create-reward.dto';
@@ -24,7 +26,7 @@ export class RewardsService {
 
   /* ───────────────────────── Reward Rules CRUD ───────────────────────── */
 
-  async createReward(dto: CreateRewardDto) {
+  async createReward(user: UserWithBranch, dto: CreateRewardDto) {
     return this.prisma.rewards.create({
       data: {
         name: dto.name.trim(),
@@ -35,12 +37,15 @@ export class RewardsService {
         required_total_amount: dto.required_total_amount ?? 0,
         transaction_type: dto.transaction_type?.trim() || null,
         is_active: dto.is_active ?? true,
+        ...environmentCreateFields(user),
       },
     });
   }
 
-  async updateReward(id: string, dto: UpdateRewardDto) {
-    const existing = await this.prisma.rewards.findUnique({ where: { id } });
+  async updateReward(user: UserWithBranch, id: string, dto: UpdateRewardDto) {
+    const existing = await this.prisma.rewards.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
+    });
     if (!existing) throw new NotFoundException('Reward not found');
 
     return this.prisma.rewards.update({
@@ -71,13 +76,15 @@ export class RewardsService {
     });
   }
 
-  async deleteReward(id: string) {
-    const existing = await this.prisma.rewards.findUnique({ where: { id } });
+  async deleteReward(user: UserWithBranch, id: string) {
+    const existing = await this.prisma.rewards.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
+    });
     if (!existing) throw new NotFoundException('Reward not found');
 
     // Soft-disable instead of hard delete if customer_rewards exist
     const usageCount = await this.prisma.customer_rewards.count({
-      where: { reward_id: id },
+      where: applyEnvironmentFilter(user, { reward_id: id }),
     });
 
     if (usageCount > 0) {
@@ -92,18 +99,20 @@ export class RewardsService {
     return { message: 'Reward deleted' };
   }
 
-  async findAllRewards(activeOnly = false) {
+  async findAllRewards(user: UserWithBranch, activeOnly = false) {
     const where: Prisma.rewardsWhereInput = activeOnly
-      ? { is_active: true }
-      : {};
+      ? applyEnvironmentFilter(user, { is_active: true })
+      : applyEnvironmentFilter(user);
     return this.prisma.rewards.findMany({
       where,
       orderBy: { created_at: 'desc' },
     });
   }
 
-  async findOneReward(id: string) {
-    const reward = await this.prisma.rewards.findUnique({ where: { id } });
+  async findOneReward(user: UserWithBranch, id: string) {
+    const reward = await this.prisma.rewards.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
+    });
     if (!reward) throw new NotFoundException('Reward not found');
     return reward;
   }
@@ -113,6 +122,7 @@ export class RewardsService {
   async findCustomerRewards(user: UserWithBranch, customerId: string) {
     const where: Prisma.customer_rewardsWhereInput = {
       customer_id: customerId,
+      ...applyEnvironmentFilter(user),
       ...(!isSuperAdmin(user) ? buildBranchFilter(user) : {}),
     };
 
@@ -143,8 +153,8 @@ export class RewardsService {
     customerRewardId: string,
     notes?: string,
   ) {
-    const cr = await this.prisma.customer_rewards.findUnique({
-      where: { id: customerRewardId },
+    const cr = await this.prisma.customer_rewards.findFirst({
+      where: applyEnvironmentFilter(user, { id: customerRewardId }),
       include: { rewards: true, customers: true },
     });
 
@@ -185,6 +195,7 @@ export class RewardsService {
           user_id: user.id,
           branch_id: cr.branch_id,
           action: 'REWARD_CLAIMED',
+          ...environmentCreateFields(user),
           details: JSON.stringify({
             customerRewardId: cr.id,
             customerId: cr.customer_id,
@@ -220,6 +231,7 @@ export class RewardsService {
         where: {
           customer_id: customerId,
           purpose: { notIn: ['Start', 'End'] },
+          ...applyEnvironmentFilter(user),
           ...branchFilter,
         },
       }),
@@ -227,6 +239,7 @@ export class RewardsService {
         where: {
           customer_id: customerId,
           purpose: { notIn: ['Start', 'End'] },
+          ...applyEnvironmentFilter(user),
           ...branchFilter,
         },
         _sum: { cash_in: true },
@@ -237,7 +250,7 @@ export class RewardsService {
 
     // Get all active reward rules
     const activeRewards = await this.prisma.rewards.findMany({
-      where: { is_active: true },
+      where: applyEnvironmentFilter(user, { is_active: true }),
       orderBy: { required_transaction_count: 'asc' },
     });
 
@@ -245,7 +258,10 @@ export class RewardsService {
     const earnedRewardIds = new Set(
       (
         await this.prisma.customer_rewards.findMany({
-          where: { customer_id: customerId, ...branchFilter },
+          where: applyEnvironmentFilter(user, {
+            customer_id: customerId,
+            ...branchFilter,
+          }),
           select: { reward_id: true },
         })
       ).map((cr) => cr.reward_id),
@@ -289,6 +305,7 @@ export class RewardsService {
   /* ─────────── Post-Transaction Hook: evaluate & grant rewards ─────────── */
 
   async evaluateRewardsAfterTransaction(
+    user: UserWithBranch,
     customerId: string,
     branchId: string,
     transactionPurpose?: string | null,
@@ -297,7 +314,7 @@ export class RewardsService {
 
     try {
       const activeRewards = await this.prisma.rewards.findMany({
-        where: { is_active: true },
+        where: applyEnvironmentFilter(user, { is_active: true }),
       });
 
       if (activeRewards.length === 0) return;
@@ -309,6 +326,7 @@ export class RewardsService {
             customer_id: customerId,
             branch_id: branchId,
             purpose: { notIn: ['Start', 'End'] },
+            ...applyEnvironmentFilter(user),
           },
         }),
         this.prisma.transactions.aggregate({
@@ -316,6 +334,7 @@ export class RewardsService {
             customer_id: customerId,
             branch_id: branchId,
             purpose: { notIn: ['Start', 'End'] },
+            ...applyEnvironmentFilter(user),
           },
           _sum: { cash_in: true },
         }),
@@ -327,7 +346,10 @@ export class RewardsService {
       const alreadyEarned = new Set(
         (
           await this.prisma.customer_rewards.findMany({
-            where: { customer_id: customerId, branch_id: branchId },
+            where: applyEnvironmentFilter(user, {
+              customer_id: customerId,
+              branch_id: branchId,
+            }),
             select: { reward_id: true },
           })
         ).map((cr) => cr.reward_id),
@@ -358,6 +380,7 @@ export class RewardsService {
                 reward_id: reward.id,
                 branch_id: branchId,
                 status: 'earned',
+                ...environmentCreateFields(user),
               },
             })
             .catch((err) => {

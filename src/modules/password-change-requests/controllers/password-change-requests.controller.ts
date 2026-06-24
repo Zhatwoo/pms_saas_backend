@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
 import { AUTH_STRICT_THROTTLE } from '../../../config/throttle-auth.constants';
 import { Roles } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
@@ -8,6 +9,22 @@ import { ActivatePasswordChangeRequestDto } from '../dto/activate-password-chang
 import { CreatePasswordChangeRequestDto } from '../dto/create-password-change-request.dto';
 import { ReviewPasswordChangeRequestDto } from '../dto/review-password-change-request.dto';
 import { PasswordChangeRequestsService } from '../services/password-change-requests.service';
+
+const ACCESS_TOKEN_COOKIE = 'pms_access_token';
+
+function isProduction() {
+  return process.env.NODE_ENV === 'production';
+}
+
+function accessCookieOptions(maxAgeSeconds?: number) {
+  return {
+    httpOnly: true,
+    secure: isProduction(),
+    sameSite: 'lax' as const,
+    path: '/',
+    maxAge: Math.max(1, maxAgeSeconds ?? 3600) * 1000,
+  };
+}
 
 @Controller('password-change-requests')
 export class PasswordChangeRequestsController {
@@ -53,11 +70,31 @@ export class PasswordChangeRequestsController {
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post(':id/activate')
-  activate(
+  async activate(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('id') id: string,
     @Body() dto: ActivatePasswordChangeRequestDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<unknown> {
-    return this.passwordChangeRequestsService.activate(req.user, id, dto);
+    const result = await this.passwordChangeRequestsService.activate(
+      req.user,
+      id,
+      dto,
+    );
+
+    if (result.access_token) {
+      res.cookie(
+        ACCESS_TOKEN_COOKIE,
+        result.access_token,
+        accessCookieOptions(result.expires_in),
+      );
+    }
+
+    return {
+      success: true,
+      message: result.message,
+      access_token: result.access_token,
+      expires_in: result.expires_in,
+    };
   }
 }

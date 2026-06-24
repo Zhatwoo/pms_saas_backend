@@ -5,29 +5,37 @@ import {
   ApproveQRReplacementRequestDto,
   RejectQRReplacementRequestDto,
 } from '../dto/qr-replacement-request.dto';
+import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import {
+  assertBranchAccess,
+  environmentCreateFields,
+  getEnvironment,
+  requireBranchId,
+} from '../../../common/utils/authorization.util';
 
 @Injectable()
 export class QRReplacementRequestsService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
   async createRequest(
-    userId: string,
-    branchId: string,
+    user: AuthenticatedUserProfile,
     pawnedItemId: string,
     dto: CreateQRReplacementRequestDto,
   ) {
     const supabase = this.supabaseService.getClient();
+    const branchId = requireBranchId(user);
 
     const { data, error } = await supabase
       .from('qr_replacement_requests')
       .insert({
         pawned_item_id: pawnedItemId,
-        requested_by: userId,
+        requested_by: user.id,
         branch_id: branchId,
         reason: dto.reason,
         description: dto.description || null,
         status: 'pending',
         created_at: new Date().toISOString(),
+        ...environmentCreateFields(user),
       })
       .select()
       .single();
@@ -39,8 +47,12 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async getRequestsByBranch(branchId: string) {
+  async getRequestsByBranch(
+    user: AuthenticatedUserProfile,
+    branchId: string,
+  ) {
     const supabase = this.supabaseService.getClient();
+    assertBranchAccess(user, branchId);
 
     const { data, error } = await supabase
       .from('qr_replacement_requests')
@@ -48,19 +60,26 @@ export class QRReplacementRequestsService {
         '*, requested_by_user:requested_by(id, full_name, email), pawned_item:pawned_item_id(qr_code, item_id)',
       )
       .eq('branch_id', branchId)
+      .eq('environment', getEnvironment(user))
       .order('created_at', { ascending: false });
 
     if (error) throw new Error(`Failed to fetch requests: ${error.message}`);
     return data;
   }
 
-  async getRequestsByStatus(branchId: string, status: string) {
+  async getRequestsByStatus(
+    user: AuthenticatedUserProfile,
+    branchId: string,
+    status: string,
+  ) {
     const supabase = this.supabaseService.getClient();
+    assertBranchAccess(user, branchId);
 
     const { data, error } = await supabase
       .from('qr_replacement_requests')
       .select('*, requested_by_user:requested_by(id, full_name, email)')
       .eq('branch_id', branchId)
+      .eq('environment', getEnvironment(user))
       .eq('status', status)
       .order('created_at', { ascending: false });
 
@@ -69,13 +88,14 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async getRequestById(requestId: string) {
+  async getRequestById(user: AuthenticatedUserProfile, requestId: string) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase
       .from('qr_replacement_requests')
       .select('*')
       .eq('id', requestId)
+      .eq('environment', getEnvironment(user))
       .single();
 
     if (error) throw new Error(`Failed to fetch request: ${error.message}`);
@@ -84,7 +104,7 @@ export class QRReplacementRequestsService {
 
   async approveRequest(
     requestId: string,
-    userId: string,
+    user: AuthenticatedUserProfile,
     dto: ApproveQRReplacementRequestDto,
   ) {
     const supabase = this.supabaseService.getClient();
@@ -93,11 +113,12 @@ export class QRReplacementRequestsService {
       .from('qr_replacement_requests')
       .update({
         status: 'approved',
-        approved_by: userId,
+        approved_by: user.id,
         approved_at: new Date().toISOString(),
         approval_notes: dto.notes || null,
       })
       .eq('id', requestId)
+      .eq('environment', getEnvironment(user))
       .select()
       .single();
 
@@ -107,7 +128,7 @@ export class QRReplacementRequestsService {
 
   async rejectRequest(
     requestId: string,
-    userId: string,
+    user: AuthenticatedUserProfile,
     dto: RejectQRReplacementRequestDto,
   ) {
     const supabase = this.supabaseService.getClient();
@@ -116,11 +137,12 @@ export class QRReplacementRequestsService {
       .from('qr_replacement_requests')
       .update({
         status: 'rejected',
-        approved_by: userId,
+        approved_by: user.id,
         approved_at: new Date().toISOString(),
         rejection_reason: dto.rejectionReason,
       })
       .eq('id', requestId)
+      .eq('environment', getEnvironment(user))
       .select()
       .single();
 
@@ -128,7 +150,10 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async markAsCompleted(requestId: string) {
+  async markAsCompleted(
+    user: AuthenticatedUserProfile,
+    requestId: string,
+  ) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase
@@ -138,6 +163,7 @@ export class QRReplacementRequestsService {
         completed_at: new Date().toISOString(),
       })
       .eq('id', requestId)
+      .eq('environment', getEnvironment(user))
       .select()
       .single();
 
@@ -146,13 +172,17 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async checkIfQRCanBeGenerated(pawnedItemId: string) {
+  async checkIfQRCanBeGenerated(
+    user: AuthenticatedUserProfile,
+    pawnedItemId: string,
+  ) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase
       .from('qr_replacement_requests')
       .select('id, status')
       .eq('pawned_item_id', pawnedItemId)
+      .eq('environment', getEnvironment(user))
       .eq('status', 'approved')
       .single();
 

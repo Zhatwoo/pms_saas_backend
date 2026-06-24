@@ -3,12 +3,16 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   assertBranchAccess,
   buildBranchFilter,
+  applyEnvironmentFilter,
+  environmentCreateFields,
+  getEnvironment,
   isSuperAdmin,
   requireBranchId,
 } from '../../../common/utils/authorization.util';
@@ -21,6 +25,7 @@ import { normalizeCustomerFullName } from '../../../common/utils/customer-name.u
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
+import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 
 type CustomerGroupMatch = {
   id: string;
@@ -56,6 +61,8 @@ const TX_SELECT = {
   id_photo: true,
   id_back_photo: true,
   created_by_user_id: true,
+  environment: true,
+  created_by: true,
   created_at: true,
   users: {
     select: {
@@ -133,14 +140,20 @@ const ALLOWED_TRANSACTION_PURPOSES = new Set([
 ]);
 
 @Injectable()
-export class TransactionsService {
+export class TransactionsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly rewardsService: RewardsService,
     private readonly encryption: EncryptionService,
     private readonly financeDailyBalance: FinanceDailyBalanceService,
+    private readonly supabase: SupabaseService,
   ) {}
+
+  async onModuleInit() {
+    // Run retroactive sync on startup
+    void this.syncPastRenewals();
+  }
 
   private toDbDate(value?: string | null): Date {
     const date = value || getPhCalendarDateString();
@@ -274,7 +287,55 @@ export class TransactionsService {
     }
   }
 
-  private mapTransaction(row: any) {
+  private async resolveLinkedPawnedItem(
+    tx: any,
+    user: UserWithBranch,
+    branchId: string | null,
+    dto: Record<string, unknown>,
+  ) {
+    const relatedPawnedItemId = String(dto.related_pawned_item_id ?? '').trim();
+    const unitCode = String(dto.unit_code ?? '').trim();
+
+    if (relatedPawnedItemId) {
+      return tx.pawned_items.findFirst({
+        where: {
+          id: relatedPawnedItemId,
+          ...(branchId ? { branch_id: branchId } : {}),
+          ...applyEnvironmentFilter(user),
+        },
+        select: {
+          id: true,
+          item_id: true,
+          item_name: true,
+          amount: true,
+          branch_id: true,
+          status: true,
+        },
+      });
+    }
+
+    if (unitCode) {
+      return tx.pawned_items.findFirst({
+        where: {
+          item_id: { equals: unitCode, mode: 'insensitive' },
+          ...(branchId ? { branch_id: branchId } : {}),
+          ...applyEnvironmentFilter(user),
+        },
+        select: {
+          id: true,
+          item_id: true,
+          item_name: true,
+          amount: true,
+          branch_id: true,
+          status: true,
+        },
+      });
+    }
+
+    return null;
+  }
+
+  private async mapTransaction(row: any) {
     const pawnedItemsDecrypted = row.pawned_items
       ? {
           ...row.pawned_items,
@@ -294,6 +355,11 @@ export class TransactionsService {
 
     const createdByUser = this.encryption.decryptUsersJoin(row.users);
 
+    const [resolvedIdPhoto, resolvedIdBackPhoto] = await Promise.all([
+      this.resolveStorageUrl(row.id_photo),
+      this.resolveStorageUrl(row.id_back_photo),
+    ]);
+
     return {
       ...row,
       transaction_date: this.formatDate(row.transaction_date),
@@ -304,6 +370,8 @@ export class TransactionsService {
       storage_fee: this.toNumber(row.storage_fee),
       pawn_amount: this.toNumber(row.pawn_amount),
       details: this.encryption.decryptTransactionDetails(row.details),
+      id_photo: resolvedIdPhoto,
+      id_back_photo: resolvedIdBackPhoto,
       pawned_item: pawnedItemsDecrypted
         ? {
             ...pawnedItemsDecrypted,
@@ -334,6 +402,7 @@ export class TransactionsService {
         id: customerId,
         deleted_at: null,
         ...buildBranchFilter(user),
+        ...applyEnvironmentFilter(user),
       },
       select: { id: true, full_name: true, branch_id: true },
     });
@@ -346,6 +415,7 @@ export class TransactionsService {
       where: {
         deleted_at: null,
         ...buildBranchFilter(user),
+        ...applyEnvironmentFilter(user),
         // Database-level case-insensitive match
         full_name: {
           equals: customer.full_name,
@@ -363,7 +433,9 @@ export class TransactionsService {
     }
 
     const pawnedItems = await this.prisma.pawned_items.findMany({
-      where: { customer_id: { in: matchingCustomerIds } },
+      where: applyEnvironmentFilter(user, {
+        customer_id: { in: matchingCustomerIds },
+      }),
       select: { id: true },
       take: 1000,
     });
@@ -423,6 +495,7 @@ export class TransactionsService {
           id: dtoClean.customer_id,
           branch_id: branchId,
           deleted_at: null,
+          ...applyEnvironmentFilter(user),
         },
         select: { id: true },
       });
@@ -435,6 +508,17 @@ export class TransactionsService {
 
     const transactionNo = `${purpose.substring(0, 2).toUpperCase()}-${Date.now()}`;
     const now = new Date();
+
+    let idPhotoUrl = dtoClean.id_photo ?? null;
+    if (idPhotoUrl && idPhotoUrl.startsWith('data:image/')) {
+      const uploadBranchId = branchId || 'system';
+      const uploadCustomerId = dtoClean.customer_id || 'unknown';
+      idPhotoUrl = await this.uploadPhoto(
+        idPhotoUrl,
+        this.buildRenewalUploadPath(uploadBranchId, uploadCustomerId),
+        'id_pictures',
+      );
+    }
 
     const payload: any = {
       transaction_no: transactionNo,
@@ -458,15 +542,118 @@ export class TransactionsService {
           ? null
           : this.encryption.encryptTransactionDetails(String(dtoClean.details)),
       profile_photo: dtoClean.profile_photo ?? null,
-      id_photo: dtoClean.id_photo ?? null,
+      id_photo: idPhotoUrl,
       id_back_photo: dtoClean.id_back_photo ?? null,
+      ...environmentCreateFields(user),
     };
 
     const data = await this.prisma.$transaction(async (tx) => {
+      let linkedPawnedItem: {
+        id: string;
+        item_id: string;
+        item_name: string;
+        amount: number;
+        branch_id: string;
+        status: string;
+      } | null = null;
+
+      if (purpose === 'Buy Back' || purpose === 'Redeem') {
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(
+          tx,
+          user,
+          branchId,
+          dtoClean,
+        );
+
+        if (!linkedPawnedItem) {
+          throw new BadRequestException(
+            `${purpose} requires a valid pawned item reference.`,
+          );
+        }
+
+        if (linkedPawnedItem.status === 'Redeemed') {
+          throw new BadRequestException('Pawned item is already redeemed.');
+        }
+
+        const principal = Number(linkedPawnedItem.amount ?? amounts.pawnAmount ?? 0);
+        if (!Number.isFinite(principal) || principal <= 0) {
+          throw new BadRequestException(
+            'Buy back principal amount is invalid for this pawned item.',
+          );
+        }
+
+        amounts.pawnAmount = Number(principal.toFixed(2));
+        amounts.cashIn = Number(
+          (amounts.pawnAmount + amounts.storageFee + amounts.returnAmount).toFixed(
+            2,
+          ),
+        );
+
+        payload.related_pawned_item_id = linkedPawnedItem.id;
+        payload.unit_code = linkedPawnedItem.item_id;
+        payload.unit = linkedPawnedItem.item_name;
+        payload.pawn_amount = amounts.pawnAmount;
+        payload.cash_in = amounts.cashIn;
+      }
+
+      if (purpose === 'Renew') {
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(
+          tx,
+          user,
+          branchId,
+          dtoClean,
+        );
+
+        if (!linkedPawnedItem) {
+          throw new BadRequestException(
+            'Renew requires a valid pawned item reference.',
+          );
+        }
+
+        const manilaDateStr = getPhCalendarDateString();
+        await tx.item_renewals.create({
+          data: {
+            pawned_item_id: linkedPawnedItem.id,
+            renewal_date: this.toDbDate(manilaDateStr),
+            amount_paid: amounts.cashIn,
+            ...environmentCreateFields(user),
+          },
+        });
+
+        await tx.pawned_items.update({
+          where: { id: linkedPawnedItem.id },
+          data: {
+            pawn_date: this.toDbDate(manilaDateStr),
+            status: 'Active',
+            updated_at: new Date(),
+          },
+        });
+
+        payload.related_pawned_item_id = linkedPawnedItem.id;
+        payload.unit_code = linkedPawnedItem.item_id;
+        payload.unit = linkedPawnedItem.item_name;
+      }
+
       const created = await tx.transactions.create({
         data: payload,
         select: TX_SELECT,
       });
+
+      if (linkedPawnedItem && (purpose === 'Buy Back' || purpose === 'Redeem')) {
+        await tx.pawned_items.update({
+          where: { id: linkedPawnedItem.id },
+          data: {
+            status: 'Redeemed',
+            updated_at: new Date(),
+          },
+        });
+
+        await tx.sale_items.deleteMany({
+          where: applyEnvironmentFilter(user, {
+            original_pawn_id: linkedPawnedItem.id,
+          }),
+        });
+      }
 
       const netChange = amounts.cashIn - amounts.cashOut;
       // Single balance writer: same Manila business date as transaction_date above.
@@ -484,6 +671,7 @@ export class TransactionsService {
           user_id: user.id ?? null,
           branch_id: branchId ?? null,
           action: 'TRANSACTION_CREATED',
+          ...environmentCreateFields(user),
           details: JSON.stringify({
             transactionId: created.id,
             transactionNo,
@@ -509,6 +697,16 @@ export class TransactionsService {
           : `Transaction Alert: ${purpose.toLowerCase()}`,
         category: 'Transactions',
         branch_id: branchId ?? undefined,
+        event_key: `transaction:${data.id}`,
+        entity_type:
+          purpose === 'Buy Back'
+            ? 'redemption'
+            : purpose === 'Renew'
+              ? 'payment'
+              : 'transaction',
+        entity_id: transactionNo,
+        environment: getEnvironment(user),
+        created_by: user.authId,
       });
     } catch (e) {
       console.warn('[TransactionsService] Failed to create notification', e);
@@ -518,6 +716,7 @@ export class TransactionsService {
     if (branchId && dtoClean.customer_id) {
       this.rewardsService
         .evaluateRewardsAfterTransaction(
+          user,
           dtoClean.customer_id,
           branchId,
           purpose,
@@ -527,7 +726,7 @@ export class TransactionsService {
         );
     }
 
-    return this.mapTransaction(data);
+    return await this.mapTransaction(data);
   }
 
   async findAll(
@@ -538,7 +737,7 @@ export class TransactionsService {
     customerId?: string,
   ) {
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
-    const where: any = {};
+    const where: any = applyEnvironmentFilter(user);
 
     if (scoped) where.branch_id = scoped;
     if (!isSuperAdmin(user)) Object.assign(where, buildBranchFilter(user));
@@ -584,20 +783,22 @@ export class TransactionsService {
       take: 500,
     });
 
-    const transactions = rows.map((row) => this.mapTransaction(row));
-    const stats = await this.buildStats(transactions, scoped, date);
+    const transactions = await Promise.all(
+      rows.map((row) => this.mapTransaction(row)),
+    );
+    const stats = await this.buildStats(user, transactions, scoped, date);
 
     return { transactions, stats };
   }
 
   async findOne(user: UserWithBranch, id: string) {
-    const data = await this.prisma.transactions.findUnique({
-      where: { id },
+    const data = await this.prisma.transactions.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
       select: TX_SELECT,
     });
     if (!data) throw new NotFoundException('Transaction not found');
     assertBranchAccess(user, (data as any).branch_id);
-    return this.mapTransaction(data);
+    return await this.mapTransaction(data);
   }
 
   async findLatestPawnSource(
@@ -617,6 +818,7 @@ export class TransactionsService {
     const where: any = {
       purpose: 'Pawn',
       ...(isSuperAdmin(user) ? {} : buildBranchFilter(user)),
+      ...applyEnvironmentFilter(user),
     };
 
     if (trimmedRelatedId) {
@@ -633,7 +835,7 @@ export class TransactionsService {
 
     if (!row) return null;
     assertBranchAccess(user, (row as any).branch_id);
-    return this.mapTransaction(row);
+    return await this.mapTransaction(row);
   }
 
   async update(
@@ -641,8 +843,8 @@ export class TransactionsService {
     id: string,
     dto: Partial<CreateTransactionDto>,
   ) {
-    const existing = await this.prisma.transactions.findUnique({
-      where: { id },
+    const existing = await this.prisma.transactions.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
       select: { id: true, branch_id: true },
     });
     if (!existing) throw new NotFoundException('Transaction not found');
@@ -665,12 +867,12 @@ export class TransactionsService {
       },
       select: TX_SELECT,
     });
-    return this.mapTransaction(updated);
+    return await this.mapTransaction(updated);
   }
 
   async remove(user: UserWithBranch, id: string) {
-    const existing = await this.prisma.transactions.findUnique({
-      where: { id },
+    const existing = await this.prisma.transactions.findFirst({
+      where: applyEnvironmentFilter(user, { id }),
       select: { id: true, branch_id: true },
     });
     if (!existing) throw new NotFoundException('Transaction not found');
@@ -699,7 +901,8 @@ export class TransactionsService {
   }
 
   private async buildStats(
-    rows: Array<ReturnType<TransactionsService['mapTransaction']>>,
+    user: UserWithBranch,
+    rows: Array<Awaited<ReturnType<TransactionsService['mapTransaction']>>>,
     scoped: string | null,
     date?: string,
   ) {
@@ -728,21 +931,19 @@ export class TransactionsService {
 
       // Parallelize both queries
       const [balanceData, sessionRow] = await Promise.all([
-        this.prisma.daily_balances.findUnique({
+        this.prisma.daily_balances.findFirst({
           where: {
-            branch_id_record_date: {
-              branch_id: scoped,
-              record_date: balanceDate,
-            },
+            branch_id: scoped,
+            record_date: balanceDate,
+            ...applyEnvironmentFilter(user),
           },
           select: { starting_balance: true, ending_balance: true },
         }),
-        this.prisma.branch_day_sessions.findUnique({
+        this.prisma.branch_day_sessions.findFirst({
           where: {
-            branch_id_session_date: {
-              branch_id: scoped,
-              session_date: balanceDate,
-            },
+            branch_id: scoped,
+            session_date: balanceDate,
+            ...applyEnvironmentFilter(user),
           },
           select: {
             opened_at: true,
@@ -782,7 +983,10 @@ export class TransactionsService {
         startingBalanceCalc = this.toNumber(balanceData.starting_balance);
       } else {
         const priorRow = await this.prisma.daily_balances.findFirst({
-          where: { branch_id: scoped, record_date: { lt: balanceDate } },
+          where: applyEnvironmentFilter(user, {
+            branch_id: scoped,
+            record_date: { lt: balanceDate },
+          }),
           orderBy: { record_date: 'desc' },
           select: { ending_balance: true },
         });
@@ -790,15 +994,189 @@ export class TransactionsService {
       }
 
       stats.startingBalance = startingBalanceCalc;
-      const net = await this.financeDailyBalance.sumOperationalNetCash(
-        scoped,
-        balanceDateStr,
-      );
-      stats.endingBalance = Number(
-        (startingBalanceCalc + net).toFixed(2),
-      );
+      stats.endingBalance =
+        await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
+          scoped,
+          balanceDateStr,
+        );
     }
 
     return stats;
+  }
+
+  private async uploadPhoto(
+    base64: string,
+    path: string,
+    bucket: string,
+  ): Promise<string> {
+    const client = this.supabase.getClient();
+    const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
+    const buf = Buffer.from(base64Data, 'base64');
+
+    const { data, error } = await client.storage
+      .from(bucket)
+      .upload(path, buf, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `Photo upload to ${bucket} failed: ${error.message}`,
+      );
+    }
+
+    const { data: signedData, error: signError } = await client.storage
+      .from(bucket)
+      .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+    if (signError || !signedData?.signedUrl) {
+      return `${bucket}/${path}`;
+    }
+
+    return signedData.signedUrl;
+  }
+
+  private buildRenewalUploadPath(
+    branchId: string,
+    customerId: string,
+  ) {
+    const timestamp = Date.now();
+    const rand = Math.random().toString(36).slice(2, 8);
+    return `${branchId}/${customerId}/renewal_${timestamp}_${rand}.jpg`;
+  }
+
+  private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
+    if (!storedUrl) {
+      return '';
+    }
+
+    if (!storedUrl.startsWith('http')) {
+      const parts = storedUrl.split('/');
+      if (parts.length < 2) return storedUrl;
+      const bucket = parts[0];
+      const path = parts.slice(1).join('/');
+
+      try {
+        const { data } = await this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+        return data?.signedUrl || storedUrl;
+      } catch {
+        return storedUrl;
+      }
+    }
+
+    try {
+      const parsedUrl = new URL(storedUrl);
+      const storagePrefix = '/storage/v1/object/public/';
+
+      if (!parsedUrl.pathname.includes(storagePrefix)) {
+        return storedUrl;
+      }
+
+      const storagePath = parsedUrl.pathname.split(storagePrefix)[1];
+      if (!storagePath) {
+        return storedUrl;
+      }
+
+      const [bucketName, ...objectPathParts] = storagePath.split('/');
+      const objectPath = objectPathParts.join('/');
+
+      if (!bucketName || !objectPath) {
+        return storedUrl;
+      }
+
+      const { data, error } = await this.supabase
+        .getClient()
+        .storage.from(bucketName)
+        .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+
+      if (error || !data?.signedUrl) {
+        return storedUrl;
+      }
+
+      return data.signedUrl;
+    } catch {
+      return storedUrl;
+    }
+  }
+
+  async syncPastRenewals() {
+    try {
+      const renewTx = await this.prisma.transactions.findMany({
+        where: {
+          purpose: 'Renew',
+          related_pawned_item_id: { not: null },
+          voided_at: null,
+        },
+        select: {
+          id: true,
+          related_pawned_item_id: true,
+          transaction_date: true,
+          cash_in: true,
+        },
+      });
+
+      for (const tx of renewTx) {
+        const pawnedItemId = tx.related_pawned_item_id!;
+        const renewalDate = tx.transaction_date;
+
+        const existingRenewal = await this.prisma.item_renewals.findFirst({
+          where: {
+            pawned_item_id: pawnedItemId,
+            renewal_date: renewalDate,
+          },
+        });
+
+        if (!existingRenewal) {
+          console.log(`[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date}`);
+          await this.prisma.item_renewals.create({
+            data: {
+              pawned_item_id: pawnedItemId,
+              renewal_date: renewalDate,
+              amount_paid: tx.cash_in,
+            },
+          });
+        }
+      }
+
+      const pawnedItems = await this.prisma.pawned_items.findMany({
+        where: {
+          status: 'Active',
+          item_renewals: { some: {} },
+        },
+        include: {
+          item_renewals: {
+            orderBy: { renewal_date: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      for (const item of pawnedItems) {
+        const latestRenewal = item.item_renewals[0];
+        if (latestRenewal) {
+          const renewalDate = new Date(latestRenewal.renewal_date);
+          const pawnDate = new Date(item.pawn_date);
+          
+          if (renewalDate.getTime() > pawnDate.getTime()) {
+            console.log(`[Sync] Updating pawn_date of item ${item.item_id} from ${item.pawn_date} to ${latestRenewal.renewal_date}`);
+            await this.prisma.pawned_items.update({
+              where: { id: item.id },
+              data: {
+                pawn_date: latestRenewal.renewal_date,
+                updated_at: new Date(),
+              },
+            });
+          }
+        }
+      }
+      console.log('[Sync] Past renewals synchronization completed successfully.');
+    } catch (error) {
+      console.error('[Sync] Failed to sync past renewals:', error);
+    }
   }
 }

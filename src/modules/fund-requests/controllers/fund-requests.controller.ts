@@ -20,7 +20,9 @@ import { SourceConfirmFundRequestDto } from '../dto/source-confirm-fund-request.
 import { TransferFundRequestDto } from '../dto/transfer-fund-request.dto';
 import { UploadFundTransferProofDto } from '../dto/upload-fund-transfer-proof.dto';
 import { FundRequestsService } from '../services/fund-requests.service';
+import { RequiresOpeningChecklist } from '../../../common/decorators';
 
+@RequiresOpeningChecklist()
 @Controller('fund-requests')
 export class FundRequestsController {
   constructor(private readonly fundRequestsService: FundRequestsService) {}

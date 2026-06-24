@@ -3,11 +3,12 @@ import { NotificationsController } from './controllers/notifications.controller'
 import { NotificationsService } from './services/notifications.service';
 import { EmailController } from './controllers/email.controller';
 import { EmailService } from './services/email.service';
+import { NotificationEventsService } from './services/notification-events.service';
 
 @Global()
 @Module({
   controllers: [NotificationsController, EmailController],
-  providers: [NotificationsService, EmailService],
+  providers: [NotificationsService, NotificationEventsService, EmailService],
   exports: [NotificationsService, EmailService],
 })
 export class NotificationsModule {}

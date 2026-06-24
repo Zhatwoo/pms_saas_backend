@@ -31,8 +31,11 @@ export class UsersController {
   /** Super-admin user creation — high-value target for automated abuse when credentials leak. */
   @Throttle(AUTH_STRICT_THROTTLE)
   @Post()
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  create(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() createUserDto: CreateUserDto,
+  ) {
+    return this.usersService.create(createUserDto, req.user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
@@ -43,18 +46,18 @@ export class UsersController {
   ) {
     if (req.user.role === Role.SUPER_ADMIN) {
       if (branchId?.trim()) {
-        return this.usersService.findAll({
+        return this.usersService.findAll(req.user, {
           branchId: branchId.trim(),
           scopedToBranch: true,
         });
       }
 
-      return this.usersService.findAll();
+      return this.usersService.findAll(req.user);
     }
     if (!req.user.branchId) {
       return [];
     }
-    return this.usersService.findAll({
+    return this.usersService.findAll(req.user, {
       branchId: req.user.branchId,
       scopedToBranch: true,
     });

@@ -27,6 +27,7 @@ export class ActivityLogsController {
 
     if (roleNorm === 'admin' || roleNorm === 'employee') {
       return this.activityLogsService.getLogs(
+        user,
         user.branchId,
         roleNorm,
         startDate,
@@ -39,6 +40,7 @@ export class ActivityLogsController {
 
     // For superadmin, they can filter by branchId or get all
     return this.activityLogsService.getLogs(
+      user,
       qBranchId,
       'super_admin',
       startDate,

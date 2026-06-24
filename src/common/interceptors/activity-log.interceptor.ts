@@ -7,6 +7,7 @@ import {
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { ActivityLogsService } from '../../modules/activity-logs/activity-logs.service';
+import { getEnvironment } from '../utils/authorization.util';
 
 @Injectable()
 export class ActivityLogInterceptor implements NestInterceptor {
@@ -37,6 +38,8 @@ export class ActivityLogInterceptor implements NestInterceptor {
 
               this.activityLogsService.createLog({
                 userId: user.id || user.sub,
+                authId: user.authId ?? null,
+                environment: getEnvironment(user),
                 branchId: user.branchId || null,
                 action: action,
                 details: {

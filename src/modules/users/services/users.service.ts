@@ -14,6 +14,13 @@ import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
+import { NotificationsService } from '../../notifications/services/notifications.service';
+import {
+  applyEnvironmentFilter,
+  environmentCreateFields,
+  getEnvironment,
+  isDeveloper,
+} from '../../../common/utils/authorization.util';
 
 type UserRow = Prisma.usersGetPayload<{
   select: typeof UsersService.userSelect;
@@ -32,7 +39,10 @@ export class UsersService {
     role: true,
     branch_id: true,
     avatar_url: true,
+    notification_sound: true,
     account_status: true,
+    is_developer: true,
+    environment: true,
     created_at: true,
     branches: { select: { name: true } },
   } satisfies Prisma.usersSelect;
@@ -41,6 +51,7 @@ export class UsersService {
     private readonly supabaseService: SupabaseService,
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private isUuidParam(value: string): boolean {
@@ -92,18 +103,34 @@ export class UsersService {
       branchId: row.branch_id,
       branchName: row.branches?.name ?? null,
       accountStatus: row.account_status ?? 'active',
+      notificationSound: row.notification_sound ?? 'sound8.mp3',
+      isDeveloper: row.is_developer,
+      environment: row.environment,
       createdAt: row.created_at,
     };
   }
 
-  async findAll(scope?: { branchId: string; scopedToBranch: true }) {
-    const where: Prisma.usersWhereInput = {};
+  async findAll(
+    viewer?: AuthenticatedUserProfile,
+    scope?: { branchId: string; scopedToBranch: true },
+  ) {
+    const where: Prisma.usersWhereInput = viewer
+      ? applyEnvironmentFilter(viewer)
+      : {};
 
     if (scope?.scopedToBranch && scope.branchId) {
-      Object.assign(where, {
+      const branchScopedStaff: Prisma.usersWhereInput = {
         branch_id: scope.branchId,
         role: { in: ['admin', 'employee', 'branch'] },
-      });
+      };
+
+      if (viewer?.role === Role.SUPER_ADMIN && viewer.id) {
+        Object.assign(where, {
+          OR: [branchScopedStaff, { id: viewer.id }],
+        });
+      } else {
+        Object.assign(where, branchScopedStaff);
+      }
     }
 
     const rows = await this.prisma.users.findMany({
@@ -135,10 +162,11 @@ export class UsersService {
     return this.mapToResponse(row);
   }
 
-  async create(dto: CreateUserDto) {
+  async create(dto: CreateUserDto, actor?: AuthenticatedUserProfile) {
     const email = dto.email.trim().toLowerCase();
     const fullName = dto.fullName.trim();
     const normalizedRole = this.normalizeStoredRole(dto.role);
+    const developer = isDeveloper({ email });
     const isTargetSuperAdmin = normalizedRole === 'super_admin';
     const effectiveBranchId = isTargetSuperAdmin
       ? null
@@ -192,6 +220,9 @@ export class UsersService {
           role: normalizedRole,
           branch_id: effectiveBranchId,
           account_status: 'active',
+          is_developer: developer,
+          environment: getEnvironment({ email, isDeveloper: developer }),
+          created_by: actor?.authId ?? authId,
         },
         update: {
           email,
@@ -199,10 +230,55 @@ export class UsersService {
           role: normalizedRole,
           branch_id: effectiveBranchId,
           account_status: 'active',
+          is_developer: developer,
+          environment: getEnvironment({ email, isDeveloper: developer }),
           updated_at: new Date(),
         },
         select: UsersService.userSelect,
       });
+
+      await this.notificationsService.createForSuperadmins({
+        title: `New staff account created - ${fullName}`,
+        subtitle: branch
+          ? `System Alert: ${normalizedRole} assigned to ${branch.name}.`
+          : `System Alert: ${normalizedRole} account created.`,
+        category: 'Alerts',
+        event_key: `user-created:${row.id}`,
+        entity_type: 'user',
+        entity_id: row.id,
+        ...environmentCreateFields(actor ?? { email, isDeveloper: developer }),
+      });
+
+      if (branch && normalizedRole === 'employee') {
+        const branchAdmins = await this.prisma.users.findMany({
+          where: {
+            branch_id: branch.id,
+            role: 'admin',
+            account_status: 'active',
+          },
+          select: { id: true },
+        });
+
+        await Promise.all(
+          branchAdmins.map((admin) =>
+            this.notificationsService.create({
+              title: `New employee account created - ${fullName}`,
+              subtitle: `System Alert: employee assigned to ${branch.name}.`,
+              category: 'Alerts',
+              user_id: admin.id,
+              branch_id: branch.id,
+              event_key: `user-created:${row.id}:admin:${admin.id}`,
+              entity_type: 'user',
+              entity_id: row.id,
+              environment: getEnvironment({
+                email,
+                isDeveloper: developer,
+              }),
+              created_by: actor?.authId ?? authId,
+            }),
+          ),
+        );
+      }
 
       return this.mapToResponse({
         ...row,
@@ -224,7 +300,8 @@ export class UsersService {
       dto.avatarUrl === undefined &&
       dto.accountStatus === undefined &&
       dto.role === undefined &&
-      dto.branchId === undefined
+      dto.branchId === undefined &&
+      dto.notificationSound === undefined
     ) {
       throw new BadRequestException('No updates provided');
     }
@@ -284,6 +361,7 @@ export class UsersService {
     const payload: Prisma.usersUncheckedUpdateInput = {
       updated_at: new Date(),
     };
+    let branchTransferTarget: { id: string; name: string } | null = null;
 
     if (dto.fullName !== undefined) {
       const trimmed = dto.fullName.trim();
@@ -311,16 +389,22 @@ export class UsersService {
       } else {
         const branch = await this.prisma.branches.findUnique({
           where: { id: dto.branchId },
-          select: { id: true, status: true },
+          select: { id: true, status: true, name: true },
         });
         if (!branch || !this.isActiveBranchStatus(branch.status)) {
           throw new BadRequestException('Invalid or inactive branch');
         }
         payload.branch_id = dto.branchId;
+        if (String(existing.branch_id) !== String(dto.branchId)) {
+          branchTransferTarget = { id: branch.id, name: branch.name };
+        }
       }
     }
 
     if (dto.avatarUrl !== undefined) payload.avatar_url = dto.avatarUrl;
+    if (dto.notificationSound !== undefined) {
+      payload.notification_sound = dto.notificationSound;
+    }
 
     const updated = await this.prisma.users.update({
       where: { auth_id: existing.auth_id },
@@ -341,6 +425,13 @@ export class UsersService {
           },
         });
       if (error) throw new InternalServerErrorException(error.message);
+    }
+
+    if (
+      branchTransferTarget &&
+      this.normalizeStoredRole(updated.role ?? '') !== 'super_admin'
+    ) {
+      await this.notifyUserBranchTransfer(updated, branchTransferTarget);
     }
 
     return this.mapToResponse(updated);
@@ -368,9 +459,10 @@ export class UsersService {
       throw new BadRequestException('Invalid or inactive target branch');
     }
 
+    const transferredAt = new Date();
     const updated = await this.prisma.users.update({
       where: { auth_id: existing.auth_id },
-      data: { branch_id: targetBranchId, updated_at: new Date() },
+      data: { branch_id: targetBranchId, updated_at: transferredAt },
       select: UsersService.userSelect,
     });
 
@@ -381,9 +473,35 @@ export class UsersService {
       });
     if (error) throw new InternalServerErrorException(error.message);
 
+    await this.notifyUserBranchTransfer(updated, targetBranch, transferredAt);
+
     return this.mapToResponse({
       ...updated,
       branches: { name: targetBranch.name },
+    });
+  }
+
+  private async notifyUserBranchTransfer(
+    user: UserRow,
+    targetBranch: { id: string; name: string },
+    transferredAt = new Date(),
+  ) {
+    const message = `You were transferred to ${targetBranch.name}. Please sign in again, then confirm this branch assignment before continuing.`;
+
+    await this.notificationsService.create({
+      title: `You were transferred to ${targetBranch.name}`,
+      subtitle: message,
+      message,
+      category: 'Alerts',
+      user_id: user.id,
+      branch_id: targetBranch.id,
+      notification_type: 'USER_BRANCH_TRANSFER',
+      target_url: '/dashboard',
+      entity_type: 'user_branch_transfer',
+      entity_id: user.id,
+      event_key: `user-branch-transfer:${user.id}:${targetBranch.id}:${transferredAt.toISOString()}`,
+      environment: user.environment,
+      created_by: user.auth_id,
     });
   }
 

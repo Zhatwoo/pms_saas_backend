@@ -20,6 +20,9 @@ interface CreateIncidentTicketDto {
   userId?: string | null;
   amountImpact?: number | null;
   transactionRef?: string | null;
+  inventoryItemRef?: string | null;
+  itemStatus?: 'missing' | 'broken' | 'damaged' | null;
+  metadata?: Record<string, unknown>;
   requiresManagerEscalation?: boolean;
 }
 
@@ -177,7 +180,7 @@ export class IncidentTicketsService {
         p_escalation_owner_user_id: escalationOwnerUserId,
         p_related_transaction_id: null,
         p_transaction_ref: dto.transactionRef?.trim() || null,
-        p_inventory_item_ref: null,
+        p_inventory_item_ref: dto.inventoryItemRef?.trim() || null,
         p_amount_impact:
           typeof dto.amountImpact === 'number' &&
           Number.isFinite(dto.amountImpact)
@@ -187,6 +190,8 @@ export class IncidentTicketsService {
         p_status: dto.requiresManagerEscalation ? 'escalated' : 'open',
         p_metadata: {
           created_from: 'backend-incident-tickets-api',
+          ...(dto.metadata ?? {}),
+          itemStatus: dto.itemStatus ?? null,
         },
       });
 

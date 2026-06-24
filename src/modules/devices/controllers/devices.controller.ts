@@ -35,7 +35,7 @@ export class DevicesController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get()
   findAll(@Req() req: { user: AuthenticatedUserProfile }) {
-    return this.devicesService.findAll(req.user.role, req.user.branchId);
+    return this.devicesService.findAll(req.user);
   }
 
   /** Login logs — super admin or admin */
@@ -45,7 +45,7 @@ export class DevicesController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('limit', new DefaultValuePipe(200), ParseIntPipe) limit: number,
   ) {
-    return this.devicesService.findLogs(req.user.role, req.user.branchId, limit);
+    return this.devicesService.findLogs(req.user, limit);
   }
 
   /** Public — called from the login screen before the employee is authenticated.
@@ -66,35 +66,51 @@ export class DevicesController {
   /** Super admin authorizes a device */
   @Roles(Role.SUPER_ADMIN)
   @Post('authorize')
-  authorize(@Body() dto: AuthorizeDeviceDto) {
-    return this.devicesService.authorize(dto);
+  authorize(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: AuthorizeDeviceDto,
+  ) {
+    return this.devicesService.authorize(req.user, dto);
   }
 
   /** View single device */
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.devicesService.findOne(id);
+  findOne(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.devicesService.findOne(req.user, id);
   }
 
   /** Update device name / type / branch / status */
   @Roles(Role.SUPER_ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateDeviceDto) {
-    return this.devicesService.update(id, dto);
+  update(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: UpdateDeviceDto,
+  ) {
+    return this.devicesService.update(req.user, id, dto);
   }
 
   /** Block a stolen device immediately */
   @Roles(Role.SUPER_ADMIN)
   @Patch(':id/block')
-  block(@Param('id') id: string) {
-    return this.devicesService.block(id);
+  block(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.devicesService.block(req.user, id);
   }
 
   /** Remove device permanently */
   @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.devicesService.remove(id);
+  remove(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.devicesService.remove(req.user, id);
   }
 }

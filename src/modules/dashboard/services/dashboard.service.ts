@@ -12,6 +12,11 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { findInterestRateGroup } from '../../../common/utils/inventory-valuation.util';
+import {
+  applyEnvironmentFilter,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 interface DashboardRelationUser {
   id: string;
@@ -351,11 +356,12 @@ export class DashboardService {
     let query = client
       .from('pawned_items')
       .select(
-        'id, item_id, item_name, amount, pawn_date, status, branch_id, customers(full_name, email)',
+        'id, item_id, item_name, category, amount, pawn_date, status, branch_id, customers(full_name, email)',
       )
       .eq('status', 'Active')
       .not('pawn_date', 'is', null)
       .order('pawn_date', { ascending: true });
+    query = query.eq('environment', getEnvironment(user));
 
     if (branchId) query = query.eq('branch_id', branchId);
 
@@ -364,9 +370,23 @@ export class DashboardService {
       throw new InternalServerErrorException(error.message);
     }
 
+    const interestRatesSetting = await this.prisma.shop_settings.findFirst({
+      where: {
+        setting_key: 'interest_rates',
+        environment: getEnvironment(user),
+      },
+      select: { setting_value: true },
+    });
+    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+
     return (data || []).map((item: any) => {
+      const category = item.category;
+      const group = findInterestRateGroup(interestRates, category);
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
       const maturityDate = new Date(item.pawn_date);
-      maturityDate.setDate(maturityDate.getDate() + 30);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
+
       const daysRemaining = Math.ceil(
         (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
       );
@@ -488,6 +508,7 @@ export class DashboardService {
     client: ReturnType<SupabaseService['getClient']>,
     branchIds: string[],
     asOfDate: string,
+    environment: string,
   ): Promise<{
     todayByBranch: Map<string, DailyBalanceRow>;
     priorByBranch: Map<string, DailyBalanceRow>;
@@ -501,6 +522,7 @@ export class DashboardService {
         'branch_id, record_date, starting_balance, ending_balance, updated_at',
       )
       .in('branch_id', branchIds)
+      .eq('environment', environment)
       .eq('record_date', asOfDate);
     if (todayErr) {
       throw new InternalServerErrorException(todayErr.message);
@@ -518,6 +540,7 @@ export class DashboardService {
             'branch_id, record_date, starting_balance, ending_balance, updated_at',
           )
           .eq('branch_id', bid)
+          .eq('environment', environment)
           .lt('record_date', asOfDate)
           .order('record_date', { ascending: false })
           .limit(1)
@@ -646,11 +669,16 @@ export class DashboardService {
           recentTransfersResult,
           systemExpensesResult,
         ] = await Promise.all([
-          this.prisma.branches.count(),
-          this.prisma.branches.count({ where: { status: 'Active' } }),
-          this.prisma.users.count(),
-          this.prisma.users.count({ where: { account_status: 'pending' } }),
+          this.prisma.branches.count({ where: applyEnvironmentFilter(user) }),
+          this.prisma.branches.count({
+            where: applyEnvironmentFilter(user, { status: 'Active' }),
+          }),
+          this.prisma.users.count({ where: applyEnvironmentFilter(user) }),
+          this.prisma.users.count({
+            where: applyEnvironmentFilter(user, { account_status: 'pending' }),
+          }),
           this.prisma.branches.findMany({
+            where: applyEnvironmentFilter(user),
             select: {
               id: true,
               name: true,
@@ -664,12 +692,14 @@ export class DashboardService {
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
+            .eq('environment', getEnvironment(user))
             .eq('status', 'transferred'),
           client
             .from('fund_requests')
             .select(
               'status, amount_requested, approved_amount, amount_transferred',
-            ),
+            )
+            .eq('environment', getEnvironment(user)),
           client
             .from('fund_requests')
             .select(
@@ -687,6 +717,7 @@ export class DashboardService {
                 requested_by:requested_by_user_id(id, full_name, email)
               `,
             )
+            .eq('environment', getEnvironment(user))
             .order('created_at', { ascending: false })
             .limit(8),
           client
@@ -706,12 +737,14 @@ export class DashboardService {
                 requested_by:requested_by_user_id(id, full_name, email)
               `,
             )
+            .eq('environment', getEnvironment(user))
             .eq('status', 'transferred')
             .order('transferred_at', { ascending: false })
             .limit(8),
           client
             .from('transactions')
             .select('cash_out')
+            .eq('environment', getEnvironment(user))
             .eq('purpose', 'Expense')
             .is('branch_id', null),
         ]);
@@ -739,6 +772,7 @@ export class DashboardService {
             client,
             branchIdsSa,
             asOfDateSa,
+            getEnvironment(user),
           );
 
         return {
@@ -811,16 +845,19 @@ export class DashboardService {
                   requested_by:requested_by_user_id(id, full_name, email)
                 `,
             )
+            .eq('environment', getEnvironment(user))
             .eq('branch_id', branchId)
             .order('created_at', { ascending: false }),
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
+            .eq('environment', getEnvironment(user))
             .eq('branch_id', branchId)
             .eq('status', 'transferred'),
           client
             .from('transactions')
             .select('purpose, cash_in, cash_out')
+            .eq('environment', getEnvironment(user))
             .eq('branch_id', branchId)
             .eq('transaction_date', getPhCalendarDateString())
             .is('voided_at', null),
@@ -842,6 +879,7 @@ export class DashboardService {
             client,
             [branchId],
             todayStrAdmin,
+            getEnvironment(user),
           );
         const adminBranch = branchResult
           ? {
@@ -913,16 +951,19 @@ export class DashboardService {
                 requested_by:requested_by_user_id(id, full_name, email)
               `,
             )
+            .eq('environment', getEnvironment(user))
             .eq('branch_id', employeeBranchId)
             .order('created_at', { ascending: false }),
           client
             .from('fund_requests')
             .select('branch_id, amount_transferred, transferred_at')
+            .eq('environment', getEnvironment(user))
             .eq('branch_id', employeeBranchId)
             .eq('status', 'transferred'),
           client
             .from('transactions')
             .select('purpose, cash_in, cash_out')
+            .eq('environment', getEnvironment(user))
             .eq('branch_id', employeeBranchId)
             .eq('transaction_date', getPhCalendarDateString())
             .is('voided_at', null),
@@ -944,6 +985,7 @@ export class DashboardService {
             client,
             [employeeBranchId],
             todayStrEmp,
+            getEnvironment(user),
           );
         const employeeBranch = employeeBranchResult
           ? {
@@ -1024,6 +1066,15 @@ export class DashboardService {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
 
+    const interestRatesSetting = await this.prisma.shop_settings.findFirst({
+      where: {
+        setting_key: 'interest_rates',
+        environment: getEnvironment(user),
+      },
+      select: { setting_value: true },
+    });
+    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+
     let fromDate: string;
     let toDate: string;
 
@@ -1044,7 +1095,7 @@ export class DashboardService {
 
     // Build base queries
     const buildPawnQuery = (baseQuery: any) => {
-      let q = baseQuery;
+      let q = baseQuery.eq('environment', getEnvironment(user));
       if (branchId) q = q.eq('branch_id', branchId);
       return q;
     };
@@ -1059,20 +1110,18 @@ export class DashboardService {
         .lte('pawn_date', toDate),
     );
     // 2. Items near expiration (maturity within 7 days)
-    const twentyThreeDaysAgo = new Date(today);
-    twentyThreeDaysAgo.setDate(twentyThreeDaysAgo.getDate() - 23);
     const nearExpQuery = buildPawnQuery(
       client
         .from('pawned_items')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'Active')
-        .lte('pawn_date', twentyThreeDaysAgo.toISOString().split('T')[0]),
+        .select('category, pawn_date')
+        .eq('status', 'Active'),
     );
     // 3. Items ready for sale
     let saleQuery = client
       .from('sale_items')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'Available');
+    saleQuery = saleQuery.eq('environment', getEnvironment(user));
     if (branchId) saleQuery = saleQuery.eq('branch_id', branchId);
 
     // 4. Total contracts (overall)
@@ -1108,6 +1157,7 @@ export class DashboardService {
       .select('cash_in, purpose')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
+    revenueQuery = revenueQuery.eq('environment', getEnvironment(user));
     if (branchId) revenueQuery = revenueQuery.eq('branch_id', branchId);
 
     // 8. Contract trends (last 6 months)
@@ -1129,6 +1179,7 @@ export class DashboardService {
       .from('transactions')
       .select('cash_in, transaction_date, purpose')
       .gte('transaction_date', yearStartStr);
+    revenueTrendQuery = revenueTrendQuery.eq('environment', getEnvironment(user));
     if (branchId)
       revenueTrendQuery = revenueTrendQuery.eq('branch_id', branchId);
 
@@ -1136,7 +1187,7 @@ export class DashboardService {
     const attentionQuery = buildPawnQuery(
       client
         .from('pawned_items')
-        .select('id, item_name, item_id, amount, pawn_date, status')
+        .select('id, item_name, item_id, category, amount, pawn_date, status')
         .eq('status', 'Active')
         .lte('pawn_date', todayStr)
         .order('pawn_date', { ascending: true })
@@ -1150,6 +1201,7 @@ export class DashboardService {
       .eq('purpose', 'Sold Item')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
+    branchSalesQuery = branchSalesQuery.eq('environment', getEnvironment(user));
     if (branchId) branchSalesQuery = branchSalesQuery.eq('branch_id', branchId);
 
     const allBranchSalesQuery = isAdmin
@@ -1157,6 +1209,7 @@ export class DashboardService {
           .from('transactions')
           .select('cash_in')
           .eq('purpose', 'Sold Item')
+          .eq('environment', getEnvironment(user))
           .gte('transaction_date', fromDate)
           .lte('transaction_date', toDate)
       : branchSalesQuery;
@@ -1277,8 +1330,12 @@ export class DashboardService {
 
     // Build attention items
     const attentionItems = (attentionResult.data || []).map((item: any) => {
+      const category = item.category;
+      const group = findInterestRateGroup(interestRates, category);
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
       const maturityDate = new Date(item.pawn_date);
-      maturityDate.setDate(maturityDate.getDate() + 30);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
       const daysRemaining = Math.ceil(
         (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
       );
@@ -1308,6 +1365,7 @@ export class DashboardService {
     let notifQuery = client
       .from('notifications')
       .select('id, title, subtitle, created_at, is_read')
+      .eq('environment', getEnvironment(user))
       .order('created_at', { ascending: false })
       .limit(10);
 
@@ -1331,6 +1389,23 @@ export class DashboardService {
       branchId: item.branch_id || null,
     }));
 
+    let itemsNearExpiration = 0;
+    for (const item of nearExpResult.data || []) {
+      if (!item.pawn_date) continue;
+      const category = item.category;
+      const group = findInterestRateGroup(interestRates, category);
+      const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+
+      const maturityDate = new Date(item.pawn_date);
+      maturityDate.setDate(maturityDate.getDate() + defaultDuration);
+      const daysRemaining = Math.ceil(
+        (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (daysRemaining > 0 && daysRemaining <= 7) {
+        itemsNearExpiration++;
+      }
+    }
+
     return {
       overallData: {
         totalContracts: totalContractsResult.count ?? 0,
@@ -1343,7 +1418,7 @@ export class DashboardService {
       },
       kpiData: {
         activeContracts: activeResult.count ?? 0,
-        itemsNearExpiration: nearExpResult.count ?? 0,
+        itemsNearExpiration,
         itemsReadyForSale: saleResult.count ?? 0,
         monthlyRevenue: `₱ ${monthlyRevenue.toLocaleString()}`,
       },

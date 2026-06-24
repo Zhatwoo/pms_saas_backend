@@ -12,7 +12,9 @@ import { PrismaService } from '../../infrastructure/prisma';
 import { Role } from '../enums';
 import { parseCookieHeader } from '../utils/cookie.util';
 import { EncryptionService } from '../encryption/encryption.service';
+import { isDeveloper } from '../utils/authorization.util';
 import type { Request } from 'express';
+import * as crypto from 'node:crypto';
 
 type UserRow = {
   id: string;
@@ -23,6 +25,7 @@ type UserRow = {
   branch_id: string | null;
   avatar_url: string | null;
   account_status: string | null;
+  is_developer: boolean | null;
   branches?: { name: string } | null;
 };
 
@@ -35,9 +38,20 @@ type RequestUser = {
   branchId: string | null;
   branchName: string | null;
   avatarUrl: string | null;
+  isDeveloper: boolean;
 };
 
 type AuthenticatedRequest = Request & { user?: RequestUser };
+
+type AuthCredential =
+  | { type: 'jwt'; source: 'cookie' | 'bearer'; token: string }
+  | { type: 'api-key'; key: string };
+
+const UNAUTHORIZED_RESPONSE = {
+  statusCode: 401,
+  message: 'Unauthorized request',
+  error: 'Unauthorized',
+};
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -58,27 +72,35 @@ export class JwtAuthGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (isPublic) {
+    if (isPublic || this.isKnownPublicRoute(request)) {
       return true;
     }
 
-    const token = this.extractSessionToken(request);
-    if (!token) {
-      this.logger.warn(
-        `Missing session cookie for ${request.method} ${request.path}`,
-      );
-      throw new UnauthorizedException('Missing session');
+    this.logAuthIndicators(request);
+
+    const credential = this.extractCredential(request);
+    if (!credential) {
+      this.throwUnauthorized(request, 'Missing authentication credential');
+    }
+
+    if (credential.type === 'api-key') {
+      if (!this.isValidApiKey(credential.key)) {
+        this.throwUnauthorized(request, 'Invalid API key');
+      }
+
+      request.user = this.createApiKeyUser();
+      return true;
     }
 
     const authClient = this.supabase.getAuthClient();
-    const { data, error } = await authClient.auth.getUser(token);
+    const { data, error } = await authClient.auth.getUser(credential.token);
     const authUser = data?.user;
 
     if (error || !authUser?.id) {
       this.logger.warn(
         `Invalid JWT for ${request.method} ${request.path}: ${error?.message ?? 'missing auth user'}`,
       );
-      throw new UnauthorizedException('Invalid token');
+      this.throwUnauthorized(request, 'Invalid JWT');
     }
 
     const user = await this.prisma.users.findUnique({
@@ -92,6 +114,7 @@ export class JwtAuthGuard implements CanActivate {
         branch_id: true,
         avatar_url: true,
         account_status: true,
+        is_developer: true,
         branches: { select: { name: true } },
       },
     });
@@ -100,23 +123,52 @@ export class JwtAuthGuard implements CanActivate {
       this.logger.warn(
         `Authenticated auth_id has no users row: ${authUser.id}`,
       );
-      throw new UnauthorizedException('User account not found');
+      this.throwUnauthorized(request, 'Authenticated user row not found');
     }
 
     request.user = this.toRequestUser(user);
+    request.user.isDeveloper =
+      request.user.isDeveloper || isDeveloper({ email: authUser.email });
     return true;
   }
 
-  private extractSessionToken(request: Request): string | null {
+  private isKnownPublicRoute(request: Request): boolean {
+    const method = (request.method ?? '').toUpperCase();
+    const path = String(
+      request.originalUrl ?? request.url ?? request.path ?? '',
+    ).split('?')[0];
+    const normalizedPath = path.replace(/^\/api(?=\/)/, '');
+
+    if (method === 'OPTIONS') {
+      return true;
+    }
+
+    return (
+      (method === 'POST' &&
+        ['/auth/login', '/auth/register', '/auth/logout'].includes(
+          normalizedPath,
+        )) ||
+      (method === 'GET' && normalizedPath === '/auth/signup/branches') ||
+      (method === 'POST' && normalizedPath === '/devices/request-authorization')
+    );
+  }
+
+  private extractCredential(request: Request): AuthCredential | null {
+    const apiKey = this.extractApiKey(request);
+    if (apiKey) {
+      return { type: 'api-key', key: apiKey };
+    }
+
     const cookies = parseCookieHeader(request.headers.cookie);
     const cookieToken = cookies.pms_access_token;
 
     if (cookieToken) {
-      return cookieToken;
+      return { type: 'jwt', source: 'cookie', token: cookieToken };
     }
 
-    if (process.env.ALLOW_BEARER_AUTH === 'true') {
-      return this.extractBearerToken(request.headers?.authorization);
+    const bearerToken = this.extractBearerToken(request.headers?.authorization);
+    if (bearerToken && process.env.ALLOW_BEARER_AUTH !== 'false') {
+      return { type: 'jwt', source: 'bearer', token: bearerToken };
     }
 
     return null;
@@ -130,6 +182,74 @@ export class JwtAuthGuard implements CanActivate {
     return token;
   }
 
+  private extractApiKey(request: Request): string | null {
+    const raw = request.headers['x-api-key'];
+    const apiKey = Array.isArray(raw) ? raw[0] : raw;
+    return typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : null;
+  }
+
+  private isValidApiKey(apiKey: string): boolean {
+    const configuredKeys = this.getConfiguredApiKeys();
+    if (configuredKeys.length === 0) {
+      return false;
+    }
+
+    return configuredKeys.some((configuredKey) =>
+      this.secureCompare(configuredKey, apiKey),
+    );
+  }
+
+  private getConfiguredApiKeys(): string[] {
+    return [
+      ...(process.env.API_KEYS ?? '').split(','),
+      process.env.API_KEY ?? '',
+      ...(process.env.PMS_API_KEYS ?? '').split(','),
+      process.env.PMS_API_KEY ?? '',
+    ]
+      .map((key) => key.trim())
+      .filter(Boolean);
+  }
+
+  private secureCompare(expected: string, actual: string): boolean {
+    const expectedBuffer = Buffer.from(expected);
+    const actualBuffer = Buffer.from(actual);
+    if (expectedBuffer.length !== actualBuffer.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(expectedBuffer, actualBuffer);
+  }
+
+  private createApiKeyUser(): RequestUser {
+    return {
+      id: 'api-key',
+      authId: 'api-key',
+      fullName: 'API Key',
+      email: 'api-key@system.local',
+      role: this.resolveApiKeyRole(),
+      branchId: process.env.API_KEY_BRANCH_ID || null,
+      branchName: null,
+      avatarUrl: null,
+      isDeveloper: false,
+    };
+  }
+
+  private resolveApiKeyRole(): Role {
+    return (
+      this.normalizeRole(process.env.API_KEY_ROLE ?? null) ?? Role.EMPLOYEE
+    );
+  }
+
+  private logAuthIndicators(request: Request): void {
+    if (process.env.AUTH_DEBUG !== 'true') {
+      return;
+    }
+
+    const cookies = parseCookieHeader(request.headers.cookie);
+    this.logger.warn(
+      `Auth debug ${request.method} ${request.path}: hasCookie=${Boolean(cookies.pms_access_token)} hasBearer=${Boolean(this.extractBearerToken(request.headers?.authorization))} hasApiKey=${Boolean(this.extractApiKey(request))} origin=${String(request.headers.origin ?? '')}`,
+    );
+  }
+
   private normalizeRole(role: string | null): Role | null {
     if (role === 'super_admin' || role === 'superadmin')
       return Role.SUPER_ADMIN;
@@ -140,15 +260,15 @@ export class JwtAuthGuard implements CanActivate {
 
   private toRequestUser(user: UserRow) {
     if (user.account_status === 'pending') {
-      throw new UnauthorizedException('Account pending approval');
+      throw new UnauthorizedException(UNAUTHORIZED_RESPONSE);
     }
     if (user.account_status === 'rejected') {
-      throw new UnauthorizedException('Account rejected');
+      throw new UnauthorizedException(UNAUTHORIZED_RESPONSE);
     }
 
     const role = this.normalizeRole(user.role);
     if (!role) {
-      throw new UnauthorizedException('User account role is invalid');
+      throw new UnauthorizedException(UNAUTHORIZED_RESPONSE);
     }
 
     return {
@@ -160,6 +280,16 @@ export class JwtAuthGuard implements CanActivate {
       branchId: user.branch_id,
       branchName: user.branches?.name ?? null,
       avatarUrl: user.avatar_url,
+      isDeveloper:
+        Boolean(user.is_developer) ||
+        user.email.trim().toLowerCase().endsWith('@dev.com'),
     };
+  }
+
+  private throwUnauthorized(request: Request, reason: string): never {
+    this.logger.warn(
+      `${reason} for ${request.method} ${request.originalUrl ?? request.path}`,
+    );
+    throw new UnauthorizedException(UNAUTHORIZED_RESPONSE);
   }
 }

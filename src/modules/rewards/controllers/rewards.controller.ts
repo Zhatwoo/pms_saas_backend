@@ -25,32 +25,51 @@ export class RewardsController {
 
   @Roles(Role.SUPER_ADMIN)
   @Post()
-  createReward(@Body() dto: CreateRewardDto) {
-    return this.rewardsService.createReward(dto);
+  createReward(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: CreateRewardDto,
+  ) {
+    return this.rewardsService.createReward(req.user, dto);
   }
 
   @Roles(Role.SUPER_ADMIN)
   @Patch(':id')
-  updateReward(@Param('id') id: string, @Body() dto: UpdateRewardDto) {
-    return this.rewardsService.updateReward(id, dto);
+  updateReward(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body() dto: UpdateRewardDto,
+  ) {
+    return this.rewardsService.updateReward(req.user, id, dto);
   }
 
   @Roles(Role.SUPER_ADMIN)
   @Delete(':id')
-  deleteReward(@Param('id') id: string) {
-    return this.rewardsService.deleteReward(id);
+  deleteReward(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.rewardsService.deleteReward(req.user, id);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get()
-  findAllRewards(@Query('activeOnly') activeOnly?: string) {
-    return this.rewardsService.findAllRewards(activeOnly === 'true');
+  findAllRewards(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('activeOnly') activeOnly?: string,
+  ) {
+    return this.rewardsService.findAllRewards(
+      req.user,
+      activeOnly === 'true',
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get(':id')
-  findOneReward(@Param('id') id: string) {
-    return this.rewardsService.findOneReward(id);
+  findOneReward(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.rewardsService.findOneReward(req.user, id);
   }
 
   /* ──────────── Customer-Specific Rewards ──────────── */

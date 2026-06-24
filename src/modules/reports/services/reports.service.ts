@@ -5,6 +5,10 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
 import { isNonRevenuePurpose } from '../../../common/enums';
 import { Role } from '../../../common/enums';
+import {
+  applyEnvironmentFilter,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -109,6 +113,7 @@ export class ReportsService {
       .select('id', { count: 'exact', head: true })
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
+    txnQuery = txnQuery.eq('environment', getEnvironment(user));
     if (branchId) txnQuery = txnQuery.eq('branch_id', branchId);
     const { count: txnCount } = await txnQuery;
 
@@ -118,6 +123,7 @@ export class ReportsService {
       .select('cash_in, purpose')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
+    salesQuery = salesQuery.eq('environment', getEnvironment(user));
     if (branchId) salesQuery = salesQuery.eq('branch_id', branchId);
     const { data: salesData } = await salesQuery;
 
@@ -134,6 +140,7 @@ export class ReportsService {
       .from('transactions')
       .select('cash_in, purpose')
       .eq('transaction_date', todayStr);
+    todaySalesQuery = todaySalesQuery.eq('environment', getEnvironment(user));
     if (branchId) todaySalesQuery = todaySalesQuery.eq('branch_id', branchId);
     const { data: todaySalesData } = await todaySalesQuery;
     const totalSalesToday = (todaySalesData || []).reduce(
@@ -143,7 +150,7 @@ export class ReportsService {
 
     // Active branches
     const branches = await this.prisma.branches.findMany({
-      where: branchId ? { id: branchId } : undefined,
+      where: applyEnvironmentFilter(user, branchId ? { id: branchId } : {}),
       select: {
         id: true,
         name: true,
@@ -171,6 +178,7 @@ export class ReportsService {
       .select('branch_id, cash_in, purpose')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
+    periodTxnQuery = periodTxnQuery.eq('environment', getEnvironment(user));
     if (branchId) periodTxnQuery = periodTxnQuery.eq('branch_id', branchId);
     const { data: periodTxns } = await periodTxnQuery;
 
@@ -206,6 +214,7 @@ export class ReportsService {
       .gte('transaction_date', trendStart)
       .lte('transaction_date', trendEnd)
       .order('transaction_date', { ascending: true });
+    trendQuery = trendQuery.eq('environment', getEnvironment(user));
     if (branchId) trendQuery = trendQuery.eq('branch_id', branchId);
     const { data: trendData } = await trendQuery;
 
@@ -281,6 +290,7 @@ export class ReportsService {
       .select('cash_out, purpose')
       .gte('transaction_date', fromDate)
       .lte('transaction_date', toDate);
+    cashOutQuery = cashOutQuery.eq('environment', getEnvironment(user));
     if (branchId) cashOutQuery = cashOutQuery.eq('branch_id', branchId);
     const { data: cashOutData } = await cashOutQuery;
 
@@ -297,6 +307,7 @@ export class ReportsService {
       .eq('transaction_date', fromDate)
       .eq('purpose', 'Start')
       .limit(1);
+    openingQuery = openingQuery.eq('environment', getEnvironment(user));
     if (branchId) openingQuery = openingQuery.eq('branch_id', branchId);
     const { data: openingTxn } = await openingQuery;
 
