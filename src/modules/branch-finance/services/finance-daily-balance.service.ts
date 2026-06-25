@@ -552,7 +552,6 @@ export class FinanceDailyBalanceService {
       .filter(
         (r) =>
           !isJournalPurposeStartEnd(r.purpose) &&
-          !isFundTransferBookRow(r) &&
           this.txCreatedAtMs(r.created_at) < cutoffMs,
       )
       .map((r) => r.id);
@@ -992,8 +991,31 @@ export class FinanceDailyBalanceService {
         await this.ledgerBookEndingForBusinessDate(branchId, priorStr)
       ).toFixed(2),
     );
+    const todayRow = await this.db.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: {
+          branch_id: branchId,
+          record_date: bizDate,
+        },
+      },
+      select: { ending_balance: true },
+    });
+    const todayEnding =
+      todayRow?.ending_balance != null
+        ? Number(this.dec(todayRow.ending_balance).toFixed(2))
+        : 0;
+    const todayNet = Number(
+      (await this.fullDayOperationalNetCash(branchId, businessDateStr)).toFixed(
+        2,
+      ),
+    );
     return {
-      amount: Math.max(openingCapital, ledgerPrior),
+      amount: Math.max(
+        openingCapital,
+        ledgerPrior,
+        todayEnding,
+        Number((openingCapital + todayNet).toFixed(2)),
+      ),
       closedSessionRecordDate: null,
     };
   }
