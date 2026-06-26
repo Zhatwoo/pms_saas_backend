@@ -8,7 +8,6 @@ import {
 import { Prisma } from '@prisma/client';
 import { Role, TransactionPurpose } from '../../../common/enums';
 import {
-  addManilaCalendarDays,
   getPhCalendarDateString,
   getPhWallClockTimeString,
 } from '../../../common/utils/branch-calendar-date.util';
@@ -127,78 +126,24 @@ export class BranchDaySessionService {
     return !row || row.is_closed;
   }
 
-  private async computeSuggestedStartingBalance(
-    branchId: string,
-    businessDateStr: string,
-  ): Promise<number> {
-    return this.financeDailyBalance.suggestedStartingCashForBusinessDate(
-      branchId,
-      businessDateStr,
-    );
-  }
-
   /**
    * Suggested starting cash for the next shift on businessDateStr.
    *
-   * Prefers the employee-confirmed End Day closing balance (daily_balances.ending_balance)
-   * from the last closed session — e.g. ₱16,000 entered at End Day stays ₱16,000 at Start Day.
-   *
-   * Falls back to ledger math (prior day ending + today's net) only when no confirmed closing exists.
+   * Uses {@link FinanceDailyBalanceService.expectedOpeningCashBeforeStartDay} so validation,
+   * business-session snapshot, and opening checklist all share one book-position source.
    */
   private async resolveSuggestedStartingBalance(
     branchId: string,
     businessDateStr: string,
   ): Promise<number> {
-    const date = this.toRecordDate(businessDateStr);
-    const dayRow = await this.prisma.branch_day_sessions.findUnique({
-      where: {
-        branch_id_session_date: {
-          branch_id: branchId,
-          session_date: date,
-        },
-      },
-      select: { is_closed: true },
-    });
-    this.logger.warn(
-      `[ResolveSuggestedStart] branch=${branchId} date=${businessDateStr} isClosed=${dayRow?.is_closed ?? null}`,
-    );
-    if (dayRow?.is_closed) {
-      const confirmedClosing =
-        await this.financeDailyBalance.confirmedClosingBalanceForBusinessDate(
-          branchId,
-          businessDateStr,
-        );
-      if (confirmedClosing != null) {
-        this.logger.warn(
-          `[ResolveSuggestedStart] isClosed=true confirmedClosing=${confirmedClosing}`,
-        );
-        return confirmedClosing;
-      }
-
-      const yesterdayStr = addManilaCalendarDays(businessDateStr, -1);
-      const priorDayEnding =
-        await this.financeDailyBalance.ledgerBookEndingForBusinessDate(
-          branchId,
-          yesterdayStr,
-        );
-      const fullNet = await this.financeDailyBalance.fullDayOperationalNetCash(
-        branchId,
-        businessDateStr,
-      );
-      const result = Math.max(0, Number((priorDayEnding + fullNet).toFixed(2)));
-      this.logger.warn(
-        `[ResolveSuggestedStart] isClosed=true (ledger fallback) priorDayEnding=${priorDayEnding} fullNet=${fullNet} result=${result}`,
-      );
-      return result;
-    }
-    const fallback = await this.computeSuggestedStartingBalance(
+    const amount = await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
       branchId,
       businessDateStr,
     );
-    this.logger.warn(
-      `[ResolveSuggestedStart] isClosed=false fallback=${fallback}`,
+    this.logger.debug(
+      `[ResolveSuggestedStart] branch=${branchId} date=${businessDateStr} amount=${amount}`,
     );
-    return Number(Number(fallback).toFixed(2));
+    return Number(Number(amount).toFixed(2));
   }
 
   async getSnapshot(branchId: string): Promise<BranchBusinessSessionSnapshot> {
@@ -625,10 +570,17 @@ export class BranchDaySessionService {
           closeCutoff,
         );
 
+      const systemEnding =
+        await this.financeDailyBalance.computeOpenSessionBookEnding(
+          params.branchId,
+          closeDateStr,
+          tx,
+        );
+
       const persistConfirmed =
         params.physicalEndingAmount != null
           ? Number(params.physicalEndingAmount.toFixed(2))
-          : 0;
+          : Number((systemEnding ?? 0).toFixed(2));
 
       const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
         tx,

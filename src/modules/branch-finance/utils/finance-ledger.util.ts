@@ -75,3 +75,16 @@ export function operationalNetFromRows(
   }
   return Number(net.toFixed(2));
 }
+
+/** Max of basis chain, prior close + today's net, and stored daily_balances ending (pre–Start Day). */
+export function mergeExpectedOpeningCashAmounts(
+  basisAmount: number,
+  priorClose: number,
+  todayNet: number,
+  todayDbEnding: number,
+): number {
+  const priorPlusToday = Number((priorClose + todayNet).toFixed(2));
+  return Number(
+    Math.max(basisAmount, priorPlusToday, todayDbEnding).toFixed(2),
+  );
+}

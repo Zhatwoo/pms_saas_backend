@@ -12,6 +12,7 @@ import {
   isFundTransferBookRow,
   isInboundBranchCashFundTransferRow,
   isJournalPurposeStartEnd,
+  mergeExpectedOpeningCashAmounts,
   operationalNetFromRows,
 } from '../utils/finance-ledger.util';
 import { BranchFinanceSessionGateService } from './branch-finance-session-gate.service';
@@ -27,6 +28,15 @@ type Tx = FinanceDailyBalanceTx;
 @Injectable()
 export class FinanceDailyBalanceService {
   private readonly logger = new Logger(FinanceDailyBalanceService.name);
+  private readonly fullDayNetCache = new Map<
+    string,
+    { at: number; value: number }
+  >();
+  private readonly expectedOpeningCache = new Map<
+    string,
+    { at: number; value: number }
+  >();
+  private static readonly LEDGER_READ_CACHE_MS = 8000;
 
   private get db(): any {
     return this.prisma as any;
@@ -754,6 +764,13 @@ export class FinanceDailyBalanceService {
     businessDateStr: string,
     opts?: { environment?: string },
   ): Promise<number> {
+    const cacheKey = `${branchId}:${businessDateStr}:${opts?.environment ?? ''}`;
+    const cached = this.fullDayNetCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.at < FinanceDailyBalanceService.LEDGER_READ_CACHE_MS) {
+      return cached.value;
+    }
+
     const date = this.toRecordDate(businessDateStr);
     const rows = await this.db.transactions.findMany({
       where: {
@@ -777,9 +794,10 @@ export class FinanceDailyBalanceService {
       opts,
     );
     const net = Number(operationalNetFromRows(filtered).toFixed(2));
-    this.logger.warn(
+    this.logger.debug(
       `[FullDayNet] branch=${branchId} date=${businessDateStr} rowCount=${rows.length} net=${net} rows=${JSON.stringify(rows)}`,
     );
+    this.fullDayNetCache.set(cacheKey, { at: now, value: net });
     // No receipt-status filter here: the employee physically counts all cash on hand,
     // including fund transfers that arrived before their session opened. The suggestion
     // is informational; the employee's confirmed count is always authoritative.
@@ -864,15 +882,22 @@ export class FinanceDailyBalanceService {
     } else if (row) {
       start = Number(this.dec(row.starting_balance).toFixed(2));
     } else {
-      const b = await this.db.branches.findUnique({
-        where: { id: branchId },
-        select: { opening_cash_balance: true },
-      });
-      start = Number(this.dec(b?.opening_cash_balance).toFixed(2));
+      start = await this.priorBookEndingBeforeDateInTx(
+        this.db,
+        branchId,
+        date,
+      );
     }
 
     if (daySession?.is_closed && row?.ending_balance != null) {
-      return Number(this.dec(row.ending_balance).toFixed(2));
+      const stored = Number(this.dec(row.ending_balance).toFixed(2));
+      const priorClose = await this.priorBookEndingBeforeDateInTx(
+        this.db,
+        branchId,
+        date,
+      );
+      const bookWithTodayActivity = Number((priorClose + net).toFixed(2));
+      return Math.max(stored, bookWithTodayActivity);
     }
 
     const computed = Number((start + net).toFixed(2));
@@ -926,6 +951,20 @@ export class FinanceDailyBalanceService {
             );
             cursor = addManilaCalendarDays(cursor, 1);
           }
+        } else if (sessionDateStr === businessDateStr) {
+          const priorClose = await this.priorBookEndingBeforeDateInTx(
+            this.db,
+            branchId,
+            bizDate,
+          );
+          const todayNet = await this.fullDayOperationalNetCash(
+            branchId,
+            businessDateStr,
+          );
+          amount = Math.max(
+            amount,
+            Number((priorClose + todayNet).toFixed(2)),
+          );
         }
 
         const todayDb = await this.db.daily_balances.findUnique({
@@ -991,7 +1030,11 @@ export class FinanceDailyBalanceService {
         await this.ledgerBookEndingForBusinessDate(branchId, priorStr)
       ).toFixed(2),
     );
-    const todayRow = await this.db.daily_balances.findUnique({
+    const todayNet = await this.fullDayOperationalNetCash(
+      branchId,
+      businessDateStr,
+    );
+    const todayDb = await this.db.daily_balances.findUnique({
       where: {
         branch_id_record_date: {
           branch_id: branchId,
@@ -1000,24 +1043,165 @@ export class FinanceDailyBalanceService {
       },
       select: { ending_balance: true },
     });
-    const todayEnding =
-      todayRow?.ending_balance != null
-        ? Number(this.dec(todayRow.ending_balance).toFixed(2))
+    const todayDbEnding =
+      todayDb?.ending_balance != null
+        ? Number(this.dec(todayDb.ending_balance).toFixed(2))
         : 0;
-    const todayNet = Number(
-      (await this.fullDayOperationalNetCash(branchId, businessDateStr)).toFixed(
-        2,
-      ),
-    );
     return {
       amount: Math.max(
         openingCapital,
         ledgerPrior,
-        todayEnding,
-        Number((openingCapital + todayNet).toFixed(2)),
+        Number((ledgerPrior + todayNet).toFixed(2)),
+        todayDbEnding,
       ),
       closedSessionRecordDate: null,
     };
+  }
+
+  /**
+   * Employee-confirmed End Day closing from the most recent closed session on or before
+   * `businessDateStr`, plus operational net on later calendar days (e.g. pre-open fund transfer).
+   */
+  async lastClosedEndDayAmountForOpening(
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<{ amount: number; closedSessionDate: string | null }> {
+    const bizDate = this.toRecordDate(businessDateStr);
+
+    const lastClosed = await this.db.branch_day_sessions.findFirst({
+      where: {
+        branch_id: branchId,
+        is_closed: true,
+        session_date: { lte: bizDate },
+      },
+      orderBy: [{ session_date: 'desc' }, { closed_at: 'desc' }],
+      select: { session_date: true },
+    });
+
+    if (!lastClosed) {
+      return { amount: 0, closedSessionDate: null };
+    }
+
+    const sessionDateStr = lastClosed.session_date
+      .toISOString()
+      .slice(0, 10);
+
+    const balanceRow = await this.db.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: {
+          branch_id: branchId,
+          record_date: lastClosed.session_date,
+        },
+      },
+      select: { ending_balance: true },
+    });
+
+    let amount =
+      balanceRow?.ending_balance != null
+        ? Number(this.dec(balanceRow.ending_balance).toFixed(2))
+        : Number(
+            (
+              await this.ledgerBookEndingForBusinessDate(
+                branchId,
+                sessionDateStr,
+              )
+            ).toFixed(2),
+          );
+
+    if (sessionDateStr < businessDateStr) {
+      let cursor = addManilaCalendarDays(sessionDateStr, 1);
+      while (cursor <= businessDateStr) {
+        amount = Number(
+          (
+            amount + (await this.fullDayOperationalNetCash(branchId, cursor))
+          ).toFixed(2),
+        );
+        cursor = addManilaCalendarDays(cursor, 1);
+      }
+    } else if (sessionDateStr === businessDateStr) {
+      const priorClose = await this.priorBookEndingBeforeDateInTx(
+        this.db,
+        branchId,
+        bizDate,
+      );
+      const todayNet = await this.fullDayOperationalNetCash(
+        branchId,
+        businessDateStr,
+      );
+      amount = Math.max(amount, Number((priorClose + todayNet).toFixed(2)));
+    }
+
+    return { amount, closedSessionDate: sessionDateStr };
+  }
+
+  /**
+   * Canonical expected physical cash before Start Day is submitted — includes confirmed fund
+   * transfers and same-day activity not yet reflected in the last closed session ending.
+   */
+  async expectedOpeningCashBeforeStartDay(
+    branchId: string,
+    businessDateStr: string,
+  ): Promise<number> {
+    const cacheKey = `${branchId}:${businessDateStr}`;
+    const cached = this.expectedOpeningCache.get(cacheKey);
+    const now = Date.now();
+    if (
+      cached &&
+      now - cached.at < FinanceDailyBalanceService.LEDGER_READ_CACHE_MS
+    ) {
+      return cached.value;
+    }
+
+    const bizDate = this.toRecordDate(businessDateStr);
+
+    const fromLastEndDay = await this.lastClosedEndDayAmountForOpening(
+      branchId,
+      businessDateStr,
+    );
+
+    const basis = await this.suggestedStartingBasisForBusinessDate(
+      branchId,
+      businessDateStr,
+    );
+
+    const priorClose = await this.priorBookEndingBeforeDateInTx(
+      this.db,
+      branchId,
+      bizDate,
+    );
+    const todayNet = await this.fullDayOperationalNetCash(
+      branchId,
+      businessDateStr,
+    );
+
+    const todayDb = await this.db.daily_balances.findUnique({
+      where: {
+        branch_id_record_date: {
+          branch_id: branchId,
+          record_date: bizDate,
+        },
+      },
+      select: { ending_balance: true },
+    });
+    const todayDbEnding =
+      todayDb?.ending_balance != null
+        ? Number(this.dec(todayDb.ending_balance).toFixed(2))
+        : 0;
+
+    const amount = mergeExpectedOpeningCashAmounts(
+      Math.max(basis.amount, fromLastEndDay.amount),
+      priorClose,
+      todayNet,
+      todayDbEnding,
+    );
+
+    this.logger.debug(
+      `[ExpectedOpeningCash] branch=${branchId} date=${businessDateStr} lastEndDay=${fromLastEndDay.amount} closedOn=${fromLastEndDay.closedSessionDate ?? 'none'} basis=${basis.amount} priorClose=${priorClose} todayNet=${todayNet} todayDb=${todayDbEnding} final=${amount}`,
+    );
+
+    const final = Number(amount.toFixed(2));
+    this.expectedOpeningCache.set(cacheKey, { at: now, value: final });
+    return final;
   }
 
   /**
@@ -1031,11 +1215,7 @@ export class FinanceDailyBalanceService {
     branchId: string,
     businessDateStr: string,
   ): Promise<number> {
-    const { amount } = await this.suggestedStartingBasisForBusinessDate(
-      branchId,
-      businessDateStr,
-    );
-    return amount;
+    return this.expectedOpeningCashBeforeStartDay(branchId, businessDateStr);
   }
 
   async sumOperationalNetCashInTx(
