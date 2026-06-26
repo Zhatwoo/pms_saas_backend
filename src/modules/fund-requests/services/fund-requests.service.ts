@@ -17,6 +17,7 @@ import {
 import { getPhCalendarDateString, getPhWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
+import { BranchDaySessionService } from '../../branch-finance/services/branch-day-session.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
@@ -171,6 +172,7 @@ export class FundRequestsService {
     private readonly notificationsService: NotificationsService,
     private readonly encryption: EncryptionService,
     private readonly financeDailyBalance: FinanceDailyBalanceService,
+    private readonly branchDaySession: BranchDaySessionService,
   ) {}
 
   /** Manila calendar date key YYYYMMDD for request/transfer numbering. */
@@ -449,7 +451,6 @@ export class FundRequestsService {
       .from(table)
       .select(column)
       .ilike(column, `${prefix}%`)
-      .eq('environment', getEnvironment(user))
       .order(column, { ascending: false })
       .limit(1);
 
@@ -464,6 +465,51 @@ export class FundRequestsService {
     const nextSeq = Number.isFinite(latestSeq) ? latestSeq + 1 : 1;
 
     return `${prefix}${String(nextSeq).padStart(3, '0')}`;
+  }
+
+  private async autoStartBranchDayFromIncomingFund(params: {
+    user: AuthenticatedUserProfile;
+    branchId: string | null | undefined;
+    businessDateStr: string;
+    amountReceived: number;
+  }): Promise<void> {
+    if (!params.branchId || params.amountReceived <= 0) {
+      return;
+    }
+
+    const needsStart = await this.branchDaySession.requiresStartingBalance(
+      params.branchId,
+    );
+    if (!needsStart) {
+      return;
+    }
+
+    const startingAmount =
+      await this.financeDailyBalance.suggestedStartingCashForBusinessDate(
+        params.branchId,
+        params.businessDateStr,
+      );
+    if (!Number.isFinite(startingAmount) || startingAmount <= 0) {
+      return;
+    }
+
+    try {
+      await this.branchDaySession.submitStartingBalance({
+        branchId: params.branchId,
+        actorUserId: params.user.id ?? null,
+        actorRole: params.user.role,
+        amount: Number(startingAmount.toFixed(2)),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        message.includes('BRANCH_STARTING_BALANCE_RACE') ||
+        message.includes('Starting balance was already submitted')
+      ) {
+        return;
+      }
+      throw err;
+    }
   }
 
   private async getFundRequestById(
@@ -1923,15 +1969,15 @@ export class FundRequestsService {
     let inboundTransactionId: string | null = null;
     let ownerOutTransactionId: string | null = null;
     let balanceDeltaApplied = 0;
+    const isExpenseTransfer = existing.purpose
+      ?.toLowerCase()
+      .includes('expense');
 
     try {
       const referenceId =
         this.compactText(existing.transfer_reference_no) ??
         this.compactText(existing.transfer_reference) ??
         existing.request_no;
-      const isExpenseTransfer = existing.purpose
-        ?.toLowerCase()
-        .includes('expense');
 
       if (!existing.source_branch_id && !isExpenseTransfer) {
         const ownerOutTransaction =
@@ -2041,6 +2087,25 @@ export class FundRequestsService {
         balanceDeltaApplied,
       });
       throw new InternalServerErrorException(error.message);
+    }
+
+    if (!isExpenseTransfer) {
+      try {
+        await this.autoStartBranchDayFromIncomingFund({
+          user,
+          branchId: existing.branch_id,
+          businessDateStr,
+          amountReceived: confirmedAmount,
+        });
+      } catch (autoStartErr) {
+        this.logger.warn(
+          `Auto-start after fund receipt skipped: ${
+            autoStartErr instanceof Error
+              ? autoStartErr.message
+              : String(autoStartErr)
+          }`,
+        );
+      }
     }
 
     const mapped = this.mapFundRequest(data);

@@ -562,7 +562,6 @@ export class FinanceDailyBalanceService {
       .filter(
         (r) =>
           !isJournalPurposeStartEnd(r.purpose) &&
-          !isFundTransferBookRow(r) &&
           this.txCreatedAtMs(r.created_at) < cutoffMs,
       )
       .map((r) => r.id);
