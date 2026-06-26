@@ -42,15 +42,21 @@ export class OpeningChecklistGateService {
       }),
     ]);
 
+    /** End Day closes the branch session — staff must Start Day again even if daily_opening still exists. */
+    if (daySession?.is_closed === true) {
+      return false;
+    }
+
+    /** Starting cash done but inventory audit not yet submitted. */
+    if (opening?.status === 'pending') {
+      return false;
+    }
+
     if (daySession && !daySession.is_closed) {
       return true;
     }
 
     if (opening?.status === 'completed') {
-      return true;
-    }
-
-    if (opening?.status === 'pending') {
       return true;
     }
 

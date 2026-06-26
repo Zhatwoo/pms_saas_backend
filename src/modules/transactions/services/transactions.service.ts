@@ -17,7 +17,7 @@ import {
   requireBranchId,
 } from '../../../common/utils/authorization.util';
 import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
+import { getPhCalendarDateString, getPhWallClockTimeString, normalizeWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { RewardsService } from '../../rewards/services/rewards.service';
@@ -161,7 +161,7 @@ export class TransactionsService implements OnModuleInit {
   }
 
   private toDbTime(value?: string | null): Date {
-    const time = value || new Date().toTimeString().slice(0, 8);
+    const time = value || getPhWallClockTimeString();
     return new Date(`1970-01-01T${time}.000Z`);
   }
 
@@ -170,7 +170,7 @@ export class TransactionsService implements OnModuleInit {
   }
 
   private formatTime(value?: Date | null): string | null {
-    return value ? value.toISOString().slice(11, 19) : null;
+    return normalizeWallClockTimeString(value);
   }
 
   private toNumber(value: any | number | string | null | undefined) {
@@ -528,7 +528,7 @@ export class TransactionsService implements OnModuleInit {
       related_pawned_item_id: dtoClean.related_pawned_item_id ?? null,
       purpose,
       transaction_date: this.toDbDate(getPhCalendarDateString()),
-      transaction_time: this.toDbTime(now.toTimeString().slice(0, 8)),
+      transaction_time: this.toDbTime(getPhWallClockTimeString(now)),
       created_by_user_id: user.id ?? null,
       return_amount: amounts.returnAmount,
       storage_fee: amounts.storageFee,
@@ -759,7 +759,7 @@ export class TransactionsService implements OnModuleInit {
           if (range === 'weekly') start.setDate(start.getDate() - 7);
           if (range === 'monthly') start.setMonth(start.getMonth() - 1);
           where.transaction_date = {
-            gte: this.toDbDate(start.toISOString().slice(0, 10)),
+            gte: this.toDbDate(getPhCalendarDateString(start)),
           };
         }
       } else if (range === 'daily' || !range) {
@@ -965,10 +965,20 @@ export class TransactionsService implements OnModuleInit {
       stats.sessionOpenedAt = sessionOpenedAt;
       stats.sealedTransactionIds = sessionRow?.sealed_transaction_ids ?? [];
 
-      if (balanceData && sessionRow?.is_closed) {
-        const bookAtClose = this.toNumber(balanceData.ending_balance);
-        stats.startingBalance = bookAtClose;
-        stats.endingBalance = bookAtClose;
+      const needsStart = !sessionRow || sessionRow.is_closed;
+      if (needsStart) {
+        const expected =
+          await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
+            scoped,
+            balanceDateStr,
+          );
+        const storedClose =
+          balanceData?.ending_balance != null && sessionRow?.is_closed
+            ? this.toNumber(balanceData.ending_balance)
+            : 0;
+        const carryForward = Math.max(storedClose, expected);
+        stats.startingBalance = carryForward;
+        stats.endingBalance = carryForward;
         return stats;
       }
 

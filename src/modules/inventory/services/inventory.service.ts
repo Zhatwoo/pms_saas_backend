@@ -14,7 +14,7 @@ import {
   inventoryBranchFilters,
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
+import { getPhCalendarDateString, getPhWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import {
@@ -1493,7 +1493,7 @@ export class InventoryService {
         branch: item.branch ?? 'Unknown',
         purpose: 'Sold Item',
         transaction_date: today,
-        transaction_time: new Date().toTimeString().slice(0, 8),
+        transaction_time: getPhWallClockTimeString(),
         cash_in: soldPrice,
         cash_out: 0,
         unit: item.item_name ?? null,
