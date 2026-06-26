@@ -91,4 +91,40 @@ export class OpeningChecklistGateService {
 
     return false;
   }
+
+  /**
+   * True during INVENTORY_AUDIT (starting cash submitted, audit not yet completed).
+   * Lets inventory checklist/tally APIs run while other modules stay gated.
+   */
+  async isInventoryAuditAllowed(branchId: string): Promise<boolean> {
+    const todayStr = getPhCalendarDateString();
+    const openingDate = this.toRecordDate(todayStr);
+
+    const [opening, daySession] = await Promise.all([
+      this.prisma.daily_opening.findUnique({
+        where: {
+          branch_id_opening_date: {
+            branch_id: branchId,
+            opening_date: openingDate,
+          },
+        },
+        select: { status: true },
+      }),
+      this.prisma.branch_day_sessions.findUnique({
+        where: {
+          branch_id_session_date: {
+            branch_id: branchId,
+            session_date: openingDate,
+          },
+        },
+        select: { is_closed: true },
+      }),
+    ]);
+
+    if (daySession?.is_closed === true) {
+      return false;
+    }
+
+    return opening?.status === 'pending';
+  }
 }

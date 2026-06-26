@@ -17,7 +17,7 @@ import {
   requireBranchId,
 } from '../../../common/utils/authorization.util';
 import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString, getPhWallClockTimeString, normalizeWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
+import { getPhCalendarDateString, getPhWallClockTimeString, normalizeWallClockTimeString, resolveTransactionCalendarDate, resolveTransactionWallClockTime } from '../../../common/utils/branch-calendar-date.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { RewardsService } from '../../rewards/services/rewards.service';
@@ -507,7 +507,6 @@ export class TransactionsService implements OnModuleInit {
     }
 
     const transactionNo = `${purpose.substring(0, 2).toUpperCase()}-${Date.now()}`;
-    const now = new Date();
 
     let idPhotoUrl = dtoClean.id_photo ?? null;
     if (idPhotoUrl && idPhotoUrl.startsWith('data:image/')) {
@@ -520,6 +519,16 @@ export class TransactionsService implements OnModuleInit {
       );
     }
 
+    const recordedAt = new Date();
+    const transactionDate = resolveTransactionCalendarDate(
+      dtoClean.transaction_date,
+      recordedAt,
+    );
+    const transactionTime = resolveTransactionWallClockTime(
+      dtoClean.transaction_time,
+      recordedAt,
+    );
+
     const payload: any = {
       transaction_no: transactionNo,
       branch_id: branchId,
@@ -527,8 +536,8 @@ export class TransactionsService implements OnModuleInit {
       customer_id: dtoClean.customer_id ?? null,
       related_pawned_item_id: dtoClean.related_pawned_item_id ?? null,
       purpose,
-      transaction_date: this.toDbDate(getPhCalendarDateString()),
-      transaction_time: this.toDbTime(getPhWallClockTimeString(now)),
+      transaction_date: this.toDbDate(transactionDate),
+      transaction_time: this.toDbTime(transactionTime),
       created_by_user_id: user.id ?? null,
       return_amount: amounts.returnAmount,
       storage_fee: amounts.storageFee,
