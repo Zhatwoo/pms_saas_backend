@@ -11,7 +11,7 @@ import {
   Patch,
 } from '@nestjs/common';
 import { InventoryService } from '../services/inventory.service';
-import { Public, Roles } from '../../../common/decorators';
+import { Public, Roles, AllowOpeningInventoryAudit } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { RequiresOpeningChecklist } from '../../../common/decorators';
@@ -22,6 +22,7 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @AllowOpeningInventoryAudit()
   @Get('pawned')
   findAllPawned(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -83,6 +84,7 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @AllowOpeningInventoryAudit()
   @Get('item/:itemId')
   findByItemId(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -263,6 +265,7 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @AllowOpeningInventoryAudit()
   @Post('pawned/qr-tally')
   qrTally(
     @Req() req: { user: AuthenticatedUserProfile },
@@ -310,6 +313,7 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @AllowOpeningInventoryAudit()
   @Get('for-sale')
   findAllForSale(
     @Req() req: { user: AuthenticatedUserProfile },

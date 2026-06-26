@@ -19,7 +19,7 @@ import {
   getEnvironment,
 } from '../../../common/utils/authorization.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
-import { getPhCalendarDateString, getPhWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
+import { getPhCalendarDateString, getPhWallClockTimeString, resolveTransactionCalendarDate, resolveTransactionWallClockTime } from '../../../common/utils/branch-calendar-date.util';
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
@@ -596,13 +596,23 @@ export class PawnTicketsService {
             select: pawnedItemSelect,
           });
 
+          const recordedAt = new Date();
+          const transactionDate = resolveTransactionCalendarDate(
+            dto.transaction?.transactionDate,
+            recordedAt,
+          );
+          const transactionTime = resolveTransactionWallClockTime(
+            dto.transaction?.transactionTime,
+            recordedAt,
+          );
+
           const transactionPayload = {
             transaction_no: this.generateTransactionNo(),
             branch_id: branchId,
             branch: branchName,
             purpose: 'Pawn',
-            transaction_date: this.toDbDate(getPhCalendarDateString()),
-            transaction_time: this.toDbTime(getPhWallClockTimeString()),
+            transaction_date: this.toDbDate(transactionDate),
+            transaction_time: this.toDbTime(transactionTime),
             // Pawn disbursement is a cash outflow from branch to customer.
             cash_in: 0,
             cash_out: pawnAmount,

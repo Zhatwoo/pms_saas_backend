@@ -83,6 +83,29 @@ export function normalizeWallClockTimeString(
   return null;
 }
 
+export function resolveTransactionWallClockTime(
+  clientValue?: string | null,
+  fallbackDate: Date = new Date(),
+): string {
+  const normalized = normalizeWallClockTimeString(clientValue);
+  if (normalized) {
+    return normalized;
+  }
+  return getPhWallClockTimeString(fallbackDate);
+}
+
+/** YYYY-MM-DD for `transactions.transaction_date`; prefers validated client value. */
+export function resolveTransactionCalendarDate(
+  clientValue?: string | null,
+  fallbackDate: Date = new Date(),
+): string {
+  const raw = String(clientValue ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+  return getPhCalendarDateString(fallbackDate);
+}
+
 /** Add whole calendar days to a YYYY-MM-DD string (civil date arithmetic in UTC components). */
 export function addManilaCalendarDays(dateStr: string, deltaDays: number): string {
   const [y, mo, d] = dateStr.split('-').map((x) => parseInt(x, 10));

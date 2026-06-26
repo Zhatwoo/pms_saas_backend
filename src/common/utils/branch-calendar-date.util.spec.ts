@@ -2,6 +2,8 @@ import {
   addManilaCalendarDays,
   getPhCalendarDateString,
   normalizeWallClockTimeString,
+  resolveTransactionCalendarDate,
+  resolveTransactionWallClockTime,
 } from './branch-calendar-date.util';
 
 describe('getPhCalendarDateString', () => {
@@ -33,6 +35,29 @@ describe('normalizeWallClockTimeString', () => {
     expect(normalizeWallClockTimeString(null)).toBeNull();
     expect(normalizeWallClockTimeString('')).toBeNull();
     expect(normalizeWallClockTimeString('not-a-time')).toBeNull();
+  });
+});
+
+describe('resolveTransactionWallClockTime', () => {
+  it('uses normalized client HH:mm:ss when provided', () => {
+    expect(resolveTransactionWallClockTime('10:55:20')).toBe('10:55:20');
+    expect(resolveTransactionWallClockTime('9:05')).toBe('09:05:00');
+  });
+
+  it('falls back to Manila wall clock when client value is invalid', () => {
+    const at = new Date('2026-06-26T02:55:20.000Z');
+    expect(resolveTransactionWallClockTime('bad', at)).toBe('10:55:20');
+  });
+});
+
+describe('resolveTransactionCalendarDate', () => {
+  it('uses validated client YYYY-MM-DD when provided', () => {
+    expect(resolveTransactionCalendarDate('2026-06-26')).toBe('2026-06-26');
+  });
+
+  it('falls back to Manila calendar date when client value is invalid', () => {
+    const at = new Date('2026-06-25T16:00:00.000Z');
+    expect(resolveTransactionCalendarDate('invalid', at)).toBe('2026-06-26');
   });
 });
 
