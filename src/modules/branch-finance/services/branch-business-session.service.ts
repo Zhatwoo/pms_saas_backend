@@ -19,6 +19,10 @@ import {
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import { BranchSessionStatus } from '../constants/branch-session-status';
 import { FinanceDailyBalanceService } from './finance-daily-balance.service';
+import {
+  type DataEnvironment,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -77,6 +81,32 @@ export class BranchBusinessSessionService {
 
   private toDbTime(value: string): Date {
     return new Date(`1970-01-01T${value}.000Z`);
+  }
+
+  private async resolveActorEnvironmentFields(
+    tx: Tx,
+    actorUserId?: string | null,
+  ): Promise<{ environment: DataEnvironment; created_by: string | null }> {
+    if (!actorUserId) {
+      return { environment: 'production', created_by: null };
+    }
+
+    const actor = await tx.users.findUnique({
+      where: { id: actorUserId },
+      select: { auth_id: true, email: true, is_developer: true },
+    });
+
+    if (!actor) {
+      return { environment: 'production', created_by: null };
+    }
+
+    return {
+      environment: getEnvironment({
+        email: actor.email,
+        isDeveloper: actor.is_developer,
+      }),
+      created_by: actor.auth_id,
+    };
   }
 
   private dec(n: unknown): Prisma.Decimal {
@@ -148,12 +178,17 @@ export class BranchBusinessSessionService {
     const date = this.toRecordDate(params.businessDateStr);
     const now = new Date();
     const timeStr = getPhWallClockTimeString(now);
+    const environmentFields = await this.resolveActorEnvironmentFields(
+      tx,
+      params.createdByUserId,
+    );
 
     const existing = await tx.transactions.findFirst({
       where: {
         branch_id: params.branchId,
         transaction_date: date,
         purpose: params.purpose,
+        environment: environmentFields.environment,
       },
       select: { id: true },
     });
@@ -168,6 +203,7 @@ export class BranchBusinessSessionService {
       cash_out: new Prisma.Decimal(0),
       details: params.details,
       created_by_user_id: params.createdByUserId ?? null,
+      ...environmentFields,
       updated_at: now,
     };
 

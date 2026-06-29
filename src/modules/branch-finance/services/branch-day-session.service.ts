@@ -14,6 +14,10 @@ import {
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
 import type { BranchBusinessSessionSnapshot } from './branch-business-session.service';
 import { FinanceDailyBalanceService } from './finance-daily-balance.service';
+import {
+  type DataEnvironment,
+  getEnvironment,
+} from '../../../common/utils/authorization.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -40,6 +44,32 @@ export class BranchDaySessionService {
 
   private dec(n: unknown): Prisma.Decimal {
     return new Prisma.Decimal(String(n ?? 0));
+  }
+
+  private async resolveActorEnvironmentFields(
+    tx: Tx,
+    actorUserId?: string | null,
+  ): Promise<{ environment: DataEnvironment; created_by: string | null }> {
+    if (!actorUserId) {
+      return { environment: 'production', created_by: null };
+    }
+
+    const actor = await tx.users.findUnique({
+      where: { id: actorUserId },
+      select: { auth_id: true, email: true, is_developer: true },
+    });
+
+    if (!actor) {
+      return { environment: 'production', created_by: null };
+    }
+
+    return {
+      environment: getEnvironment({
+        email: actor.email,
+        isDeveloper: actor.is_developer,
+      }),
+      created_by: actor.auth_id,
+    };
   }
 
   /** `daily_opening` may be absent on older DBs; end-day must still close the session. */
@@ -284,12 +314,17 @@ export class BranchDaySessionService {
     const date = this.toRecordDate(params.businessDateStr);
     const now = new Date();
     const timeStr = getPhWallClockTimeString(now);
+    const environmentFields = await this.resolveActorEnvironmentFields(
+      tx,
+      params.createdByUserId,
+    );
 
     const existing = await tx.transactions.findFirst({
       where: {
         branch_id: params.branchId,
         transaction_date: date,
         purpose: params.purpose,
+        environment: environmentFields.environment,
       },
       select: { id: true },
     });
@@ -304,6 +339,7 @@ export class BranchDaySessionService {
       cash_out: new Prisma.Decimal(0),
       details: params.details,
       created_by_user_id: params.createdByUserId ?? null,
+      ...environmentFields,
       updated_at: now,
     };
 
