@@ -41,6 +41,12 @@ export class BranchesController {
     return this.branchesService.getOverviewStats(req.user);
   }
 
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Get('transfer-destinations')
+  findTransferDestinations(@Req() req: { user: AuthenticatedUserProfile }) {
+    return this.branchesService.findTransferDestinations(req.user);
+  }
+
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get(':id')
   findOne(

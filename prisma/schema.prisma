@@ -1178,6 +1178,31 @@ model sale_items {
   @@schema("public")
 }
 
+model transfer_items {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sale_item_id         String    @db.Uuid
+  item_id              String
+  item_name            String
+  source_branch_id     String    @db.Uuid
+  target_branch_id     String    @db.Uuid
+  requested_by_user_id String?   @db.Uuid
+  received_by_user_id  String?   @db.Uuid
+  status               String    @default("pending")
+  item_included        String?
+  notes                String?
+  requested_at         DateTime  @default(now()) @db.Timestamptz(6)
+  received_at          DateTime? @db.Timestamptz(6)
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime  @default(now()) @db.Timestamptz(6)
+  environment          String    @default("production") @db.VarChar(20)
+  created_by           String?   @db.Uuid
+
+  @@index([sale_item_id], map: "idx_transfer_items_sale_item_id")
+  @@index([source_branch_id, status, requested_at(sort: Desc)], map: "idx_transfer_items_source_branch_status")
+  @@index([target_branch_id, status, requested_at(sort: Desc)], map: "idx_transfer_items_target_branch_status")
+  @@schema("public")
+}
+
 model rewards {
   id                         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                       String

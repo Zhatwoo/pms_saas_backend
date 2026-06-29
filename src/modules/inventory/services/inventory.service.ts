@@ -1243,9 +1243,10 @@ export class InventoryService {
         id: item.id,
         itemId: item.item_id,
         itemName: item.item_name,
-        category: item.category,
-        branch: item.branch,
-        availableDate: item.available_date,
+          category: item.category,
+          branch: item.branch,
+          branchId: item.branch_id,
+          availableDate: item.available_date,
         price: item.price,
         stockLevel: item.stock_level || 1,
         status: item.status || 'Available',
@@ -1519,6 +1520,277 @@ export class InventoryService {
 
     return {
       message: 'Item marked as sold, amount added to branch balance',
+    };
+  }
+
+  async findTransferItems(user: UserWithBranch, branch?: string) {
+    const client = this.supabase.getClient();
+    const { branchId } = inventoryBranchFilters(user, branch);
+
+    let query = client
+      .from('transfer_items')
+      .select('*')
+      .eq('environment', getEnvironment(user))
+      .order('requested_at', { ascending: false });
+
+    if (branchId) {
+      query = query.or(
+        `source_branch_id.eq.${branchId},target_branch_id.eq.${branchId}`,
+      );
+    }
+
+    const { data, error } = await query.limit(100);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const transferRows = data || [];
+    const branchIds = Array.from(
+      new Set(
+        transferRows
+          .flatMap((row: any) => [row.source_branch_id, row.target_branch_id])
+          .filter(Boolean),
+      ),
+    );
+
+    const branchLookup = new Map<string, string>();
+    if (branchIds.length > 0) {
+      const { data: branchRows, error: branchErr } = await client
+        .from('branches')
+        .select('id, name')
+        .in('id', branchIds)
+        .eq('environment', getEnvironment(user));
+      if (branchErr) {
+        throw new InternalServerErrorException(branchErr.message);
+      }
+      for (const branchRow of branchRows || []) {
+        branchLookup.set(String(branchRow.id), branchRow.name || 'Branch');
+      }
+    }
+
+    return {
+      transfers: transferRows.map((row: any) => ({
+        id: row.id,
+        saleItemId: row.sale_item_id,
+        itemId: row.item_id,
+        itemName: row.item_name,
+        sourceBranchId: row.source_branch_id,
+        sourceBranchName:
+          branchLookup.get(String(row.source_branch_id)) || 'Source Branch',
+        targetBranchId: row.target_branch_id,
+        targetBranchName:
+          branchLookup.get(String(row.target_branch_id)) || 'Target Branch',
+        status: row.status,
+        itemIncluded: row.item_included || '',
+        notes: row.notes || '',
+        requestedAt: row.requested_at,
+        receivedAt: row.received_at,
+      })),
+    };
+  }
+
+  async requestItemTransfer(
+    user: UserWithBranch,
+    itemId: string,
+    dto: { target_branch_id?: string; item_included?: string; notes?: string },
+  ) {
+    const targetBranchId = String(dto.target_branch_id || '').trim();
+    if (!targetBranchId) {
+      throw new BadRequestException('Target branch is required');
+    }
+
+    const item = await this.findOneForSale(user, itemId);
+    const sourceBranchId = String(item.branch_id || '');
+    if (!sourceBranchId) {
+      throw new BadRequestException('Item has no source branch');
+    }
+    if (sourceBranchId === targetBranchId) {
+      throw new BadRequestException('Cannot transfer to the same branch');
+    }
+    if (String(item.status || '').toLowerCase() !== 'available') {
+      throw new ConflictException('Only available sale items can be transferred');
+    }
+
+    const client = this.supabase.getClient();
+    const [{ data: targetBranch, error: targetErr }, { data: sourceBranch }] =
+      await Promise.all([
+        client
+          .from('branches')
+          .select('id, name')
+          .eq('id', targetBranchId)
+          .eq('environment', getEnvironment(user))
+          .single(),
+        client
+          .from('branches')
+          .select('id, name')
+          .eq('id', sourceBranchId)
+          .eq('environment', getEnvironment(user))
+          .maybeSingle(),
+      ]);
+
+    if (targetErr || !targetBranch) {
+      throw new BadRequestException('Target branch was not found');
+    }
+
+    const { data: existingPending, error: pendingErr } = await client
+      .from('transfer_items')
+      .select('id')
+      .eq('sale_item_id', itemId)
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user))
+      .maybeSingle();
+
+    if (pendingErr) {
+      throw new InternalServerErrorException(pendingErr.message);
+    }
+    if (existingPending) {
+      throw new ConflictException('This item already has a pending transfer');
+    }
+
+    const { data: transfer, error: insertErr } = await client
+      .from('transfer_items')
+      .insert([
+        {
+          sale_item_id: itemId,
+          item_id: item.item_id,
+          item_name: item.item_name,
+          source_branch_id: sourceBranchId,
+          target_branch_id: targetBranchId,
+          requested_by_user_id: user.id ?? null,
+          status: 'pending',
+          item_included: dto.item_included || null,
+          notes: dto.notes || null,
+          ...environmentCreateFields(user),
+        },
+      ])
+      .select()
+      .single();
+
+    if (insertErr) {
+      throw new InternalServerErrorException(insertErr.message);
+    }
+
+    const { error: updateErr } = await client
+      .from('sale_items')
+      .update({ status: 'Transfer Pending' })
+      .eq('id', itemId)
+      .eq('environment', getEnvironment(user));
+    if (updateErr) {
+      console.warn(
+        '[InventoryService] Transfer request created, but sale item status was not updated',
+        updateErr,
+      );
+    }
+
+    const { error: txErr } = await client.from('transactions').insert([
+      {
+        transaction_no: `TRF-${Date.now()}`,
+        branch_id: sourceBranchId,
+        branch: sourceBranch?.name || item.branch || 'Source Branch',
+        purpose: 'Transfer Item',
+        transaction_date: getPhCalendarDateString(),
+        transaction_time: getPhWallClockTimeString(),
+        cash_in: 0,
+        cash_out: 0,
+        unit: item.item_name ?? null,
+        unit_code: item.item_id ?? null,
+        details: `Item transfer requested to ${targetBranch.name}`,
+        related_sale_item_id: itemId,
+        ...environmentCreateFields(user),
+      },
+    ]);
+    if (txErr) {
+      console.warn(
+        '[InventoryService] Transfer request created, but transaction log was not written',
+        txErr,
+      );
+    }
+
+    return {
+      message: 'Item transfer requested and awaiting branch receipt',
+      transfer,
+    };
+  }
+
+  async receiveItemTransfer(user: UserWithBranch, transferId: string) {
+    const client = this.supabase.getClient();
+    const { data: transfer, error } = await client
+      .from('transfer_items')
+      .select('*')
+      .eq('id', transferId)
+      .eq('environment', getEnvironment(user))
+      .single();
+
+    if (error || !transfer) {
+      throw new NotFoundException('Transfer request not found');
+    }
+    if (transfer.status !== 'pending') {
+      throw new ConflictException('Transfer request has already been processed');
+    }
+
+    assertResourceBranch(user, transfer.target_branch_id);
+
+    const { data: targetBranch, error: targetErr } = await client
+      .from('branches')
+      .select('id, name')
+      .eq('id', transfer.target_branch_id)
+      .eq('environment', getEnvironment(user))
+      .single();
+    if (targetErr || !targetBranch) {
+      throw new BadRequestException('Target branch was not found');
+    }
+
+    const { error: itemErr } = await client
+      .from('sale_items')
+      .update({
+        branch_id: transfer.target_branch_id,
+        branch: targetBranch.name,
+        status: 'Available',
+      })
+      .eq('id', transfer.sale_item_id)
+      .eq('environment', getEnvironment(user));
+    if (itemErr) {
+      throw new InternalServerErrorException(itemErr.message);
+    }
+
+    const receivedAt = new Date().toISOString();
+    const { data: received, error: receiveErr } = await client
+      .from('transfer_items')
+      .update({
+        status: 'received',
+        received_by_user_id: user.id ?? null,
+        received_at: receivedAt,
+        updated_at: receivedAt,
+      })
+      .eq('id', transferId)
+      .eq('environment', getEnvironment(user))
+      .select()
+      .single();
+    if (receiveErr) {
+      throw new InternalServerErrorException(receiveErr.message);
+    }
+
+    await client.from('transactions').insert([
+      {
+        transaction_no: `RCV-${Date.now()}`,
+        branch_id: transfer.target_branch_id,
+        branch: targetBranch.name,
+        purpose: 'Transfer Item',
+        transaction_date: getPhCalendarDateString(),
+        transaction_time: getPhWallClockTimeString(),
+        cash_in: 0,
+        cash_out: 0,
+        unit: transfer.item_name ?? null,
+        unit_code: transfer.item_id ?? null,
+        details: 'Transferred item received by destination branch',
+        related_sale_item_id: transfer.sale_item_id,
+        ...environmentCreateFields(user),
+      },
+    ]);
+
+    return {
+      message: 'Transferred item received successfully',
+      transfer: received,
     };
   }
 
