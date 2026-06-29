@@ -137,6 +137,7 @@ const ALLOWED_TRANSACTION_PURPOSES = new Set([
   'Expense',
   'Cash Transfer',
   'Fund Transfer',
+  'Transfer Item',
 ]);
 
 @Injectable()
@@ -924,7 +925,10 @@ export class TransactionsService implements OnModuleInit {
       ).length,
       redeemed: rows.filter((t) => t.purpose === 'Redeem').length,
       transfer: rows.filter(
-        (t) => t.purpose === 'Fund Transfer' || t.purpose === 'Cash Transfer',
+        (t) =>
+          t.purpose === 'Fund Transfer' ||
+          t.purpose === 'Cash Transfer' ||
+          t.purpose === 'Transfer Item',
       ).length,
       startingBalance: 0,
       endingBalance: 0,

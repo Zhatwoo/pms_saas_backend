@@ -14,6 +14,7 @@ export enum TransactionPurpose {
   RESERVE_LAYAWAY = 'Reserve / Layaway',
   FUND_TRANSFER = 'Fund Transfer',
   CASH_TRANSFER = 'Cash Transfer',
+  TRANSFER_ITEM = 'Transfer Item',
   START = 'Start',
   END = 'End',
 }
@@ -38,6 +39,7 @@ export const JOURNAL_PURPOSES: ReadonlySet<string> = new Set([
 export const TRANSFER_PURPOSES: ReadonlySet<string> = new Set([
   TransactionPurpose.FUND_TRANSFER,
   TransactionPurpose.CASH_TRANSFER,
+  TransactionPurpose.TRANSFER_ITEM,
 ]);
 
 /**
