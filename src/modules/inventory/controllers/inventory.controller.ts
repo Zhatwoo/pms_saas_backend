@@ -338,15 +338,6 @@ export class InventoryController {
     });
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
-  @Get('transfers')
-  findTransferItems(
-    @Req() req: { user: AuthenticatedUserProfile },
-    @Query('branch') branch?: string,
-  ) {
-    return this.inventoryService.findTransferItems(req.user, branch);
-  }
-
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post('for-sale')
   createForSale(
@@ -375,30 +366,6 @@ export class InventoryController {
       dto.branch_id,
       dto.customer_id,
     );
-  }
-
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
-  @Post('for-sale/:id/transfer-request')
-  requestItemTransfer(
-    @Req() req: { user: AuthenticatedUserProfile },
-    @Param('id') id: string,
-    @Body()
-    dto: {
-      target_branch_id: string;
-      item_included?: string;
-      notes?: string;
-    },
-  ) {
-    return this.inventoryService.requestItemTransfer(req.user, id, dto);
-  }
-
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
-  @Post('transfers/:id/receive')
-  receiveItemTransfer(
-    @Req() req: { user: AuthenticatedUserProfile },
-    @Param('id') id: string,
-  ) {
-    return this.inventoryService.receiveItemTransfer(req.user, id);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

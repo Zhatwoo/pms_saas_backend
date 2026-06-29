@@ -263,34 +263,6 @@ export class BranchesService {
     }
   }
 
-  async findTransferDestinations(user: UserWithBranch) {
-    try {
-      const rows = await this.prisma.branches.findMany({
-        where: applyEnvironmentFilter(user, { status: 'Active' }),
-        select: this.branchCardSelect,
-        orderBy: { name: 'asc' },
-      });
-
-      return rows.map((row) =>
-        this.mapBranchFromDb(row as unknown as Record<string, unknown>),
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Could not load transfer destination branches';
-      this.logger.error(
-        `findTransferDestinations branches failed: ${message}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-      throw new InternalServerErrorException(
-        process.env.NODE_ENV !== 'production'
-          ? message
-          : 'Could not load destination branches',
-      );
-    }
-  }
-
   /** Public signup/site listing: active branches only. */
   async findActiveSummaries() {
     try {
