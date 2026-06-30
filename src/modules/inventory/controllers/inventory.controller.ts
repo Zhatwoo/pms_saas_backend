@@ -339,6 +339,7 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @AllowOpeningInventoryAudit()
   @Get('transfers')
   findTransferItems(
     @Req() req: { user: AuthenticatedUserProfile },

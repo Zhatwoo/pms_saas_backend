@@ -661,7 +661,7 @@ export class BranchDaySessionService {
   }
 
   /**
-   * Auto-close historical Manila sessions left open (midnight PH rollover).
+   * Auto-close open Manila sessions due for the 6 PM PH end-day sweep.
    */
   async autoCloseStaleOpenSessions(): Promise<
     Array<{
@@ -676,7 +676,7 @@ export class BranchDaySessionService {
 
     const stale = await this.prisma.branch_day_sessions.findMany({
       where: {
-        session_date: { lt: todayDate },
+        session_date: { lte: todayDate },
         is_closed: false,
       },
       select: { id: true, branch_id: true, session_date: true },
@@ -739,7 +739,7 @@ export class BranchDaySessionService {
             branchName: branch?.name ?? 'Unknown',
             businessDateStr: closeDateStr,
             purpose: TransactionPurpose.END,
-            details: `Branch business day auto-closed at Manila midnight — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
+            details: `Branch business day auto-closed at 6:00 PM Manila time — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
             createdByUserId: null,
           });
 

@@ -4,7 +4,7 @@ import { FinanceAuditService } from './services/finance-audit.service';
 import { BranchDaySessionService } from './services/branch-day-session.service';
 
 /**
- * At 00:00 Asia/Manila: close branch_day_sessions rows before today's Manila date that are still open.
+ * At 18:00 Asia/Manila: close open branch_day_sessions for the current Manila business date.
  */
 @Injectable()
 export class BranchFinanceEndDayCronService {
@@ -15,9 +15,9 @@ export class BranchFinanceEndDayCronService {
     private readonly financeAudit: FinanceAuditService,
   ) {}
 
-  @Cron('0 0 * * *', { timeZone: 'Asia/Manila' })
-  async handleManilaMidnight() {
-    this.logger.log('Running Manila midnight branch day-session sweep…');
+  @Cron('0 18 * * *', { timeZone: 'Asia/Manila' })
+  async handleManilaSixPm() {
+    this.logger.log('Running Manila 6 PM branch day-session sweep…');
 
     try {
       const rows = await this.branchDaySessions.autoCloseStaleOpenSessions();
@@ -34,14 +34,14 @@ export class BranchFinanceEndDayCronService {
       }
       if (rows.length > 0) {
         this.logger.log(
-          `Manila midnight sweep closed ${rows.length} stale branch day session(s).`,
+          `Manila 6 PM sweep closed ${rows.length} branch day session(s).`,
         );
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.logger.error(`BranchFinance midnight job failed: ${msg}`);
+      this.logger.error(`BranchFinance 6 PM job failed: ${msg}`);
     }
 
-    this.logger.log('Manila midnight branch day-session sweep finished.');
+    this.logger.log('Manila 6 PM branch day-session sweep finished.');
   }
 }
