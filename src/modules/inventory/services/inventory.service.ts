@@ -451,15 +451,30 @@ export class InventoryService {
       saleQuery = saleQuery.eq('branch_id', scopedBranchId);
     }
 
-    const [pawnedResult, saleResult] = await Promise.all([
+    let transferQuery = client
+      .from('transfer_items')
+      .select('*')
+      .ilike('item_id', cleanId)
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user))
+      .order('requested_at', { ascending: false });
+
+    if (scopedBranchId) {
+      transferQuery = transferQuery.eq('target_branch_id', scopedBranchId);
+    }
+
+    const [pawnedResult, saleResult, transferResult] = await Promise.all([
       pawnedQuery.limit(1),
       saleQuery.limit(1),
+      transferQuery.limit(1),
     ]);
 
     const { data: pawnedRows, error: pawnedError } = pawnedResult;
     const pawnedData = Array.isArray(pawnedRows) ? pawnedRows[0] : null;
     const { data: saleRows, error: saleError } = saleResult;
     const saleData = Array.isArray(saleRows) ? saleRows[0] : null;
+    const { data: transferRows, error: transferError } = transferResult;
+    const transferData = Array.isArray(transferRows) ? transferRows[0] : null;
 
     if (pawnedError) {
       console.error(
@@ -472,6 +487,13 @@ export class InventoryService {
       console.error(
         `[InventoryService] Error fetching sale item ${cleanId}:`,
         saleError,
+      );
+    }
+
+    if (transferError) {
+      console.error(
+        `[InventoryService] Error fetching transfer item ${cleanId}:`,
+        transferError,
       );
     }
 
@@ -492,6 +514,31 @@ export class InventoryService {
         status: saleData.status,
         originalPhoto,
         type: 'SALE',
+      };
+    }
+
+    if (transferData) {
+      assertResourceBranch(user, transferData.target_branch_id);
+
+      const { data: targetBranch } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', transferData.target_branch_id)
+        .eq('environment', getEnvironment(user))
+        .maybeSingle();
+
+      return {
+        id: transferData.id,
+        itemId: transferData.item_id,
+        itemName: transferData.item_name,
+        category: 'Transfer Item',
+        branch: targetBranch?.name || 'Target Branch',
+        pawnDate: transferData.requested_at,
+        status: 'Transfer Pending',
+        itemPhotos: [],
+        originalPhoto: '',
+        itemIncluded: transferData.item_included || '',
+        type: 'TRANSFER',
       };
     }
 
@@ -1020,6 +1067,16 @@ export class InventoryService {
         throw new InternalServerErrorException(saleError.message);
       }
 
+      const { data: transferItems, error: transferError } = await client
+        .from('transfer_items')
+        .select('item_id, item_name')
+        .eq('target_branch_id', branchId)
+        .eq('status', 'pending')
+        .eq('environment', getEnvironment(user));
+      if (transferError) {
+        throw new InternalServerErrorException(transferError.message);
+      }
+
       systemItemListSource = [
         ...((Array.isArray(pawnedItems) ? pawnedItems : []).filter(
           (item: { item_id?: string | null; status?: string | null }) =>
@@ -1029,6 +1086,12 @@ export class InventoryService {
             !redeemedPawnedIds.has(item.item_id),
         )),
         ...(Array.isArray(saleItems) ? saleItems : []),
+        ...((Array.isArray(transferItems) ? transferItems : []).map(
+          (item: { item_id?: string | null; item_name?: string | null }) => ({
+            ...item,
+            category: 'Transfer Item',
+          }),
+        )),
       ];
     }
 
