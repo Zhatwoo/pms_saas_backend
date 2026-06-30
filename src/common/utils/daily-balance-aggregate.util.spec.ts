@@ -57,7 +57,7 @@ describe('netCashFromTransactions', () => {
     const net = netCashFromTransactions([
       { purpose: 'Pawn', cash_in: 0, cash_out: 100 },
       { purpose: 'Start', cash_in: 0, cash_out: 0 },
-      { purpose: 'Redeem', cash_in: 50, cash_out: 0, voided_at: '2026-01-01' },
+      { purpose: 'Buy Back', cash_in: 50, cash_out: 0, voided_at: '2026-01-01' },
       { purpose: 'Renew', cash_in: 25, cash_out: 0 },
     ]);
     expect(net).toBe(-75);

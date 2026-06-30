@@ -6,10 +6,9 @@
  */
 export enum TransactionPurpose {
   PAWN = 'Pawn',
-  REDEEM = 'Redeem',
+  BUY_BACK = 'Buy Back',
   RENEW = 'Renew',
   REAPPRAISE = 'Reappraise',
-  BUY_BACK = 'Buy Back',
   SOLD_ITEM = 'Sold Item',
   RESERVE_LAYAWAY = 'Reserve / Layaway',
   FUND_TRANSFER = 'Fund Transfer',
@@ -20,10 +19,9 @@ export enum TransactionPurpose {
 
 /** Purposes that represent actual business revenue (cash inflows from operations). */
 export const REVENUE_PURPOSES: ReadonlySet<string> = new Set([
-  TransactionPurpose.REDEEM,
+  TransactionPurpose.BUY_BACK,
   TransactionPurpose.RENEW,
   TransactionPurpose.REAPPRAISE,
-  TransactionPurpose.BUY_BACK,
   TransactionPurpose.SOLD_ITEM,
   TransactionPurpose.RESERVE_LAYAWAY,
 ]);

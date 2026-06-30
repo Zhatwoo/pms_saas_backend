@@ -1132,8 +1132,8 @@ export class DashboardService {
         .gte('pawn_date', fromDate)
         .lte('pawn_date', toDate),
     );
-    // 5. Redeemed
-    const redeemedQuery = buildPawnQuery(
+    // 5. Redeemed (Buy Back transactions)
+    const boughtBackQuery = buildPawnQuery(
       client
         .from('pawned_items')
         .select('id', { count: 'exact', head: true })
@@ -1219,7 +1219,7 @@ export class DashboardService {
       nearExpResult,
       saleResult,
       totalContractsResult,
-      redeemedResult,
+      boughtBackResult,
       expiredResult,
       revenueResult,
       contractTrendResult,
@@ -1232,7 +1232,7 @@ export class DashboardService {
       nearExpQuery,
       saleQuery,
       totalContractsQuery,
-      redeemedQuery,
+      boughtBackQuery,
       expiredQuery,
       revenueQuery,
       contractTrendQuery,
@@ -1279,12 +1279,12 @@ export class DashboardService {
     ];
     const contractTrendMap = new Map<
       string,
-      { contracts: number; redeemed: number }
+      { contracts: number; boughtBack: number }
     >();
     for (let i = 0; i < 6; i++) {
       const d = new Date(today.getFullYear(), today.getMonth() - 5 + i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      contractTrendMap.set(key, { contracts: 0, redeemed: 0 });
+      contractTrendMap.set(key, { contracts: 0, boughtBack: 0 });
     }
     for (const row of contractTrendResult.data || []) {
       if (!row.pawn_date) continue;
@@ -1292,7 +1292,7 @@ export class DashboardService {
       const entry = contractTrendMap.get(key);
       if (entry) {
         entry.contracts += 1;
-        if (row.status === 'Redeemed') entry.redeemed += 1;
+        if (row.status === 'Redeemed') entry.boughtBack += 1;
       }
     }
     const contractTrends = Array.from(contractTrendMap.entries()).map(
@@ -1301,7 +1301,7 @@ export class DashboardService {
         return {
           month: monthNames[parseInt(month) - 1],
           contracts: val.contracts,
-          redeemed: val.redeemed,
+          boughtBack: val.boughtBack,
         };
       },
     );
@@ -1410,8 +1410,8 @@ export class DashboardService {
       overallData: {
         totalContracts: totalContractsResult.count ?? 0,
         active: activeResult.count ?? 0,
-        redeemed: redeemedResult.count ?? 0,
-        redeemedOverdue: expiredResult.count ?? 0,
+        boughtBack: boughtBackResult.count ?? 0,
+        boughtBackOverdue: expiredResult.count ?? 0,
         branchSales,
         allBranchSales,
         totalOverallSales: `₱ ${allBranchSales.toLocaleString()}`,

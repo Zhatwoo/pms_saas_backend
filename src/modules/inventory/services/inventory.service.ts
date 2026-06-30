@@ -423,7 +423,7 @@ export class InventoryService {
       user.role === Role.SUPER_ADMIN ? null : requireUserBranchId(user);
 
     // Resolve the live inventory row first. A stale pawned row can remain in the
-    // table after a buy-back/redeem flow, so prefer the current Available sale row
+    // table after a buy-back flow, so prefer the current Available sale row
     // when the same item ID exists in both places.
     let pawnedQuery = client
       .from('pawned_items')
@@ -960,18 +960,18 @@ export class InventoryService {
         throw new InternalServerErrorException(pawnedError.message);
       }
 
-      const { data: redeemedRows, error: redeemedError } = await client
+      const { data: boughtBackRows, error: boughtBackError } = await client
         .from('transactions')
         .select('related_pawned_item_id')
         .eq('branch_id', branchId)
         .eq('environment', getEnvironment(user))
-        .in('purpose', ['Redeem', 'Buy Back']);
-      if (redeemedError) {
-        throw new InternalServerErrorException(redeemedError.message);
+        .in('purpose', ['Buy Back']);
+      if (boughtBackError) {
+        throw new InternalServerErrorException(boughtBackError.message);
       }
 
-      const redeemedPawnedIds = new Set(
-        (Array.isArray(redeemedRows) ? redeemedRows : [])
+      const boughtBackPawnedIds = new Set(
+        (Array.isArray(boughtBackRows) ? boughtBackRows : [])
           .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
           .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
       );
@@ -981,7 +981,7 @@ export class InventoryService {
           isStatusIncludedInInventoryValuation(item.status) &&
           typeof item.item_id === 'string' &&
           item.item_id.trim().length > 0 &&
-          !redeemedPawnedIds.has(item.item_id),
+          !boughtBackPawnedIds.has(item.item_id),
       );
     } else {
       const { data: pawnedItems, error: pawnedError } = await client
@@ -994,18 +994,18 @@ export class InventoryService {
         throw new InternalServerErrorException(pawnedError.message);
       }
 
-      const { data: redeemedRows, error: redeemedError } = await client
+      const { data: boughtBackRows, error: boughtBackError } = await client
         .from('transactions')
         .select('related_pawned_item_id')
         .eq('branch_id', branchId)
         .eq('environment', getEnvironment(user))
-        .in('purpose', ['Redeem', 'Buy Back']);
-      if (redeemedError) {
-        throw new InternalServerErrorException(redeemedError.message);
+        .in('purpose', ['Buy Back']);
+      if (boughtBackError) {
+        throw new InternalServerErrorException(boughtBackError.message);
       }
 
-      const redeemedPawnedIds = new Set(
-        (Array.isArray(redeemedRows) ? redeemedRows : [])
+      const boughtBackPawnedIds = new Set(
+        (Array.isArray(boughtBackRows) ? boughtBackRows : [])
           .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
           .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
       );
@@ -1026,7 +1026,7 @@ export class InventoryService {
             isStatusIncludedInInventoryValuation(item.status) &&
             typeof item.item_id === 'string' &&
             item.item_id.trim().length > 0 &&
-            !redeemedPawnedIds.has(item.item_id),
+            !boughtBackPawnedIds.has(item.item_id),
         )),
         ...(Array.isArray(saleItems) ? saleItems : []),
       ];

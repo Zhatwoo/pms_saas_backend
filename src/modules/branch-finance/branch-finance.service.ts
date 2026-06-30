@@ -72,7 +72,6 @@ interface BranchRow {
 
 export type LedgerEntryType =
   | 'pawn'
-  | 'redeem'
   | 'buy_back'
   | 'renewal'
   | 'sale'
@@ -124,7 +123,6 @@ export interface BranchFinanceSummary {
   todayCashOut: number;
   breakdown: {
     pawnOut: number;
-    redeemIn: number;
     buyBackIn: number;
     renewalIn: number;
     saleIn: number;
@@ -502,9 +500,6 @@ export class BranchFinanceService {
     if (purpose === 'pawn' || purpose === 'new pawn') {
       return 'pawn';
     }
-    if (purpose === 'redeem') {
-      return 'redeem';
-    }
     if (purpose === 'buy back') {
       return 'buy_back';
     }
@@ -537,9 +532,6 @@ export class BranchFinanceService {
     switch (type) {
       case 'pawn':
         parts.push('New Pawn');
-        break;
-      case 'redeem':
-        parts.push('Redeem');
         break;
       case 'buy_back':
         parts.push('Buy Back');
@@ -777,7 +769,6 @@ export class BranchFinanceService {
 
         const breakdown = {
           pawnOut: 0,
-          redeemIn: 0,
           buyBackIn: 0,
           renewalIn: 0,
           saleIn: 0,
@@ -808,9 +799,6 @@ export class BranchFinanceService {
           switch (type) {
             case 'pawn':
               breakdown.pawnOut += co;
-              break;
-            case 'redeem':
-              breakdown.redeemIn += ci;
               break;
             case 'buy_back':
               breakdown.buyBackIn += ci;
@@ -874,7 +862,6 @@ export class BranchFinanceService {
           todayCashOut: Number(todayCashOut.toFixed(2)),
           breakdown: {
             pawnOut: Number(breakdown.pawnOut.toFixed(2)),
-            redeemIn: Number(breakdown.redeemIn.toFixed(2)),
             buyBackIn: Number(breakdown.buyBackIn.toFixed(2)),
             renewalIn: Number(breakdown.renewalIn.toFixed(2)),
             saleIn: Number(breakdown.saleIn.toFixed(2)),
