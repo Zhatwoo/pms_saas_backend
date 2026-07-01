@@ -93,3 +93,45 @@ export function findInterestRateGroup(
     ) ?? null
   );
 }
+
+/** Pawn items within this many days of maturity are included in opening inventory QR audit. */
+export const OPENING_AUDIT_PAWN_WINDOW_DAYS = 7;
+
+export function getPawnMaturityDaysRemaining(
+  pawnDate: string | Date | null | undefined,
+  category: string | null | undefined,
+  interestRates: any[],
+  asOf: Date = new Date(),
+): number | null {
+  if (!pawnDate) {
+    return null;
+  }
+
+  const group = findInterestRateGroup(interestRates, category ?? undefined);
+  const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+  const maturityDate = new Date(pawnDate);
+  maturityDate.setDate(maturityDate.getDate() + defaultDuration);
+
+  return Math.ceil(
+    (maturityDate.getTime() - asOf.getTime()) / (1000 * 60 * 60 * 24),
+  );
+}
+
+export function isPawnItemWithinOpeningAuditWindow(
+  pawnDate: string | Date | null | undefined,
+  category: string | null | undefined,
+  interestRates: any[],
+  windowDays: number = OPENING_AUDIT_PAWN_WINDOW_DAYS,
+  asOf: Date = new Date(),
+): boolean {
+  const daysRemaining = getPawnMaturityDaysRemaining(
+    pawnDate,
+    category,
+    interestRates,
+    asOf,
+  );
+  if (daysRemaining === null) {
+    return false;
+  }
+  return daysRemaining <= windowDays;
+}
