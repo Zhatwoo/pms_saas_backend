@@ -9,42 +9,46 @@ datasource db {
 }
 
 model branches {
-  id                                                     String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  branch_code                                            String                     @unique @default(dbgenerated("lpad((nextval('branch_code_seq'::regclass))::text, 3, '0'::text)"))
-  name                                                   String                     @unique
-  location                                               String
-  status                                                 String                     @default("Active")
-  created_at                                             DateTime                   @default(now()) @db.Timestamptz(6)
-  updated_at                                             DateTime                   @default(now()) @db.Timestamptz(6)
-  contact_number                                         String?
-  allowed_ip                                             String?
+  id                                                       String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_code                                              String                     @unique @default(dbgenerated("lpad((nextval('branch_code_seq'::regclass))::text, 3, '0'::text)"))
+  name                                                     String                     @unique
+  location                                                 String
+  status                                                   String                     @default("Active")
+  created_at                                               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at                                               DateTime                   @default(now()) @db.Timestamptz(6)
+  contact_number                                           String
   /// Configured opening cash when no prior daily_balances row exists (initial capital).
-  opening_cash_balance                                   Decimal                    @default(0) @db.Decimal(12, 2)
+  opening_cash_balance                                     Decimal                    @default(0) @db.Decimal(12, 2)
   /// LOAN_AMOUNT: sum pawn loan amounts; APPRAISED_VALUE: sum appraised_value with fallback to amount.
-  inventory_valuation_mode                               String                     @default("LOAN_AMOUNT")
-  environment                                            String                     @default("production") @db.VarChar(20)
-  created_by                                             String?                    @db.Uuid
-  activity_logs                                          activity_logs[]
-  authorized_devices                                     authorized_devices[]
-  branch_business_sessions                               branch_business_sessions[]
-  branch_day_sessions                                    branch_day_sessions[]
-  customer_rewards                                       customer_rewards[]
-  customers                                              customers[]
-  daily_balances                                         daily_balances[]
-  daily_opening                                          daily_opening[]
-  finance_audit_events                                   finance_audit_events[]
-  fund_requests_fund_requests_branch_idTobranches        fund_requests[]            @relation("fund_requests_branch_idTobranches")
-  fund_requests_fund_requests_source_branch_idTobranches fund_requests[]            @relation("fund_requests_source_branch_idTobranches")
-  incident_ticket_events                                 incident_ticket_events[]
-  incident_tickets                                       incident_tickets[]
-  layaway_reservations                                   layaway_reservations[]
-  login_logs                                             login_logs[]
-  notifications                                          notifications[]
-  pawned_items                                           pawned_items[]
-  sale_items                                             sale_items[]
-  transactions                                           transactions[]
-  users                                                  users[]
+  inventory_valuation_mode                                 String                     @default("LOAN_AMOUNT")
+  allowed_ip                                               String?
+  environment                                              String                     @default("production") @db.VarChar(20)
+  created_by                                               String?                    @db.Uuid
+  activity_logs                                            activity_logs[]
+  authorized_devices                                       authorized_devices[]
+  branch_business_sessions                                 branch_business_sessions[]
+  branch_day_sessions                                      branch_day_sessions[]
+  customer_rewards                                         customer_rewards[]
+  customers                                                customers[]
+  daily_balances                                           daily_balances[]
+  daily_opening                                            daily_opening[]
+  finance_audit_events                                     finance_audit_events[]
+  fund_requests_fund_requests_branch_idTobranches          fund_requests[]            @relation("fund_requests_branch_idTobranches")
+  fund_requests_fund_requests_source_branch_idTobranches   fund_requests[]            @relation("fund_requests_source_branch_idTobranches")
+  incident_ticket_events                                   incident_ticket_events[]
+  incident_tickets                                         incident_tickets[]
+  layaway_reservations                                     layaway_reservations[]
+  login_logs                                               login_logs[]
+  notifications                                            notifications[]
+  pawned_items                                             pawned_items[]
+  sale_items                                               sale_items[]
+  transactions                                             transactions[]
+  transfer_items_transfer_items_source_branch_idTobranches transfer_items[]           @relation("transfer_items_source_branch_idTobranches")
+  transfer_items_transfer_items_target_branch_idTobranches transfer_items[]           @relation("transfer_items_target_branch_idTobranches")
+  users                                                    users[]
 
+  @@index([created_by], map: "idx_branches_created_by")
+  @@index([environment], map: "idx_branches_environment")
   @@schema("public")
 }
 
@@ -91,10 +95,14 @@ model users {
   notifications                                                        notifications[]
   transactions                                                         transactions[]
   transactions_voided                                                  transactions[]             @relation("transactions_voided_by_user_idTousers")
+  transfer_items_transfer_items_received_by_user_idTousers             transfer_items[]           @relation("transfer_items_received_by_user_idTousers")
+  transfer_items_transfer_items_requested_by_user_idTousers            transfer_items[]           @relation("transfer_items_requested_by_user_idTousers")
   users                                                                auth_users                 @relation(fields: [auth_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   branches                                                             branches?                  @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([auth_id])
+  @@index([created_by], map: "idx_users_created_by")
+  @@index([environment], map: "idx_users_environment")
   @@schema("public")
 }
 
@@ -123,6 +131,8 @@ model customers {
   transactions         transactions[]
 
   @@index([branch_id, deleted_at, created_at(sort: Desc)], map: "idx_customers_branch_deleted_created")
+  @@index([created_by], map: "idx_customers_created_by")
+  @@index([environment], map: "idx_customers_environment")
   @@schema("public")
 }
 
@@ -151,12 +161,12 @@ model pawned_items {
   id_back_photo          String?
   item_photos            Json             @default("[]")
   item_photo             String?
-  /// Inventory-specific status used for audit/incident handling.
-  inventory_status       inventory_status @default(verified)
   appraised_value        Decimal?         @db.Decimal(15, 2)
   estimated_resale_value Decimal?         @db.Decimal(15, 2)
   environment            String           @default("production") @db.VarChar(20)
   created_by             String?          @db.Uuid
+  /// Inventory-specific status used for audit/incident handling.
+  inventory_status       inventory_status @default(verified)
   item_renewals          item_renewals[]
   branches               branches         @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
   customers              customers?       @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -166,16 +176,8 @@ model pawned_items {
   @@index([branch_id, status], map: "idx_pawned_items_branch_status")
   @@index([item_name(ops: raw("gin_trgm_ops"))], map: "idx_pawned_items_item_name_trgm", type: Gin)
   @@index([pawn_date(sort: Desc)], map: "idx_pawned_items_pawn_date")
-  @@schema("public")
-}
-
-/// Simplified inventory status enum enforced at application level: verified, missing, broken, damaged
-enum inventory_status {
-  verified
-  missing
-  broken
-  damaged
-
+  @@index([created_by], map: "idx_pawned_items_created_by")
+  @@index([environment], map: "idx_pawned_items_environment")
   @@schema("public")
 }
 
@@ -208,6 +210,7 @@ model transactions {
   voided_by_user_id      String?                @db.Uuid
   environment            String                 @default("production") @db.VarChar(20)
   created_by             String?                @db.Uuid
+  buyback_proof          String?
   finance_audit_events   finance_audit_events[]
   fund_requests          fund_requests[]
   layaway_reservations   layaway_reservations[]
@@ -222,6 +225,8 @@ model transactions {
   @@index([branch_id, transaction_date(sort: Desc)], map: "idx_transactions_branch_transaction_date")
   @@index([customer_id], map: "idx_transactions_customer_id")
   @@index([purpose], map: "idx_transactions_purpose")
+  @@index([created_by], map: "idx_transactions_created_by")
+  @@index([environment], map: "idx_transactions_environment")
   @@schema("public")
 }
 
@@ -244,6 +249,8 @@ model finance_audit_events {
 
   @@index([branch_id, created_at(sort: Desc)], map: "idx_finance_audit_branch_created")
   @@index([event_type], map: "idx_finance_audit_event_type")
+  @@index([created_by], map: "idx_finance_audit_events_created_by")
+  @@index([environment], map: "idx_finance_audit_events_environment")
   @@schema("public")
 }
 
@@ -261,6 +268,8 @@ model daily_balances {
 
   @@unique([branch_id, record_date])
   @@index([branch_id, record_date(sort: Desc)], map: "idx_daily_balances_branch_date")
+  @@index([created_by], map: "idx_daily_balances_created_by")
+  @@index([environment], map: "idx_daily_balances_environment")
   @@schema("public")
 }
 
@@ -289,49 +298,55 @@ model branch_business_sessions {
 
   @@unique([branch_id, business_date], map: "branch_business_sessions_branch_date_key")
   @@index([branch_id, business_date(sort: Desc)], map: "idx_branch_business_sessions_branch_date")
+  @@index([created_by], map: "idx_branch_business_sessions_created_by")
+  @@index([environment], map: "idx_branch_business_sessions_environment")
   @@schema("public")
 }
 
 /// Per-branch Manila calendar day: opening starting balance + end-day closure gate for operational cash.
 model branch_day_sessions {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  branch_id          String    @db.Uuid
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_id              String    @db.Uuid
   /// Manila calendar date (YYYY-MM-DD) stored as date-only.
-  session_date       DateTime  @db.Date
-  starting_balance   Decimal   @db.Decimal(12, 2)
-  is_closed          Boolean   @default(false)
-  closed_at          DateTime? @db.Timestamptz(6)
-  opened_at          DateTime  @default(now()) @db.Timestamptz(6)
-  started_by_user_id String?   @db.Uuid
-  closed_by_user_id  String?   @db.Uuid
-  operational_cutoff_at DateTime? @db.Timestamptz(6)
-  sealed_transaction_ids String[] @default([]) @db.Uuid
-  created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
-  environment        String    @default("production") @db.VarChar(20)
-  created_by         String?   @db.Uuid
-  branches           branches  @relation(fields: [branch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  closed_by_user     users?    @relation("branch_day_sessions_closed_by", fields: [closed_by_user_id], references: [id], onUpdate: NoAction)
-  started_by_user    users?    @relation("branch_day_sessions_started_by", fields: [started_by_user_id], references: [id], onUpdate: NoAction)
+  session_date           DateTime  @db.Date
+  starting_balance       Decimal   @db.Decimal(12, 2)
+  is_closed              Boolean   @default(false)
+  closed_at              DateTime? @db.Timestamptz(6)
+  opened_at              DateTime  @default(now()) @db.Timestamptz(6)
+  started_by_user_id     String?   @db.Uuid
+  closed_by_user_id      String?   @db.Uuid
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime  @default(now()) @db.Timestamptz(6)
+  operational_cutoff_at  DateTime? @db.Timestamptz(6)
+  sealed_transaction_ids String[]  @default([]) @db.Uuid
+  environment            String    @default("production") @db.VarChar(20)
+  created_by             String?   @db.Uuid
+  branches               branches  @relation(fields: [branch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  closed_by_user         users?    @relation("branch_day_sessions_closed_by", fields: [closed_by_user_id], references: [id], onUpdate: NoAction)
+  started_by_user        users?    @relation("branch_day_sessions_started_by", fields: [started_by_user_id], references: [id], onUpdate: NoAction)
 
   @@unique([branch_id, session_date], map: "branch_day_sessions_branch_session_date_key")
   @@index([branch_id, session_date(sort: Desc)], map: "idx_branch_day_sessions_branch_date")
+  @@index([created_by], map: "idx_branch_day_sessions_created_by")
+  @@index([environment], map: "idx_branch_day_sessions_environment")
   @@schema("public")
 }
 
 model activity_logs {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id    String?   @db.Uuid
-  branch_id  String?   @db.Uuid
-  action     String
-  details    String?
-  created_at DateTime  @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
-  environment String   @default("production") @db.VarChar(20)
-  created_by String?   @db.Uuid
-  branches   branches? @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
-  users      users?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String?   @db.Uuid
+  branch_id   String?   @db.Uuid
+  action      String
+  details     String?
+  created_at  DateTime  @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  environment String    @default("production") @db.VarChar(20)
+  created_by  String?   @db.Uuid
+  branches    branches? @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
+  users       users?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
 
   @@index([created_at], map: "idx_activity_logs_created_at")
+  @@index([created_by], map: "idx_activity_logs_created_by")
+  @@index([environment], map: "idx_activity_logs_environment")
   @@schema("public")
 }
 
@@ -346,13 +361,13 @@ model notifications {
   created_at        DateTime?  @default(now()) @db.Timestamptz(6)
   customer_id       String?    @db.Uuid
   log_id            String?    @db.Uuid
+  event_key         String?    @unique(where: raw("(event_key IS NOT NULL)"))
+  target_role       String?
   message           String?
   notification_type String?
   target_url        String?
   entity_type       String?
   entity_id         String?
-  event_key         String?    @unique(map: "notifications_event_key_key")
-  target_role       String?
   read_at           DateTime?  @db.Timestamptz(6)
   updated_at        DateTime?  @default(now()) @db.Timestamptz(6)
   environment       String     @default("production") @db.VarChar(20)
@@ -367,6 +382,8 @@ model notifications {
   @@index([is_read], map: "idx_notifications_is_read")
   @@index([log_id], map: "idx_notifications_log_id")
   @@index([target_role], map: "idx_notifications_target_role")
+  @@index([created_by], map: "idx_notifications_created_by")
+  @@index([environment], map: "idx_notifications_environment")
   @@schema("public")
 }
 
@@ -379,32 +396,36 @@ model categories {
   environment String   @default("production") @db.VarChar(20)
   created_by  String?  @db.Uuid
 
-  @@unique([name, environment], map: "categories_name_environment_key")
+  @@unique([name, environment])
+  @@index([created_by], map: "idx_categories_created_by")
+  @@index([environment], map: "idx_categories_environment")
   @@schema("public")
 }
 
 model authorized_devices {
-  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employee_id        String?      @db.Uuid
-  branch_id          String?      @db.Uuid
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id        String?   @db.Uuid
+  branch_id          String?   @db.Uuid
   device_name        String
-  device_type        String       @default("DESKTOP")
+  device_type        String    @default("DESKTOP")
   device_fingerprint String
   ip_address         String?
-  status             String       @default("PENDING")
-  last_login         DateTime?    @db.Timestamp(6)
-  created_at         DateTime     @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime     @default(now()) @db.Timestamptz(6)
-  environment        String       @default("production") @db.VarChar(20)
-  created_by         String?      @db.Uuid
-  employee           users?       @relation(fields: [employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  branch             branches?    @relation(fields: [branch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  status             String    @default("PENDING")
+  last_login         DateTime?
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  environment        String    @default("production") @db.VarChar(20)
+  created_by         String?   @db.Uuid
+  branch             branches? @relation(fields: [branch_id], references: [id])
+  employee           users?    @relation(fields: [employee_id], references: [id])
 
   @@unique([employee_id, device_fingerprint], map: "uq_authorized_devices_employee_fingerprint")
   @@index([branch_id])
   @@index([employee_id])
   @@index([device_fingerprint])
   @@index([status])
+  @@index([created_by], map: "idx_authorized_devices_created_by")
+  @@index([environment], map: "idx_authorized_devices_environment")
   @@schema("public")
 }
 
@@ -416,16 +437,18 @@ model login_logs {
   login_status       String
   failure_reason     String?
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  branch_id          String?   @db.Uuid
   environment        String    @default("production") @db.VarChar(20)
   created_by         String?   @db.Uuid
-  employee           users?    @relation(fields: [employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  branch             branches? @relation(fields: [branch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  branch_id          String?   @db.Uuid
+  branch             branches? @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
+  employee           users?    @relation(fields: [employee_id], references: [id])
 
   @@index([branch_id])
-  @@index([device_fingerprint])
   @@index([employee_id])
   @@index([login_status])
+  @@index([created_by], map: "idx_login_logs_created_by")
+  @@index([environment], map: "idx_login_logs_environment")
+  @@index([created_at])
   @@schema("public")
 }
 
@@ -937,6 +960,8 @@ model daily_opening {
   @@unique([branch_id, opening_date], map: "daily_opening_branch_date_unique")
   @@index([branch_id, opening_date], map: "idx_daily_opening_branch_date")
   @@index([employee_id, opening_date], map: "idx_daily_opening_employee_date")
+  @@index([created_by], map: "idx_daily_opening_created_by")
+  @@index([environment], map: "idx_daily_opening_environment")
   @@schema("public")
 }
 
@@ -1010,6 +1035,8 @@ model fund_requests {
   @@index([source_confirmed_by_user_id], map: "idx_fund_requests_source_confirmed_by_user_id")
   @@index([status], map: "idx_fund_requests_status")
   @@index([transfer_mode], map: "idx_fund_requests_transfer_mode")
+  @@index([created_by], map: "idx_fund_requests_created_by")
+  @@index([environment], map: "idx_fund_requests_environment")
   @@schema("public")
 }
 
@@ -1034,6 +1061,8 @@ model incident_ticket_events {
 
   @@index([branch_id, created_at(sort: Desc)], map: "idx_incident_ticket_events_branch_created")
   @@index([ticket_id, created_at(sort: Desc)], map: "idx_incident_ticket_events_ticket_created")
+  @@index([created_by], map: "idx_incident_ticket_events_created_by")
+  @@index([environment], map: "idx_incident_ticket_events_environment")
   @@schema("public")
 }
 
@@ -1087,6 +1116,8 @@ model incident_tickets {
   @@index([source], map: "idx_incident_tickets_source")
   @@index([status], map: "idx_incident_tickets_status")
   @@index([user_id], map: "idx_incident_tickets_user_id")
+  @@index([created_by], map: "idx_incident_tickets_created_by")
+  @@index([environment], map: "idx_incident_tickets_environment")
   @@schema("public")
 }
 
@@ -1103,6 +1134,8 @@ model item_renewals {
   pawned_items   pawned_items @relation(fields: [pawned_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([pawned_item_id, renewal_date(sort: Desc)], map: "idx_item_renewals_pawned_item_id")
+  @@index([created_by], map: "idx_item_renewals_created_by")
+  @@index([environment], map: "idx_item_renewals_environment")
   @@schema("public")
 }
 
@@ -1143,6 +1176,8 @@ model layaway_reservations {
 
   @@index([branch_id, status], map: "idx_layaway_reservations_branch_status")
   @@index([transaction_id], map: "idx_layaway_reservations_transaction")
+  @@index([created_by], map: "idx_layaway_reservations_created_by")
+  @@index([environment], map: "idx_layaway_reservations_environment")
   @@schema("public")
 }
 
@@ -1170,11 +1205,14 @@ model sale_items {
   customers            customers?            @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   pawned_items         pawned_items?         @relation(fields: [original_pawn_id], references: [id], onUpdate: NoAction)
   transactions         transactions[]
+  transfer_items       transfer_items[]
 
   @@index([available_date(sort: Desc)], map: "idx_sale_items_available_date")
   @@index([branch_id, status], map: "idx_sale_items_branch_status")
   @@index([customer_id], map: "idx_sale_items_customer_id")
   @@index([item_name(ops: raw("gin_trgm_ops"))], map: "idx_sale_items_item_name_trgm", type: Gin)
+  @@index([created_by], map: "idx_sale_items_created_by")
+  @@index([environment], map: "idx_sale_items_environment")
   @@schema("public")
 }
 
@@ -1195,6 +1233,8 @@ model rewards {
   customer_rewards           customer_rewards[]
 
   @@index([is_active], map: "idx_rewards_is_active")
+  @@index([created_by], map: "idx_rewards_created_by")
+  @@index([environment], map: "idx_rewards_environment")
   @@schema("public")
 }
 
@@ -1222,6 +1262,8 @@ model customer_rewards {
   @@index([branch_id], map: "idx_customer_rewards_branch_id")
   @@index([status], map: "idx_customer_rewards_status")
   @@index([reward_id], map: "idx_customer_rewards_reward_id")
+  @@index([created_by], map: "idx_customer_rewards_created_by")
+  @@index([environment], map: "idx_customer_rewards_environment")
   @@schema("public")
 }
 
@@ -1233,7 +1275,51 @@ model shop_settings {
   environment   String    @default("production") @db.VarChar(20)
   created_by    String?   @db.Uuid
 
-  @@unique([setting_key, environment], map: "shop_settings_setting_key_environment_key")
+  @@unique([setting_key, environment])
+  @@index([created_by], map: "idx_shop_settings_created_by")
+  @@index([environment], map: "idx_shop_settings_environment")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transfer_items {
+  id                                                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sale_item_id                                       String     @db.Uuid
+  item_id                                            String
+  item_name                                          String
+  source_branch_id                                   String     @db.Uuid
+  target_branch_id                                   String     @db.Uuid
+  requested_by_user_id                               String?    @db.Uuid
+  received_by_user_id                                String?    @db.Uuid
+  status                                             String     @default("pending")
+  item_included                                      String?
+  notes                                              String?
+  requested_at                                       DateTime   @default(now()) @db.Timestamptz(6)
+  received_at                                        DateTime?  @db.Timestamptz(6)
+  created_at                                         DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at                                         DateTime   @default(now()) @db.Timestamptz(6)
+  environment                                        String     @default("production") @db.VarChar(20)
+  created_by                                         String?    @db.Uuid
+  users_transfer_items_received_by_user_idTousers    users?     @relation("transfer_items_received_by_user_idTousers", fields: [received_by_user_id], references: [id], onUpdate: NoAction)
+  users_transfer_items_requested_by_user_idTousers   users?     @relation("transfer_items_requested_by_user_idTousers", fields: [requested_by_user_id], references: [id], onUpdate: NoAction)
+  sale_items                                         sale_items @relation(fields: [sale_item_id], references: [id], onUpdate: NoAction)
+  branches_transfer_items_source_branch_idTobranches branches   @relation("transfer_items_source_branch_idTobranches", fields: [source_branch_id], references: [id], onUpdate: NoAction)
+  branches_transfer_items_target_branch_idTobranches branches   @relation("transfer_items_target_branch_idTobranches", fields: [target_branch_id], references: [id], onUpdate: NoAction)
+
+  @@index([sale_item_id], map: "idx_transfer_items_sale_item_id")
+  @@index([source_branch_id, status, requested_at(sort: Desc)], map: "idx_transfer_items_source_branch_status")
+  @@index([target_branch_id, status, requested_at(sort: Desc)], map: "idx_transfer_items_target_branch_status")
+  @@schema("public")
+}
+
+/// Simplified inventory status enum enforced at application level: verified, missing, broken, damaged
+enum inventory_status {
+  verified
+  missing
+  broken
+  damaged
+
   @@schema("public")
 }
 
@@ -1319,6 +1405,7 @@ enum sale_status {
   Available
   Sold
   Reserved
+  Transfer_Pending @map("Transfer Pending")
 
   @@schema("public")
 }

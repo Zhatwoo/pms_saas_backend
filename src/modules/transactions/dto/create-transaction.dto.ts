@@ -96,6 +96,10 @@ export class CreateTransactionDto {
   id_back_photo?: string;
 
   @IsOptional()
+  @IsString()
+  buyback_proof?: string;
+
+  @IsOptional()
   @Allow()
   layaway?: unknown;
 }
