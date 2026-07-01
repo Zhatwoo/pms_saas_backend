@@ -709,7 +709,10 @@ export class FinanceDailyBalanceService {
       const result = await run(existingClient);
       return result ?? 0;
     }
-    const result = await this.db.$transaction(run);
+    const result = await this.db.$transaction(run, {
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
     return result ?? 0;
   }
 
@@ -1333,7 +1336,10 @@ export class FinanceDailyBalanceService {
       await run(existingClient);
       return;
     }
-    await this.db.$transaction(run);
+    await this.db.$transaction(run, {
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
   }
 
   /**

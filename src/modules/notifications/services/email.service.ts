@@ -334,7 +334,7 @@ export class EmailService {
               <p><strong>What you can do:</strong></p>
               <ul>
                 <li>Renew your items to extend the expiration date</li>
-                <li>Redeem your items to take them back</li>
+                <li>Buy back your items to take them back</li>
                 <li>Contact us if you need assistance</li>
               </ul>
 

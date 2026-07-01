@@ -24,6 +24,7 @@ type Tx = Prisma.TransactionClient;
 @Injectable()
 export class BranchDaySessionService {
   private readonly logger = new Logger(BranchDaySessionService.name);
+  
 
   constructor(
     private readonly prisma: PrismaService,
@@ -239,32 +240,13 @@ export class BranchDaySessionService {
     let operationalCutoffAt: string | null = null;
     let sealedTransactionIds: string[] = [];
     if (operationalCashAllowed && dayRow) {
-      await this.financeDailyBalance.reconcileOpenSessionDailyBalance(
-        branchId,
-        manilaCalendarDate,
-      );
-      const refreshed = await this.prisma.branch_day_sessions.findUnique({
-        where: {
-          branch_id_session_date: {
-            branch_id: branchId,
-            session_date: todayDate,
-          },
-        },
-        select: {
-          operational_cutoff_at: true,
-          sealed_transaction_ids: true,
-        },
-      });
-      sealedTransactionIds = refreshed?.sealed_transaction_ids ?? [];
+      sealedTransactionIds = dayRow.sealed_transaction_ids ?? [];
       operationalCutoffAt =
-        refreshed?.operational_cutoff_at?.toISOString() ??
+        dayRow.operational_cutoff_at?.toISOString() ??
         (await this.financeDailyBalance.resolveOperationalCutoffIso(
           branchId,
           manilaCalendarDate,
         ));
-      // Confirmed physical count lives on branch_day_sessions; use it for projections
-      // so we never show a stale daily_balances.starting_balance (e.g. carry-forward) after opening.
-      const startNum = Number(this.dec(dayRow.starting_balance).toFixed(2));
       systemEndingBalanceToday =
         await this.financeDailyBalance.computeOpenSessionBookEnding(
           branchId,
@@ -661,7 +643,7 @@ export class BranchDaySessionService {
   }
 
   /**
-   * Auto-close historical Manila sessions left open (midnight PH rollover).
+   * Auto-close open Manila sessions due for the 6 PM PH end-day sweep.
    */
   async autoCloseStaleOpenSessions(): Promise<
     Array<{
@@ -676,7 +658,7 @@ export class BranchDaySessionService {
 
     const stale = await this.prisma.branch_day_sessions.findMany({
       where: {
-        session_date: { lt: todayDate },
+        session_date: { lte: todayDate },
         is_closed: false,
       },
       select: { id: true, branch_id: true, session_date: true },
@@ -739,7 +721,7 @@ export class BranchDaySessionService {
             branchName: branch?.name ?? 'Unknown',
             businessDateStr: closeDateStr,
             purpose: TransactionPurpose.END,
-            details: `Branch business day auto-closed at Manila midnight — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
+            details: `Branch business day auto-closed at 6:00 PM Manila time — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
             createdByUserId: null,
           });
 
