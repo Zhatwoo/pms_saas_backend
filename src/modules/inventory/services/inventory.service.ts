@@ -14,13 +14,15 @@ import {
   inventoryBranchFilters,
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
+import { getPhCalendarDateString, getPhWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import {
   INVENTORY_VALUATION_STATUSES,
   isStatusIncludedInInventoryValuation,
   findInterestRateGroup,
+  isPawnItemWithinOpeningAuditWindow,
+  OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
 import {
   environmentCreateFields,
@@ -130,6 +132,194 @@ export class InventoryService {
       getPhCalendarDateString(),
       delta,
     );
+  }
+
+  private async loadInterestRates(user: UserWithBranch): Promise<any[]> {
+    const { data } = await this.supabase
+      .getClient()
+      .from('shop_settings')
+      .select('setting_value')
+      .eq('setting_key', 'interest_rates')
+      .eq('environment', getEnvironment(user))
+      .maybeSingle();
+
+    return (data?.setting_value as any[]) || [];
+  }
+
+  private async buildOpeningAuditSystemItems(
+    user: UserWithBranch,
+    branchId: string,
+  ): Promise<
+    Array<{
+      item_id: string;
+      item_name: string;
+      category: string;
+      source: 'pawned' | 'sale';
+      status: string;
+    }>
+  > {
+    const client = this.supabase.getClient();
+    const interestRates = await this.loadInterestRates(user);
+
+    const [pawnedResult, saleResult, pendingTransfersResult] =
+      await Promise.all([
+        client
+          .from('pawned_items')
+          .select('id, item_id, item_name, category, status, pawn_date')
+          .eq('branch_id', branchId)
+          .eq('environment', getEnvironment(user))
+          .eq('status', 'Active'),
+        client
+          .from('sale_items')
+          .select('id, item_id, item_name, category, status')
+          .eq('branch_id', branchId)
+          .eq('environment', getEnvironment(user))
+          .in('status', ['Available', 'available']),
+        client
+          .from('transfer_items')
+          .select('sale_item_id')
+          .eq('source_branch_id', branchId)
+          .eq('status', 'pending')
+          .eq('environment', getEnvironment(user)),
+      ]);
+
+    if (pawnedResult.error) {
+      throw new InternalServerErrorException(pawnedResult.error.message);
+    }
+    if (saleResult.error) {
+      throw new InternalServerErrorException(saleResult.error.message);
+    }
+    if (pendingTransfersResult.error) {
+      throw new InternalServerErrorException(pendingTransfersResult.error.message);
+    }
+
+    const pendingTransferSaleIds = new Set(
+      (Array.isArray(pendingTransfersResult.data)
+        ? pendingTransfersResult.data
+        : []
+      ).map((row: { sale_item_id?: string | null }) => row.sale_item_id),
+    );
+
+    const pawnedItems = (Array.isArray(pawnedResult.data)
+      ? pawnedResult.data
+      : []
+    ).filter(
+      (item: {
+        item_id?: string | null;
+        pawn_date?: string | null;
+        category?: string | null;
+      }) =>
+        typeof item.item_id === 'string' &&
+        item.item_id.trim().length > 0 &&
+        isPawnItemWithinOpeningAuditWindow(
+          item.pawn_date,
+          item.category,
+          interestRates,
+        ),
+    );
+
+    const saleItems = (Array.isArray(saleResult.data) ? saleResult.data : [])
+      .filter(
+        (item: { id?: string | null; item_id?: string | null }) =>
+          typeof item.item_id === 'string' &&
+          item.item_id.trim().length > 0 &&
+          !pendingTransferSaleIds.has(item.id ?? ''),
+      )
+      .map((item: {
+        item_id: string;
+        item_name: string;
+        category: string;
+        status?: string | null;
+      }) => ({
+        item_id: item.item_id,
+        item_name: item.item_name,
+        category: item.category,
+        source: 'sale' as const,
+        status: item.status || 'Available',
+      }));
+
+    return [
+      ...pawnedItems.map(
+        (item: {
+          item_id: string;
+          item_name: string;
+          category: string;
+          status?: string | null;
+        }) => ({
+          item_id: item.item_id,
+          item_name: item.item_name,
+          category: item.category,
+          source: 'pawned' as const,
+          status: item.status || 'Active',
+        }),
+      ),
+      ...saleItems,
+    ];
+  }
+
+  async findOpeningAuditChecklist(user: UserWithBranch, branch?: string) {
+    const { branchId } = inventoryBranchFilters(user, branch);
+    if (!branchId) {
+      throw new BadRequestException('A single branch is required for opening audit');
+    }
+
+    assertResourceBranch(user, branchId);
+    const items = await this.buildOpeningAuditSystemItems(user, branchId);
+
+    const uniqueItems = Array.from(
+      items
+        .reduce((map, item) => {
+          const normalizedId = item.item_id.trim().toUpperCase();
+          if (!map.has(normalizedId)) {
+            map.set(normalizedId, {
+              itemId: normalizedId,
+              itemName: item.item_name,
+              category: item.category,
+              status: item.status,
+              source: item.source,
+            });
+          }
+          return map;
+        }, new Map<string, {
+          itemId: string;
+          itemName: string;
+          category: string;
+          status: string;
+          source: 'pawned' | 'sale';
+        }>())
+        .values(),
+    );
+
+    return { items: uniqueItems };
+  }
+
+  private isItemEligibleForOpeningAudit(
+    item: {
+      type?: string;
+      status?: string | null;
+      pawnDate?: string | null;
+      category?: string | null;
+    },
+    interestRates: any[],
+  ): boolean {
+    const normalizedStatus = String(item.status || '').trim().toLowerCase();
+
+    if (item.type === 'SALE' || normalizedStatus === 'available') {
+      return normalizedStatus === 'available';
+    }
+
+    if (item.type === 'PAWNED' || normalizedStatus === 'active') {
+      return (
+        normalizedStatus === 'active' &&
+        isPawnItemWithinOpeningAuditWindow(
+          item.pawnDate,
+          item.category,
+          interestRates,
+        )
+      );
+    }
+
+    return false;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -415,7 +605,11 @@ export class InventoryService {
     };
   }
 
-  async findByItemId(user: UserWithBranch, itemId: string) {
+  async findByItemId(
+    user: UserWithBranch,
+    itemId: string,
+    openingAudit = false,
+  ) {
     const client = this.supabase.getClient();
     const cleanId = itemId.trim().toUpperCase();
 
@@ -423,7 +617,7 @@ export class InventoryService {
       user.role === Role.SUPER_ADMIN ? null : requireUserBranchId(user);
 
     // Resolve the live inventory row first. A stale pawned row can remain in the
-    // table after a buy-back/redeem flow, so prefer the current Available sale row
+    // table after a buy-back flow, so prefer the current Available sale row
     // when the same item ID exists in both places.
     let pawnedQuery = client
       .from('pawned_items')
@@ -451,15 +645,30 @@ export class InventoryService {
       saleQuery = saleQuery.eq('branch_id', scopedBranchId);
     }
 
-    const [pawnedResult, saleResult] = await Promise.all([
+    let transferQuery = client
+      .from('transfer_items')
+      .select('*')
+      .ilike('item_id', cleanId)
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user))
+      .order('requested_at', { ascending: false });
+
+    if (scopedBranchId) {
+      transferQuery = transferQuery.eq('target_branch_id', scopedBranchId);
+    }
+
+    const [pawnedResult, saleResult, transferResult] = await Promise.all([
       pawnedQuery.limit(1),
       saleQuery.limit(1),
+      transferQuery.limit(1),
     ]);
 
     const { data: pawnedRows, error: pawnedError } = pawnedResult;
     const pawnedData = Array.isArray(pawnedRows) ? pawnedRows[0] : null;
     const { data: saleRows, error: saleError } = saleResult;
     const saleData = Array.isArray(saleRows) ? saleRows[0] : null;
+    const { data: transferRows, error: transferError } = transferResult;
+    const transferData = Array.isArray(transferRows) ? transferRows[0] : null;
 
     if (pawnedError) {
       console.error(
@@ -475,12 +684,80 @@ export class InventoryService {
       );
     }
 
+    if (transferError) {
+      console.error(
+        `[InventoryService] Error fetching transfer item ${cleanId}:`,
+        transferError,
+      );
+    }
+
     const pawnedStatus = String(pawnedData?.status || '').trim();
     const pawnedIsCurrentInventory = isStatusIncludedInInventoryValuation(pawnedStatus);
+    const interestRates = openingAudit
+      ? await this.loadInterestRates(user)
+      : [];
+
+    const assertOpeningAuditItem = async (item: {
+      type?: string;
+      status?: string | null;
+      pawnDate?: string | null;
+      category?: string | null;
+      saleItemId?: string | null;
+    }) => {
+      if (!openingAudit) {
+        return;
+      }
+
+      if (item.type === 'TRANSFER') {
+        throw new BadRequestException(
+          'Transfer items are not part of the opening inventory scan.',
+        );
+      }
+
+      if (item.saleItemId) {
+        const { data: pendingTransfer } = await client
+          .from('transfer_items')
+          .select('id')
+          .eq('sale_item_id', item.saleItemId)
+          .eq('status', 'pending')
+          .eq('environment', getEnvironment(user))
+          .maybeSingle();
+
+        if (pendingTransfer) {
+          throw new BadRequestException(
+            'Items with a pending transfer cannot be scanned during opening audit.',
+          );
+        }
+      }
+
+      if (
+        !this.isItemEligibleForOpeningAudit(
+          {
+            type: item.type,
+            status: item.status,
+            pawnDate: item.pawnDate,
+            category: item.category,
+          },
+          interestRates,
+        )
+      ) {
+        throw new BadRequestException(
+          `Only available sale items and active pawn items within ${OPENING_AUDIT_PAWN_WINDOW_DAYS} days of maturity can be scanned during opening audit.`,
+        );
+      }
+    };
 
     if (saleData) {
       assertResourceBranch(user, saleData.branch_id);
       const originalPhoto = await this.resolveStorageUrl(saleData.image_url);
+
+      await assertOpeningAuditItem({
+        type: 'SALE',
+        status: saleData.status,
+        pawnDate: saleData.available_date,
+        category: saleData.category,
+        saleItemId: saleData.id,
+      });
 
       return {
         id: saleData.id,
@@ -492,6 +769,31 @@ export class InventoryService {
         status: saleData.status,
         originalPhoto,
         type: 'SALE',
+      };
+    }
+
+    if (transferData && !openingAudit) {
+      assertResourceBranch(user, transferData.target_branch_id);
+
+      const { data: targetBranch } = await client
+        .from('branches')
+        .select('name')
+        .eq('id', transferData.target_branch_id)
+        .eq('environment', getEnvironment(user))
+        .maybeSingle();
+
+      return {
+        id: transferData.id,
+        itemId: transferData.item_id,
+        itemName: transferData.item_name,
+        category: 'Transfer Item',
+        branch: targetBranch?.name || 'Target Branch',
+        pawnDate: transferData.requested_at,
+        status: 'Transfer Pending',
+        itemPhotos: [],
+        originalPhoto: '',
+        itemIncluded: transferData.item_included || '',
+        type: 'TRANSFER',
       };
     }
 
@@ -537,6 +839,13 @@ export class InventoryService {
           this.resolveStorageUrl(pawnedData.id_photo),
           this.resolveStorageUrl(pawnedData.id_back_photo),
         ]);
+
+      await assertOpeningAuditItem({
+        type: 'PAWNED',
+        status: pawnedData.status,
+        pawnDate: pawnedData.pawn_date,
+        category: pawnedData.category,
+      });
 
       return {
         id: pawnedData.id,
@@ -960,18 +1269,18 @@ export class InventoryService {
         throw new InternalServerErrorException(pawnedError.message);
       }
 
-      const { data: redeemedRows, error: redeemedError } = await client
+      const { data: boughtBackRows, error: boughtBackError } = await client
         .from('transactions')
         .select('related_pawned_item_id')
         .eq('branch_id', branchId)
         .eq('environment', getEnvironment(user))
-        .in('purpose', ['Redeem', 'Buy Back']);
-      if (redeemedError) {
-        throw new InternalServerErrorException(redeemedError.message);
+        .in('purpose', ['Buy Back']);
+      if (boughtBackError) {
+        throw new InternalServerErrorException(boughtBackError.message);
       }
 
-      const redeemedPawnedIds = new Set(
-        (Array.isArray(redeemedRows) ? redeemedRows : [])
+      const boughtBackPawnedIds = new Set(
+        (Array.isArray(boughtBackRows) ? boughtBackRows : [])
           .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
           .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
       );
@@ -981,55 +1290,14 @@ export class InventoryService {
           isStatusIncludedInInventoryValuation(item.status) &&
           typeof item.item_id === 'string' &&
           item.item_id.trim().length > 0 &&
-          !redeemedPawnedIds.has(item.item_id),
+          !boughtBackPawnedIds.has(item.item_id),
       );
     } else {
-      const { data: pawnedItems, error: pawnedError } = await client
-        .from('pawned_items')
-        .select('item_id, item_name, category, status')
-        .eq('branch_id', branchId)
-        .eq('environment', getEnvironment(user))
-        .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
-      if (pawnedError) {
-        throw new InternalServerErrorException(pawnedError.message);
-      }
-
-      const { data: redeemedRows, error: redeemedError } = await client
-        .from('transactions')
-        .select('related_pawned_item_id')
-        .eq('branch_id', branchId)
-        .eq('environment', getEnvironment(user))
-        .in('purpose', ['Redeem', 'Buy Back']);
-      if (redeemedError) {
-        throw new InternalServerErrorException(redeemedError.message);
-      }
-
-      const redeemedPawnedIds = new Set(
-        (Array.isArray(redeemedRows) ? redeemedRows : [])
-          .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
-          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+      const openingAuditItems = await this.buildOpeningAuditSystemItems(
+        user,
+        branchId,
       );
-
-      const { data: saleItems, error: saleError } = await client
-        .from('sale_items')
-        .select('item_id, item_name, category')
-        .eq('branch_id', branchId)
-        .eq('environment', getEnvironment(user))
-        .in('status', ['Available', 'available']);
-      if (saleError) {
-        throw new InternalServerErrorException(saleError.message);
-      }
-
-      systemItemListSource = [
-        ...((Array.isArray(pawnedItems) ? pawnedItems : []).filter(
-          (item: { item_id?: string | null; status?: string | null }) =>
-            isStatusIncludedInInventoryValuation(item.status) &&
-            typeof item.item_id === 'string' &&
-            item.item_id.trim().length > 0 &&
-            !redeemedPawnedIds.has(item.item_id),
-        )),
-        ...(Array.isArray(saleItems) ? saleItems : []),
-      ];
+      systemItemListSource = openingAuditItems;
     }
 
     const normalizeId = (value: string) => value.trim().toUpperCase();
@@ -1238,13 +1506,39 @@ export class InventoryService {
       throw new InternalServerErrorException(error.message);
     }
 
+    let rows = Array.isArray(data) ? data : [];
+    const statusFilter = String(filters.status || '').trim().toLowerCase();
+    if (statusFilter === 'available' && rows.length > 0) {
+      const saleItemIds = rows.map((item: { id: string }) => item.id);
+      const { data: pendingTransfers, error: pendingError } = await client
+        .from('transfer_items')
+        .select('sale_item_id')
+        .in('sale_item_id', saleItemIds)
+        .eq('status', 'pending')
+        .eq('environment', getEnvironment(user));
+
+      if (pendingError) {
+        throw new InternalServerErrorException(pendingError.message);
+      }
+
+      const pendingSaleItemIds = new Set(
+        (Array.isArray(pendingTransfers) ? pendingTransfers : []).map(
+          (row: { sale_item_id: string }) => row.sale_item_id,
+        ),
+      );
+      rows = rows.filter(
+        (item: { id: string }) => !pendingSaleItemIds.has(item.id),
+      );
+    }
+
     return {
-      items: (data || []).map((item: any) => ({
+      items: rows.map((item: any) => ({
         id: item.id,
         itemId: item.item_id,
         itemName: item.item_name,
         category: item.category,
         branch: item.branch,
+        branchId: item.branch_id,
         availableDate: item.available_date,
         price: item.price,
         stockLevel: item.stock_level || 1,
@@ -1253,6 +1547,410 @@ export class InventoryService {
       })),
       total: count || 0,
     };
+  }
+
+  private mapTransferRow(
+    row: {
+      id: string;
+      sale_item_id: string;
+      item_id: string;
+      item_name: string;
+      source_branch_id: string;
+      target_branch_id: string;
+      status: string;
+      item_included?: string | null;
+      notes?: string | null;
+      requested_at?: string | null;
+    },
+    branchNames: Map<string, string>,
+  ) {
+    return {
+      id: row.id,
+      saleItemId: row.sale_item_id,
+      itemId: row.item_id,
+      itemName: row.item_name,
+      sourceBranchId: row.source_branch_id,
+      sourceBranchName:
+        branchNames.get(row.source_branch_id) || 'Source Branch',
+      targetBranchId: row.target_branch_id,
+      targetBranchName:
+        branchNames.get(row.target_branch_id) || 'Target Branch',
+      status: row.status,
+      itemIncluded: row.item_included || undefined,
+      notes: row.notes || undefined,
+      requestedAt: row.requested_at || undefined,
+    };
+  }
+
+  async findAllTransfers(user: UserWithBranch, branch?: string) {
+    const client = this.supabase.getClient();
+    const { branchId } = inventoryBranchFilters(user, branch);
+
+    let query = client
+      .from('transfer_items')
+      .select('*')
+      .eq('environment', getEnvironment(user))
+      .order('requested_at', { ascending: false });
+
+    if (branchId) {
+      query = query.or(
+        `source_branch_id.eq.${branchId},target_branch_id.eq.${branchId}`,
+      );
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    const branchIds = [
+      ...new Set(
+        rows.flatMap((row) => [row.source_branch_id, row.target_branch_id]),
+      ),
+    ];
+
+    const branchNames = new Map<string, string>();
+    if (branchIds.length > 0) {
+      const { data: branches, error: branchError } = await client
+        .from('branches')
+        .select('id, name')
+        .in('id', branchIds)
+        .eq('environment', getEnvironment(user));
+
+      if (branchError) {
+        throw new InternalServerErrorException(branchError.message);
+      }
+
+      for (const branchRow of branches || []) {
+        branchNames.set(branchRow.id, branchRow.name);
+      }
+    }
+
+    return {
+      transfers: rows.map((row) => this.mapTransferRow(row, branchNames)),
+    };
+  }
+
+  async getPendingTransferSummary(user: UserWithBranch, branch?: string) {
+    const client = this.supabase.getClient();
+    const { branchId } = inventoryBranchFilters(user, branch);
+
+    let incomingQuery = client
+      .from('transfer_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user));
+
+    let outgoingQuery = client
+      .from('transfer_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user));
+
+    if (branchId) {
+      incomingQuery = incomingQuery.eq('target_branch_id', branchId);
+      outgoingQuery = outgoingQuery.eq('source_branch_id', branchId);
+    }
+
+    const [incomingResult, outgoingResult] = await Promise.all([
+      incomingQuery,
+      outgoingQuery,
+    ]);
+
+    if (incomingResult.error) {
+      throw new InternalServerErrorException(incomingResult.error.message);
+    }
+    if (outgoingResult.error) {
+      throw new InternalServerErrorException(outgoingResult.error.message);
+    }
+
+    const incomingCount = incomingResult.count ?? 0;
+    const outgoingCount = outgoingResult.count ?? 0;
+
+    return {
+      incomingCount,
+      outgoingCount,
+      totalPending: incomingCount + outgoingCount,
+      needsReceipt: incomingCount > 0,
+    };
+  }
+
+  async createTransferRequest(
+    user: UserWithBranch & { id: string; authId?: string | null },
+    saleItemId: string,
+    dto: {
+      target_branch_id: string;
+      item_included?: string;
+      notes?: string;
+    },
+  ) {
+    const targetBranchId = dto.target_branch_id?.trim();
+    if (!targetBranchId) {
+      throw new BadRequestException('Destination branch is required');
+    }
+
+    const item = await this.findOneForSale(user, saleItemId);
+    const normalizedStatus = String(item.status || '').trim().toLowerCase();
+    if (normalizedStatus !== 'available') {
+      throw new BadRequestException('Only available items can be transferred');
+    }
+
+    const sourceBranchId = String(item.branch_id);
+    if (sourceBranchId === targetBranchId) {
+      throw new BadRequestException(
+        'Destination branch must differ from source branch',
+      );
+    }
+
+    const client = this.supabase.getClient();
+
+    const { data: pendingTransfer, error: pendingError } = await client
+      .from('transfer_items')
+      .select('id')
+      .eq('sale_item_id', saleItemId)
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user))
+      .maybeSingle();
+
+    if (pendingError) {
+      throw new InternalServerErrorException(pendingError.message);
+    }
+    if (pendingTransfer) {
+      throw new ConflictException('This item already has a pending transfer');
+    }
+
+    const { data: targetBranch, error: targetBranchError } = await client
+      .from('branches')
+      .select('id, name')
+      .eq('id', targetBranchId)
+      .eq('environment', getEnvironment(user))
+      .maybeSingle();
+
+    if (targetBranchError) {
+      throw new InternalServerErrorException(targetBranchError.message);
+    }
+    if (!targetBranch) {
+      throw new NotFoundException('Destination branch not found');
+    }
+
+    const { error: updateError } = await client
+      .from('sale_items')
+      .update({ status: 'Transfer Pending' })
+      .eq('id', saleItemId)
+      .eq('environment', getEnvironment(user));
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    const { data: transfer, error: insertError } = await client
+      .from('transfer_items')
+      .insert([
+        {
+          sale_item_id: saleItemId,
+          item_id: item.item_id,
+          item_name: item.item_name,
+          source_branch_id: sourceBranchId,
+          target_branch_id: targetBranchId,
+          requested_by_user_id: user.id,
+          status: 'pending',
+          item_included: dto.item_included?.trim() || null,
+          notes: dto.notes?.trim() || null,
+          ...environmentCreateFields(user),
+        },
+      ])
+      .select()
+      .single();
+
+    if (insertError) {
+      await client
+        .from('sale_items')
+        .update({ status: 'Available' })
+        .eq('id', saleItemId)
+        .eq('environment', getEnvironment(user));
+      throw new InternalServerErrorException(insertError.message);
+    }
+
+    const today = getPhCalendarDateString();
+    const transferDetails = [
+      `Item transfer to ${targetBranch.name}`,
+      dto.item_included?.trim()
+        ? `Included: ${dto.item_included.trim()}`
+        : null,
+      dto.notes?.trim() ? `Notes: ${dto.notes.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const { error: txError } = await client.from('transactions').insert([
+      {
+        transaction_no: `XFER-${Date.now()}`,
+        branch_id: sourceBranchId,
+        branch: item.branch ?? 'Unknown',
+        purpose: 'Transfer Item',
+        transaction_date: today,
+        transaction_time: getPhWallClockTimeString(),
+        cash_in: 0,
+        cash_out: 0,
+        unit: item.item_name ?? null,
+        unit_code: item.item_id ?? null,
+        details: transferDetails,
+        related_sale_item_id: saleItemId,
+        created_by_user_id: user.id,
+        ...environmentCreateFields(user),
+      },
+    ]);
+    if (txError) {
+      console.error(
+        '[InventoryService] Failed to create transfer transaction',
+        txError,
+      );
+    }
+
+    try {
+      await this.notificationsService.create({
+        title: `${item.item_name} incoming transfer`,
+        subtitle: `Transfer request from ${item.branch} [${item.item_id}]`,
+        message: `${item.item_name} is waiting to be received at ${targetBranch.name}. Open Transfer Items to confirm receipt.`,
+        category: 'Alerts',
+        branch_id: targetBranchId,
+        event_key: `inventory-transfer:${transfer.id}`,
+        notification_type: 'INVENTORY_ITEM_TRANSFER',
+        entity_type: 'inventory_transfer',
+        entity_id: transfer.id,
+        target_url: '/admin/pawn-transactions?itemTransfer=receive',
+        environment: getEnvironment(user),
+        created_by: user.authId ?? null,
+      });
+    } catch (error) {
+      console.warn(
+        '[InventoryService] Failed to create transfer notification',
+        error,
+      );
+    }
+
+    return {
+      message: 'Transfer request created',
+      transfer: this.mapTransferRow(transfer, new Map([[targetBranchId, targetBranch.name]])),
+    };
+  }
+
+  async receiveTransfer(
+    user: UserWithBranch & { id: string },
+    transferId: string,
+  ) {
+    const client = this.supabase.getClient();
+
+    const { data: transfer, error } = await client
+      .from('transfer_items')
+      .select('*')
+      .eq('id', transferId)
+      .eq('environment', getEnvironment(user))
+      .single();
+
+    if (error || !transfer) {
+      throw new NotFoundException('Transfer not found');
+    }
+
+    if (transfer.status !== 'pending') {
+      throw new ConflictException('Transfer is no longer pending');
+    }
+
+    assertResourceBranch(user, transfer.target_branch_id);
+
+    const { data: targetBranch, error: targetBranchError } = await client
+      .from('branches')
+      .select('name')
+      .eq('id', transfer.target_branch_id)
+      .eq('environment', getEnvironment(user))
+      .maybeSingle();
+
+    if (targetBranchError) {
+      throw new InternalServerErrorException(targetBranchError.message);
+    }
+    if (!targetBranch) {
+      throw new NotFoundException('Destination branch not found');
+    }
+
+    const { data: sourceBranch, error: sourceBranchError } = await client
+      .from('branches')
+      .select('name')
+      .eq('id', transfer.source_branch_id)
+      .eq('environment', getEnvironment(user))
+      .maybeSingle();
+
+    if (sourceBranchError) {
+      throw new InternalServerErrorException(sourceBranchError.message);
+    }
+
+    const now = new Date().toISOString();
+
+    const { error: transferUpdateError } = await client
+      .from('transfer_items')
+      .update({
+        status: 'received',
+        received_by_user_id: user.id,
+        received_at: now,
+        updated_at: now,
+      })
+      .eq('id', transferId)
+      .eq('environment', getEnvironment(user));
+
+    if (transferUpdateError) {
+      throw new InternalServerErrorException(transferUpdateError.message);
+    }
+
+    const { error: saleUpdateError } = await client
+      .from('sale_items')
+      .update({
+        branch_id: transfer.target_branch_id,
+        branch: targetBranch.name,
+        status: 'Available',
+        updated_at: now,
+      })
+      .eq('id', transfer.sale_item_id)
+      .eq('environment', getEnvironment(user));
+
+    if (saleUpdateError) {
+      throw new InternalServerErrorException(saleUpdateError.message);
+    }
+
+    const today = getPhCalendarDateString();
+    const receiveDetails = [
+      `Item received from ${sourceBranch?.name || 'source branch'}`,
+      transfer.item_included ? `Included: ${transfer.item_included}` : null,
+      transfer.notes ? `Notes: ${transfer.notes}` : null,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const { error: txError } = await client.from('transactions').insert([
+      {
+        transaction_no: `RCV-${Date.now()}`,
+        branch_id: transfer.target_branch_id,
+        branch: targetBranch.name,
+        purpose: 'Transfer Item',
+        transaction_date: today,
+        transaction_time: getPhWallClockTimeString(),
+        cash_in: 0,
+        cash_out: 0,
+        unit: transfer.item_name ?? null,
+        unit_code: transfer.item_id ?? null,
+        details: receiveDetails,
+        related_sale_item_id: transfer.sale_item_id,
+        created_by_user_id: user.id,
+        ...environmentCreateFields(user),
+      },
+    ]);
+    if (txError) {
+      console.error(
+        '[InventoryService] Failed to create receive transaction',
+        txError,
+      );
+    }
+
+    return { message: 'Transfer received successfully' };
   }
 
   async findForSaleStats(
@@ -1493,7 +2191,7 @@ export class InventoryService {
         branch: item.branch ?? 'Unknown',
         purpose: 'Sold Item',
         transaction_date: today,
-        transaction_time: new Date().toTimeString().slice(0, 8),
+        transaction_time: getPhWallClockTimeString(),
         cash_in: soldPrice,
         cash_out: 0,
         unit: item.item_name ?? null,

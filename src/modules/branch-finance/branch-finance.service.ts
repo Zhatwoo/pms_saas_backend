@@ -14,6 +14,7 @@ import {
 import {
   addManilaCalendarDays,
   getPhCalendarDateString,
+  normalizeWallClockTimeString,
 } from '../../common/utils/branch-calendar-date.util';
 import {
   SupabaseService,
@@ -26,6 +27,7 @@ import { FinanceDailyBalanceService } from './services/finance-daily-balance.ser
 import { BranchDaySessionService } from './services/branch-day-session.service';
 import { OpeningChecklistGateService } from './services/opening-checklist-gate.service';
 import { getEnvironment } from '../../common/utils/authorization.util';
+import { NotificationsService } from '../notifications/services/notifications.service';
 
 interface TransactionRow {
   id: string;
@@ -70,7 +72,6 @@ interface BranchRow {
 
 export type LedgerEntryType =
   | 'pawn'
-  | 'redeem'
   | 'buy_back'
   | 'renewal'
   | 'sale'
@@ -84,6 +85,7 @@ export interface LedgerEntry {
   id: string;
   date: string;
   time: string | null;
+  createdAt: string;
   type: LedgerEntryType;
   description: string;
   itemName: string | null;
@@ -121,7 +123,6 @@ export interface BranchFinanceSummary {
   todayCashOut: number;
   breakdown: {
     pawnOut: number;
-    redeemIn: number;
     buyBackIn: number;
     renewalIn: number;
     saleIn: number;
@@ -148,6 +149,7 @@ export class BranchFinanceService {
     private readonly financeAudit: FinanceAuditService,
     private readonly branchDaySession: BranchDaySessionService,
     private readonly openingGate: OpeningChecklistGateService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async getBusinessSession(user: UserWithBranch, branchQuery?: string) {
@@ -227,6 +229,26 @@ export class BranchFinanceService {
         ipAddress: audit?.ipAddress ?? null,
         userAgent: audit?.userAgent ?? null,
       });
+
+      const logoutMessage =
+        'End Day was completed for your branch. Please sign in again to start the next branch day.';
+
+      await this.notificationsService.create({
+        title: 'Branch day ended',
+        subtitle: logoutMessage,
+        message: logoutMessage,
+        category: 'Alerts',
+        notification_type: 'BRANCH_DAY_ENDED',
+        entity_type: 'branch_day_end',
+        entity_id: branchId,
+        branch_id: branchId,
+        user_id: null,
+        target_role: Role.EMPLOYEE,
+        target_url: '/login',
+        environment: getEnvironment(user),
+        created_by: user.authId ?? null,
+        event_key: `branch-day-end:${branchId}:${res.businessDate}:${Date.now()}`,
+      });
     }
 
     return {
@@ -248,7 +270,7 @@ export class BranchFinanceService {
     openingDate: string,
   ): Promise<number> {
     const amount =
-      await this.financeDailyBalance.suggestedStartingCashForBusinessDate(
+      await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
         branchId,
         openingDate,
       );
@@ -478,9 +500,6 @@ export class BranchFinanceService {
     if (purpose === 'pawn' || purpose === 'new pawn') {
       return 'pawn';
     }
-    if (purpose === 'redeem') {
-      return 'redeem';
-    }
     if (purpose === 'buy back') {
       return 'buy_back';
     }
@@ -513,9 +532,6 @@ export class BranchFinanceService {
     switch (type) {
       case 'pawn':
         parts.push('New Pawn');
-        break;
-      case 'redeem':
-        parts.push('Redeem');
         break;
       case 'buy_back':
         parts.push('Buy Back');
@@ -569,7 +585,8 @@ export class BranchFinanceService {
     return {
       id: row.id,
       date: row.transaction_date ?? row.created_at.split('T')[0],
-      time: row.transaction_time ?? null,
+      time: normalizeWallClockTimeString(row.transaction_time),
+      createdAt: row.created_at,
       type,
       description: this.buildDescription(row, type),
       itemName: this.getItemName(row),
@@ -752,7 +769,6 @@ export class BranchFinanceService {
 
         const breakdown = {
           pawnOut: 0,
-          redeemIn: 0,
           buyBackIn: 0,
           renewalIn: 0,
           saleIn: 0,
@@ -783,9 +799,6 @@ export class BranchFinanceService {
           switch (type) {
             case 'pawn':
               breakdown.pawnOut += co;
-              break;
-            case 'redeem':
-              breakdown.redeemIn += ci;
               break;
             case 'buy_back':
               breakdown.buyBackIn += ci;
@@ -849,7 +862,6 @@ export class BranchFinanceService {
           todayCashOut: Number(todayCashOut.toFixed(2)),
           breakdown: {
             pawnOut: Number(breakdown.pawnOut.toFixed(2)),
-            redeemIn: Number(breakdown.redeemIn.toFixed(2)),
             buyBackIn: Number(breakdown.buyBackIn.toFixed(2)),
             renewalIn: Number(breakdown.renewalIn.toFixed(2)),
             saleIn: Number(breakdown.saleIn.toFixed(2)),
@@ -1025,6 +1037,11 @@ export class BranchFinanceService {
     });
     const needsStartingBalance = !daySession || daySession.is_closed;
     if (needsStartingBalance) {
+      const expectedAmount =
+        await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
+          branchId,
+          today,
+        );
       const basis =
         await this.financeDailyBalance.suggestedStartingBasisForBusinessDate(
           branchId,
@@ -1033,8 +1050,8 @@ export class BranchFinanceService {
       const dateStr =
         basis.closedSessionRecordDate ?? addManilaCalendarDays(today, -1);
       return {
-        startingBalance: basis.amount,
-        endingBalance: basis.amount,
+        startingBalance: expectedAmount,
+        endingBalance: expectedAmount,
         date: dateStr,
       };
     }

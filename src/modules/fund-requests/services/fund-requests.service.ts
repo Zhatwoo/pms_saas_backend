@@ -14,7 +14,7 @@ import {
   requireUserBranchId,
   superAdminBranchNameFilter,
 } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString } from '../../../common/utils/branch-calendar-date.util';
+import { getPhCalendarDateString, getPhWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import { BranchDaySessionService } from '../../branch-finance/services/branch-day-session.service';
@@ -760,7 +760,7 @@ export class FundRequestsService {
         purpose: 'Fund Transfer',
         // Align with Prisma/daily_balances: Asia/Manila business date (not UTC).
         transaction_date: getPhCalendarDateString(now),
-        transaction_time: now.toTimeString().slice(0, 8),
+        transaction_time: getPhWallClockTimeString(now),
         cash_in: isInbound ? params.amount : 0,
         cash_out: isInbound ? 0 : params.amount,
         return_amount: 0,
@@ -822,7 +822,7 @@ export class FundRequestsService {
         branch: 'System / Head Office',
         purpose: 'Fund Transfer',
         transaction_date: getPhCalendarDateString(now),
-        transaction_time: now.toTimeString().slice(0, 8),
+        transaction_time: getPhWallClockTimeString(now),
         cash_in: 0,
         cash_out: params.amount,
         return_amount: 0,
@@ -875,7 +875,7 @@ export class FundRequestsService {
           branch: params.sourceBranch.name,
           purpose: 'Fund Transfer',
           transaction_date: getPhCalendarDateString(now),
-          transaction_time: now.toTimeString().slice(0, 8),
+          transaction_time: getPhWallClockTimeString(now),
           cash_in: 0,
           cash_out: params.amount,
           return_amount: 0,

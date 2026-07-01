@@ -223,6 +223,35 @@ export class BranchesService {
     }
   }
 
+  /** Active branches available as transfer destinations in the item transfer modal. */
+  async findTransferDestinations(user: UserWithBranch) {
+    try {
+      const rows = await this.prisma.branches.findMany({
+        where: applyEnvironmentFilter(user, { status: 'Active' }),
+        select: this.branchCardSelect,
+        orderBy: { name: 'asc' },
+      });
+
+      return rows.map((row) =>
+        this.mapBranchFromDb(row as unknown as Record<string, unknown>),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Could not load transfer destinations';
+      this.logger.error(
+        `findTransferDestinations failed: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        process.env.NODE_ENV !== 'production'
+          ? message
+          : 'Could not load transfer destinations',
+      );
+    }
+  }
+
   /** Admin / employee: only their assigned branch. Super admin: all. */
   async findAllForActor(user: UserWithBranch) {
     try {

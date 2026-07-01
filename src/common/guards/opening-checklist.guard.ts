@@ -8,6 +8,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { Role } from '../enums';
 import { REQUIRES_OPENING_CHECKLIST_KEY } from '../decorators/requires-opening-checklist.decorator';
+import { ALLOW_OPENING_INVENTORY_AUDIT_KEY } from '../decorators/allow-opening-inventory-audit.decorator';
 import { OpeningChecklistGateService } from '../../modules/branch-finance/services/opening-checklist-gate.service';
 
 type OpeningChecklistRequest = Request & {
@@ -44,6 +45,20 @@ export class OpeningChecklistGuard implements CanActivate {
 
     if (!user.branchId) {
       throw new ForbiddenException('Branch opening checklist is required');
+    }
+
+    const allowInventoryAudit = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_OPENING_INVENTORY_AUDIT_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    if (allowInventoryAudit) {
+      const auditAllowed = await this.openingGate.isInventoryAuditAllowed(
+        user.branchId,
+      );
+      if (auditAllowed) {
+        return true;
+      }
     }
 
     const allowed = await this.openingGate.isModulesAllowed(
