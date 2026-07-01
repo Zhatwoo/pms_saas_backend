@@ -21,6 +21,8 @@ import {
   INVENTORY_VALUATION_STATUSES,
   isStatusIncludedInInventoryValuation,
   findInterestRateGroup,
+  isPawnItemWithinOpeningAuditWindow,
+  OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
 import {
   environmentCreateFields,
@@ -130,6 +132,194 @@ export class InventoryService {
       getPhCalendarDateString(),
       delta,
     );
+  }
+
+  private async loadInterestRates(user: UserWithBranch): Promise<any[]> {
+    const { data } = await this.supabase
+      .getClient()
+      .from('shop_settings')
+      .select('setting_value')
+      .eq('setting_key', 'interest_rates')
+      .eq('environment', getEnvironment(user))
+      .maybeSingle();
+
+    return (data?.setting_value as any[]) || [];
+  }
+
+  private async buildOpeningAuditSystemItems(
+    user: UserWithBranch,
+    branchId: string,
+  ): Promise<
+    Array<{
+      item_id: string;
+      item_name: string;
+      category: string;
+      source: 'pawned' | 'sale';
+      status: string;
+    }>
+  > {
+    const client = this.supabase.getClient();
+    const interestRates = await this.loadInterestRates(user);
+
+    const [pawnedResult, saleResult, pendingTransfersResult] =
+      await Promise.all([
+        client
+          .from('pawned_items')
+          .select('id, item_id, item_name, category, status, pawn_date')
+          .eq('branch_id', branchId)
+          .eq('environment', getEnvironment(user))
+          .eq('status', 'Active'),
+        client
+          .from('sale_items')
+          .select('id, item_id, item_name, category, status')
+          .eq('branch_id', branchId)
+          .eq('environment', getEnvironment(user))
+          .in('status', ['Available', 'available']),
+        client
+          .from('transfer_items')
+          .select('sale_item_id')
+          .eq('source_branch_id', branchId)
+          .eq('status', 'pending')
+          .eq('environment', getEnvironment(user)),
+      ]);
+
+    if (pawnedResult.error) {
+      throw new InternalServerErrorException(pawnedResult.error.message);
+    }
+    if (saleResult.error) {
+      throw new InternalServerErrorException(saleResult.error.message);
+    }
+    if (pendingTransfersResult.error) {
+      throw new InternalServerErrorException(pendingTransfersResult.error.message);
+    }
+
+    const pendingTransferSaleIds = new Set(
+      (Array.isArray(pendingTransfersResult.data)
+        ? pendingTransfersResult.data
+        : []
+      ).map((row: { sale_item_id?: string | null }) => row.sale_item_id),
+    );
+
+    const pawnedItems = (Array.isArray(pawnedResult.data)
+      ? pawnedResult.data
+      : []
+    ).filter(
+      (item: {
+        item_id?: string | null;
+        pawn_date?: string | null;
+        category?: string | null;
+      }) =>
+        typeof item.item_id === 'string' &&
+        item.item_id.trim().length > 0 &&
+        isPawnItemWithinOpeningAuditWindow(
+          item.pawn_date,
+          item.category,
+          interestRates,
+        ),
+    );
+
+    const saleItems = (Array.isArray(saleResult.data) ? saleResult.data : [])
+      .filter(
+        (item: { id?: string | null; item_id?: string | null }) =>
+          typeof item.item_id === 'string' &&
+          item.item_id.trim().length > 0 &&
+          !pendingTransferSaleIds.has(item.id ?? ''),
+      )
+      .map((item: {
+        item_id: string;
+        item_name: string;
+        category: string;
+        status?: string | null;
+      }) => ({
+        item_id: item.item_id,
+        item_name: item.item_name,
+        category: item.category,
+        source: 'sale' as const,
+        status: item.status || 'Available',
+      }));
+
+    return [
+      ...pawnedItems.map(
+        (item: {
+          item_id: string;
+          item_name: string;
+          category: string;
+          status?: string | null;
+        }) => ({
+          item_id: item.item_id,
+          item_name: item.item_name,
+          category: item.category,
+          source: 'pawned' as const,
+          status: item.status || 'Active',
+        }),
+      ),
+      ...saleItems,
+    ];
+  }
+
+  async findOpeningAuditChecklist(user: UserWithBranch, branch?: string) {
+    const { branchId } = inventoryBranchFilters(user, branch);
+    if (!branchId) {
+      throw new BadRequestException('A single branch is required for opening audit');
+    }
+
+    assertResourceBranch(user, branchId);
+    const items = await this.buildOpeningAuditSystemItems(user, branchId);
+
+    const uniqueItems = Array.from(
+      items
+        .reduce((map, item) => {
+          const normalizedId = item.item_id.trim().toUpperCase();
+          if (!map.has(normalizedId)) {
+            map.set(normalizedId, {
+              itemId: normalizedId,
+              itemName: item.item_name,
+              category: item.category,
+              status: item.status,
+              source: item.source,
+            });
+          }
+          return map;
+        }, new Map<string, {
+          itemId: string;
+          itemName: string;
+          category: string;
+          status: string;
+          source: 'pawned' | 'sale';
+        }>())
+        .values(),
+    );
+
+    return { items: uniqueItems };
+  }
+
+  private isItemEligibleForOpeningAudit(
+    item: {
+      type?: string;
+      status?: string | null;
+      pawnDate?: string | null;
+      category?: string | null;
+    },
+    interestRates: any[],
+  ): boolean {
+    const normalizedStatus = String(item.status || '').trim().toLowerCase();
+
+    if (item.type === 'SALE' || normalizedStatus === 'available') {
+      return normalizedStatus === 'available';
+    }
+
+    if (item.type === 'PAWNED' || normalizedStatus === 'active') {
+      return (
+        normalizedStatus === 'active' &&
+        isPawnItemWithinOpeningAuditWindow(
+          item.pawnDate,
+          item.category,
+          interestRates,
+        )
+      );
+    }
+
+    return false;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -415,7 +605,11 @@ export class InventoryService {
     };
   }
 
-  async findByItemId(user: UserWithBranch, itemId: string) {
+  async findByItemId(
+    user: UserWithBranch,
+    itemId: string,
+    openingAudit = false,
+  ) {
     const client = this.supabase.getClient();
     const cleanId = itemId.trim().toUpperCase();
 
@@ -499,10 +693,71 @@ export class InventoryService {
 
     const pawnedStatus = String(pawnedData?.status || '').trim();
     const pawnedIsCurrentInventory = isStatusIncludedInInventoryValuation(pawnedStatus);
+    const interestRates = openingAudit
+      ? await this.loadInterestRates(user)
+      : [];
+
+    const assertOpeningAuditItem = async (item: {
+      type?: string;
+      status?: string | null;
+      pawnDate?: string | null;
+      category?: string | null;
+      saleItemId?: string | null;
+    }) => {
+      if (!openingAudit) {
+        return;
+      }
+
+      if (item.type === 'TRANSFER') {
+        throw new BadRequestException(
+          'Transfer items are not part of the opening inventory scan.',
+        );
+      }
+
+      if (item.saleItemId) {
+        const { data: pendingTransfer } = await client
+          .from('transfer_items')
+          .select('id')
+          .eq('sale_item_id', item.saleItemId)
+          .eq('status', 'pending')
+          .eq('environment', getEnvironment(user))
+          .maybeSingle();
+
+        if (pendingTransfer) {
+          throw new BadRequestException(
+            'Items with a pending transfer cannot be scanned during opening audit.',
+          );
+        }
+      }
+
+      if (
+        !this.isItemEligibleForOpeningAudit(
+          {
+            type: item.type,
+            status: item.status,
+            pawnDate: item.pawnDate,
+            category: item.category,
+          },
+          interestRates,
+        )
+      ) {
+        throw new BadRequestException(
+          `Only available sale items and active pawn items within ${OPENING_AUDIT_PAWN_WINDOW_DAYS} days of maturity can be scanned during opening audit.`,
+        );
+      }
+    };
 
     if (saleData) {
       assertResourceBranch(user, saleData.branch_id);
       const originalPhoto = await this.resolveStorageUrl(saleData.image_url);
+
+      await assertOpeningAuditItem({
+        type: 'SALE',
+        status: saleData.status,
+        pawnDate: saleData.available_date,
+        category: saleData.category,
+        saleItemId: saleData.id,
+      });
 
       return {
         id: saleData.id,
@@ -517,7 +772,7 @@ export class InventoryService {
       };
     }
 
-    if (transferData) {
+    if (transferData && !openingAudit) {
       assertResourceBranch(user, transferData.target_branch_id);
 
       const { data: targetBranch } = await client
@@ -584,6 +839,13 @@ export class InventoryService {
           this.resolveStorageUrl(pawnedData.id_photo),
           this.resolveStorageUrl(pawnedData.id_back_photo),
         ]);
+
+      await assertOpeningAuditItem({
+        type: 'PAWNED',
+        status: pawnedData.status,
+        pawnDate: pawnedData.pawn_date,
+        category: pawnedData.category,
+      });
 
       return {
         id: pawnedData.id,
@@ -1031,68 +1293,11 @@ export class InventoryService {
           !boughtBackPawnedIds.has(item.item_id),
       );
     } else {
-      const { data: pawnedItems, error: pawnedError } = await client
-        .from('pawned_items')
-        .select('item_id, item_name, category, status')
-        .eq('branch_id', branchId)
-        .eq('environment', getEnvironment(user))
-        .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
-      if (pawnedError) {
-        throw new InternalServerErrorException(pawnedError.message);
-      }
-
-      const { data: boughtBackRows, error: boughtBackError } = await client
-        .from('transactions')
-        .select('related_pawned_item_id')
-        .eq('branch_id', branchId)
-        .eq('environment', getEnvironment(user))
-        .in('purpose', ['Buy Back']);
-      if (boughtBackError) {
-        throw new InternalServerErrorException(boughtBackError.message);
-      }
-
-      const boughtBackPawnedIds = new Set(
-        (Array.isArray(boughtBackRows) ? boughtBackRows : [])
-          .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
-          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+      const openingAuditItems = await this.buildOpeningAuditSystemItems(
+        user,
+        branchId,
       );
-
-      const { data: saleItems, error: saleError } = await client
-        .from('sale_items')
-        .select('item_id, item_name, category')
-        .eq('branch_id', branchId)
-        .eq('environment', getEnvironment(user))
-        .in('status', ['Available', 'available']);
-      if (saleError) {
-        throw new InternalServerErrorException(saleError.message);
-      }
-
-      const { data: transferItems, error: transferError } = await client
-        .from('transfer_items')
-        .select('item_id, item_name')
-        .eq('target_branch_id', branchId)
-        .eq('status', 'pending')
-        .eq('environment', getEnvironment(user));
-      if (transferError) {
-        throw new InternalServerErrorException(transferError.message);
-      }
-
-      systemItemListSource = [
-        ...((Array.isArray(pawnedItems) ? pawnedItems : []).filter(
-          (item: { item_id?: string | null; status?: string | null }) =>
-            isStatusIncludedInInventoryValuation(item.status) &&
-            typeof item.item_id === 'string' &&
-            item.item_id.trim().length > 0 &&
-            !boughtBackPawnedIds.has(item.item_id),
-        )),
-        ...(Array.isArray(saleItems) ? saleItems : []),
-        ...((Array.isArray(transferItems) ? transferItems : []).map(
-          (item: { item_id?: string | null; item_name?: string | null }) => ({
-            ...item,
-            category: 'Transfer Item',
-          }),
-        )),
-      ];
+      systemItemListSource = openingAuditItems;
     }
 
     const normalizeId = (value: string) => value.trim().toUpperCase();
