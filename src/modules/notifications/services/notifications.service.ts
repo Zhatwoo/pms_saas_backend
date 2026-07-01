@@ -315,6 +315,8 @@ export class NotificationsService {
           : '/incident-report';
       case 'user_branch_transfer':
         return '/dashboard';
+      case 'inventory_transfer':
+        return '/admin/pawn-transactions?itemTransfer=receive';
       case 'password_request':
         return '/settings';
       case 'system':

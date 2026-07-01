@@ -1632,6 +1632,50 @@ export class InventoryService {
     };
   }
 
+  async getPendingTransferSummary(user: UserWithBranch, branch?: string) {
+    const client = this.supabase.getClient();
+    const { branchId } = inventoryBranchFilters(user, branch);
+
+    let incomingQuery = client
+      .from('transfer_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user));
+
+    let outgoingQuery = client
+      .from('transfer_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .eq('environment', getEnvironment(user));
+
+    if (branchId) {
+      incomingQuery = incomingQuery.eq('target_branch_id', branchId);
+      outgoingQuery = outgoingQuery.eq('source_branch_id', branchId);
+    }
+
+    const [incomingResult, outgoingResult] = await Promise.all([
+      incomingQuery,
+      outgoingQuery,
+    ]);
+
+    if (incomingResult.error) {
+      throw new InternalServerErrorException(incomingResult.error.message);
+    }
+    if (outgoingResult.error) {
+      throw new InternalServerErrorException(outgoingResult.error.message);
+    }
+
+    const incomingCount = incomingResult.count ?? 0;
+    const outgoingCount = outgoingResult.count ?? 0;
+
+    return {
+      incomingCount,
+      outgoingCount,
+      totalPending: incomingCount + outgoingCount,
+      needsReceipt: incomingCount > 0,
+    };
+  }
+
   async createTransferRequest(
     user: UserWithBranch & { id: string; authId?: string | null },
     saleItemId: string,
@@ -1768,11 +1812,14 @@ export class InventoryService {
       await this.notificationsService.create({
         title: `${item.item_name} incoming transfer`,
         subtitle: `Transfer request from ${item.branch} [${item.item_id}]`,
+        message: `${item.item_name} is waiting to be received at ${targetBranch.name}. Open Transfer Items to confirm receipt.`,
         category: 'Alerts',
         branch_id: targetBranchId,
         event_key: `inventory-transfer:${transfer.id}`,
-        entity_type: 'sale_item',
-        entity_id: item.item_id,
+        notification_type: 'INVENTORY_ITEM_TRANSFER',
+        entity_type: 'inventory_transfer',
+        entity_id: transfer.id,
+        target_url: '/admin/pawn-transactions?itemTransfer=receive',
         environment: getEnvironment(user),
         created_by: user.authId ?? null,
       });
