@@ -76,11 +76,7 @@ export class QRReplacementRequestsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Body() dto: ApproveQRReplacementRequestDto,
   ) {
-    return this.qrReplacementService.approveRequest(
-      requestId,
-      req.user,
-      dto,
-    );
+    return this.qrReplacementService.approveRequest(requestId, req.user, dto);
   }
 
   @Put(':requestId/reject')

@@ -251,7 +251,8 @@ export class AuthService {
         });
 
         const messages: Record<string, string> = {
-          UNKNOWN_DEVICE: 'Unauthorized Device. Please request authorization from your admin.',
+          UNKNOWN_DEVICE:
+            'Unauthorized Device. Please request authorization from your admin.',
           DEVICE_BLOCKED: 'This device has been blocked. Contact your admin.',
           DEVICE_PENDING: 'Device authorization is pending admin approval.',
         };

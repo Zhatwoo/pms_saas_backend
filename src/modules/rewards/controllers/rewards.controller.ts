@@ -57,10 +57,7 @@ export class RewardsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('activeOnly') activeOnly?: string,
   ) {
-    return this.rewardsService.findAllRewards(
-      req.user,
-      activeOnly === 'true',
-    );
+    return this.rewardsService.findAllRewards(req.user, activeOnly === 'true');
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

@@ -17,11 +17,18 @@ export function isSuperAdmin(user: AuthorizedUser): boolean {
   return user.role === Role.SUPER_ADMIN;
 }
 
-export function isDeveloper(user: Pick<AuthorizedUser, 'email' | 'isDeveloper'>): boolean {
-  return Boolean(user.isDeveloper) || (user.email ?? '').trim().toLowerCase().endsWith('@dev.com');
+export function isDeveloper(
+  user: Pick<AuthorizedUser, 'email' | 'isDeveloper'>,
+): boolean {
+  return (
+    Boolean(user.isDeveloper) ||
+    (user.email ?? '').trim().toLowerCase().endsWith('@dev.com')
+  );
 }
 
-export function getEnvironment(user: Pick<AuthorizedUser, 'email' | 'isDeveloper'>): DataEnvironment {
+export function getEnvironment(
+  user: Pick<AuthorizedUser, 'email' | 'isDeveloper'>,
+): DataEnvironment {
   return isDeveloper(user) ? 'development' : 'production';
 }
 
@@ -40,14 +47,15 @@ export function applyDeveloperIsolation<T extends Record<string, unknown>>(
 }
 
 export function environmentCreateFields(
-  user: Pick<AuthorizedUser, 'email' | 'isDeveloper'> & { authId?: string | null },
+  user: Pick<AuthorizedUser, 'email' | 'isDeveloper'> & {
+    authId?: string | null;
+  },
 ): { environment: DataEnvironment; created_by?: string | null } {
   return {
     environment: getEnvironment(user),
     created_by: user.authId ?? null,
   };
 }
-
 
 export function checkRole(user: AuthorizedUser, allowedRoles: Role[]): void {
   if (!allowedRoles.includes(user.role)) {

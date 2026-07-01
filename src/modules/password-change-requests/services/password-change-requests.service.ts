@@ -529,36 +529,34 @@ export class PasswordChangeRequestsService {
       },
     });
 
-    await Promise.all(
-      [
+    await Promise.all([
+      this.notificationsService.create({
+        title: 'Password Change Request Submitted',
+        subtitle: `Your request was sent to ${targetRole === Role.ADMIN ? 'your branch admin' : 'system admin'} for approval.`,
+        category: 'Requests',
+        notification_type: 'PASSWORD_CHANGE_REQUEST',
+        user_id: requester.id,
+        branch_id: requester.branchId ?? undefined,
+        event_key: `password-change:${requestId}:requester-submitted`,
+        target_url: '/settings',
+        entity_type: 'password_request',
+        entity_id: requestId,
+      }),
+      ...approvers.map((approver) =>
         this.notificationsService.create({
-          title: 'Password Change Request Submitted',
-          subtitle: `Your request was sent to ${targetRole === Role.ADMIN ? 'your branch admin' : 'system admin'} for approval.`,
+          title: 'Password Change Request',
+          subtitle: `${requester.fullName || requester.email} requested approval to change password.`,
           category: 'Requests',
           notification_type: 'PASSWORD_CHANGE_REQUEST',
-          user_id: requester.id,
+          user_id: approver.id,
           branch_id: requester.branchId ?? undefined,
-          event_key: `password-change:${requestId}:requester-submitted`,
+          event_key: `password-change:${requestId}:approver:${approver.id}`,
           target_url: '/settings',
           entity_type: 'password_request',
           entity_id: requestId,
         }),
-        ...approvers.map((approver) =>
-          this.notificationsService.create({
-            title: 'Password Change Request',
-            subtitle: `${requester.fullName || requester.email} requested approval to change password.`,
-            category: 'Requests',
-            notification_type: 'PASSWORD_CHANGE_REQUEST',
-            user_id: approver.id,
-            branch_id: requester.branchId ?? undefined,
-            event_key: `password-change:${requestId}:approver:${approver.id}`,
-            target_url: '/settings',
-            entity_type: 'password_request',
-            entity_id: requestId,
-          }),
-        ),
-      ],
-    );
+      ),
+    ]);
 
     const usersById = await this.loadUsersByIds([requester.id]);
     return this.mapRecord(
@@ -703,7 +701,7 @@ export class PasswordChangeRequestsService {
     });
 
     const approvers = await this.getApprovers(
-      existing.targetRole as Role.ADMIN | Role.SUPER_ADMIN,
+      existing.targetRole,
       existing.requesterBranchId,
     );
 

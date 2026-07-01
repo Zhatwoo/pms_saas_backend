@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
@@ -64,7 +68,9 @@ export class CategoriesService {
         },
       });
       if (existing) {
-        throw new ConflictException(`Category name "${dto.name}" already exists`);
+        throw new ConflictException(
+          `Category name "${dto.name}" already exists`,
+        );
       }
     }
 

@@ -10,11 +10,7 @@ export class CacheService {
     return await this.cacheManager.get<T>(key);
   }
 
-  async set<T>(
-    key: string,
-    value: T,
-    ttl?: number,
-  ): Promise<void> {
+  async set<T>(key: string, value: T, ttl?: number): Promise<void> {
     await this.cacheManager.set(key, value, ttl);
   }
 

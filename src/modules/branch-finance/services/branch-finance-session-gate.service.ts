@@ -48,8 +48,7 @@ export class BranchFinanceSessionGateService {
     if (row.is_closed) {
       throw new HttpException(
         {
-          message:
-            'Branch is closed for the day. Please start a new session.',
+          message: 'Branch is closed for the day. Please start a new session.',
           error: 'SESSION_CLOSED',
           branch_id: branchId,
           business_date: businessDateStr,
