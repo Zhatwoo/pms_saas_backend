@@ -14,6 +14,7 @@ export type NotificationEntityType =
   | 'incident_ticket'
   | 'password_request'
   | 'user_branch_transfer'
+  | 'inventory_transfer'
   | 'system';
 
 export type NotificationCreateInput = {

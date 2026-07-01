@@ -328,6 +328,15 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('transfers/pending-summary')
+  getPendingTransferSummary(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.getPendingTransferSummary(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get('transfers')
   findAllTransfers(
     @Req() req: { user: AuthenticatedUserProfile },
