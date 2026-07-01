@@ -729,7 +729,8 @@ export class CustomersService {
               ? parsedDetails.customer_id
               : null;
 
-        if (!detailsCustomerId || !duplicateIdSet.has(detailsCustomerId)) continue;
+        if (!detailsCustomerId || !duplicateIdSet.has(detailsCustomerId))
+          continue;
 
         pendingLogUpdates.push({
           id: log.id,

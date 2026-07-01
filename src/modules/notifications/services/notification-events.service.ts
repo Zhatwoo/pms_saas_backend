@@ -45,7 +45,9 @@ export type NotificationRealtimeEvent =
 export class NotificationEventsService {
   private readonly events$ = new Subject<NotificationRealtimeEvent>();
 
-  streamFor(user: AuthenticatedUserProfile): Observable<NotificationRealtimeEvent> {
+  streamFor(
+    user: AuthenticatedUserProfile,
+  ): Observable<NotificationRealtimeEvent> {
     return merge(
       of<NotificationRealtimeEvent>({
         type: 'notification.ready',
@@ -83,7 +85,10 @@ export class NotificationEventsService {
     user: AuthenticatedUserProfile,
     event: NotificationRealtimeEvent,
   ): boolean {
-    if (event.type === 'notification.ready' || event.type === 'notification.ping') {
+    if (
+      event.type === 'notification.ready' ||
+      event.type === 'notification.ping'
+    ) {
       return true;
     }
 

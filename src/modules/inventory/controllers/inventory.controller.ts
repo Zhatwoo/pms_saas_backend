@@ -11,7 +11,11 @@ import {
   Patch,
 } from '@nestjs/common';
 import { InventoryService } from '../services/inventory.service';
-import { Public, Roles, AllowOpeningInventoryAudit } from '../../../common/decorators';
+import {
+  Public,
+  Roles,
+  AllowOpeningInventoryAudit,
+} from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { RequiresOpeningChecklist } from '../../../common/decorators';

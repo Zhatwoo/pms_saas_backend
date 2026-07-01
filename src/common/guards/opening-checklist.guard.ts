@@ -36,7 +36,9 @@ export class OpeningChecklistGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<OpeningChecklistRequest>();
+    const request = context
+      .switchToHttp()
+      .getRequest<OpeningChecklistRequest>();
     const user = request.user;
 
     if (!user || user.role === Role.SUPER_ADMIN) {

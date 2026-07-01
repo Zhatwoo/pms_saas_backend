@@ -7,7 +7,9 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
+import { NotificationsService } from '../../../modules/notifications/services/notifications.service';
 import { Role } from '../../../common/enums';
+import type { NotificationCreateInput } from '../../../modules/notifications/types/notification.types';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import {
   applyEnvironmentFilter,
@@ -26,6 +28,7 @@ export class DevicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private decryptUserJoin<
@@ -96,7 +99,9 @@ export class DevicesService {
               environment: getEnvironment(actor),
             },
             include: {
-              employee: { select: { id: true, full_name: true, email: true, role: true } },
+              employee: {
+                select: { id: true, full_name: true, email: true, role: true },
+              },
             },
             orderBy: { created_at: 'desc' },
             take: 20,
@@ -282,7 +287,9 @@ export class DevicesService {
 
     if (existing) {
       if (existing.status === 'AUTHORIZED') {
-        throw new BadRequestException('This device is already authorized for your account.');
+        throw new BadRequestException(
+          'This device is already authorized for your account.',
+        );
       }
       if (existing.status === 'BLOCKED') {
         throw new ForbiddenException('Device is blocked');
@@ -302,7 +309,7 @@ export class DevicesService {
         throw new ForbiddenException('Device is blocked');
       }
 
-      return this.prisma.authorized_devices.update({
+      const device = await this.prisma.authorized_devices.update({
         where: { id: existingFingerprint.id },
         data: {
           employee_id: resolvedEmployeeId,
@@ -316,9 +323,28 @@ export class DevicesService {
           updated_at: new Date(),
         },
       });
+
+      // Fire notification asynchronously (non-blocking)
+      // employee_id is guaranteed to be non-null here because we validated resolvedEmployeeId above
+      if (device.employee_id) {
+        this.notifyDeviceAuthorizationRequest(
+          device.id,
+          device.device_fingerprint,
+          device.device_name,
+          device.device_type,
+          device.ip_address,
+          device.employee_id,
+          device.branch_id,
+          device.environment as 'production' | 'development',
+        ).catch(() => {
+          // Error already logged in notifyDeviceAuthorizationRequest
+        });
+      }
+
+      return device;
     }
 
-    return this.prisma.authorized_devices.create({
+    const device = await this.prisma.authorized_devices.create({
       data: {
         employee_id: resolvedEmployeeId,
         branch_id: resolvedBranchId ?? undefined,
@@ -331,9 +357,32 @@ export class DevicesService {
         created_by: resolvedAuthId,
       },
     });
+
+    // Fire notification asynchronously (non-blocking)
+    // employee_id is guaranteed to be non-null here because we validated resolvedEmployeeId above
+    if (device.employee_id) {
+      this.notifyDeviceAuthorizationRequest(
+        device.id,
+        device.device_fingerprint,
+        device.device_name,
+        device.device_type,
+        device.ip_address,
+        device.employee_id,
+        device.branch_id,
+        device.environment as 'production' | 'development',
+      ).catch(() => {
+        // Error already logged in notifyDeviceAuthorizationRequest
+      });
+    }
+
+    return device;
   }
 
-  async update(actor: AuthenticatedUserProfile, id: string, dto: UpdateDeviceDto) {
+  async update(
+    actor: AuthenticatedUserProfile,
+    id: string,
+    dto: UpdateDeviceDto,
+  ) {
     await this.findOne(actor, id);
     return this.prisma.authorized_devices.update({
       where: { id },
@@ -361,10 +410,7 @@ export class DevicesService {
   }
 
   /** All login log entries. Super admin sees all; admin sees own branch. */
-  async findLogs(
-    actor: AuthenticatedUserProfile,
-    limit = 200,
-  ) {
+  async findLogs(actor: AuthenticatedUserProfile, limit = 200) {
     if (actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
       throw new ForbiddenException('Access denied');
     }
@@ -379,7 +425,13 @@ export class DevicesService {
         where: applyEnvironmentFilter(actor, branchFilter),
         include: {
           employee: {
-            select: { id: true, full_name: true, email: true, role: true, avatar_url: true },
+            select: {
+              id: true,
+              full_name: true,
+              email: true,
+              role: true,
+              avatar_url: true,
+            },
           },
         },
         orderBy: { created_at: 'desc' },
@@ -470,4 +522,69 @@ export class DevicesService {
     }
   }
 
+  /** Create device authorization notification for super admins (fire-and-forget pattern). */
+  private async notifyDeviceAuthorizationRequest(
+    deviceId: string,
+    deviceFingerprint: string,
+    deviceName: string,
+    deviceType: string,
+    ipAddress: string | null,
+    employeeId: string,
+    branchId: string | null,
+    environment: 'production' | 'development',
+  ): Promise<void> {
+    try {
+      // Fetch employee details for notification context
+      const employee = await this.prisma.users.findUnique({
+        where: { id: employeeId },
+        select: {
+          id: true,
+          full_name: true,
+          email: true,
+          branch_id: true,
+        },
+      });
+
+      if (!employee) {
+        this.logger.warn(
+          `Cannot create device auth notification: employee ${employeeId} not found`,
+        );
+        return;
+      }
+
+      // Build notification message
+      const messageParts = [
+        `Device: ${deviceName} (${deviceType})`,
+        `Requested by: ${employee.full_name} (${employee.email})`,
+      ];
+
+      if (ipAddress) {
+        messageParts.push(`IP Address: ${ipAddress}`);
+      }
+
+      const message = messageParts.join('\n');
+
+      // Create notification payload
+      const payload: NotificationCreateInput = {
+        title: `Device Authorization Request from ${employee.full_name}`,
+        message,
+        category: 'Requests',
+        entity_type: 'system',
+        entity_id: deviceId,
+        event_key: `device_auth_request:${deviceId}`,
+        target_role: Role.SUPER_ADMIN,
+        user_id: null,
+        branch_id: branchId,
+        environment,
+      };
+
+      // Create notification (non-blocking)
+      await this.notificationsService.create(payload);
+    } catch (error) {
+      // Log error but don't propagate - notification failure should not block authorization
+      this.logger.error(
+        `Failed to create device authorization notification for device ${deviceId}, employee ${employeeId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 }

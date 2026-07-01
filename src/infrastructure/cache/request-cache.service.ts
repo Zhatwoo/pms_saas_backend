@@ -3,7 +3,7 @@ import { Injectable, Scope } from '@nestjs/common';
 /**
  * Request-scoped cache for storing data that should only be cached
  * during a single HTTP request to prevent stale data issues.
- * 
+ *
  * Example: Branch metadata lookups should be consistent within a request
  * but should refresh on the next request to pick up any updates.
  */
@@ -26,10 +26,7 @@ export class RequestCacheService {
   /**
    * Get or compute a value from request cache
    */
-  getOrCompute<T>(
-    key: string,
-    factory: () => T | Promise<T>,
-  ): T | Promise<T> {
+  getOrCompute<T>(key: string, factory: () => T | Promise<T>): T | Promise<T> {
     if (this.cache.has(key)) {
       return this.cache.get(key) as T;
     }

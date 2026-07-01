@@ -4,8 +4,7 @@
  */
 export const DISPLAY_TIMEZONE_IANA = 'Asia/Manila' as const;
 
-const OFFSET_LIKE =
-  /^(?:gmt|utc)\s*\+?\s*0?8(?::00)?$/i;
+const OFFSET_LIKE = /^(?:gmt|utc)\s*\+?\s*0?8(?::00)?$/i;
 
 /** True if the value is a known-invalid PG zone string we remap to Manila operations. */
 export function isInvalidJsStyleOffsetTimezone(raw: string): boolean {

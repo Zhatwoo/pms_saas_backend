@@ -52,10 +52,7 @@ export class DevicesController {
    *  Employee email in the body is used to look up their DB id. */
   @Public()
   @Post('request-authorization')
-  requestAuthorization(
-    @Req() req: any,
-    @Body() dto: RequestAuthorizationDto,
-  ) {
+  requestAuthorization(@Req() req: any, @Body() dto: RequestAuthorizationDto) {
     return this.devicesService.requestAuthorization(
       null,
       dto,
