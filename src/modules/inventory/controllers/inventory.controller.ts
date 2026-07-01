@@ -85,12 +85,27 @@ export class InventoryController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @AllowOpeningInventoryAudit()
+  @Get('opening-audit/checklist')
+  findOpeningAuditChecklist(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.findOpeningAuditChecklist(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @AllowOpeningInventoryAudit()
   @Get('item/:itemId')
   findByItemId(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('itemId') itemId: string,
+    @Query('opening_audit') openingAudit?: string,
   ) {
-    return this.inventoryService.findByItemId(req.user, itemId);
+    return this.inventoryService.findByItemId(
+      req.user,
+      itemId,
+      openingAudit === '1' || openingAudit === 'true',
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
