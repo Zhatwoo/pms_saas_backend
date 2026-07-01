@@ -313,6 +313,15 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('transfers')
+  findAllTransfers(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.findAllTransfers(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @AllowOpeningInventoryAudit()
   @Get('for-sale')
   findAllForSale(
@@ -345,6 +354,30 @@ export class InventoryController {
     @Body() dto: any,
   ) {
     return this.inventoryService.createForSale(req.user, dto);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('for-sale/:id/transfer-request')
+  createTransferRequest(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body()
+    dto: {
+      target_branch_id: string;
+      item_included?: string;
+      notes?: string;
+    },
+  ) {
+    return this.inventoryService.createTransferRequest(req.user, id, dto);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('transfers/:id/receive')
+  receiveTransfer(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.inventoryService.receiveTransfer(req.user, id);
   }
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
