@@ -117,7 +117,9 @@ export class NotificationsService {
     return { success: true, unreadCount };
   }
 
-  async create(payload: NotificationCreateInput): Promise<NotificationDto | null> {
+  async create(
+    payload: NotificationCreateInput,
+  ): Promise<NotificationDto | null> {
     try {
       const eventKey = payload.event_key?.trim() || null;
       if (eventKey) {
@@ -276,7 +278,9 @@ export class NotificationsService {
   }
 
   private buildTargetUrl(payload: NotificationCreateInput): string | null {
-    const entityType = payload.entity_type as NotificationEntityType | undefined;
+    const entityType = payload.entity_type as
+      | NotificationEntityType
+      | undefined;
     const entityId = payload.entity_id ?? null;
 
     if (payload.customer_id) {

@@ -47,10 +47,7 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async getRequestsByBranch(
-    user: AuthenticatedUserProfile,
-    branchId: string,
-  ) {
+  async getRequestsByBranch(user: AuthenticatedUserProfile, branchId: string) {
     const supabase = this.supabaseService.getClient();
     assertBranchAccess(user, branchId);
 
@@ -150,10 +147,7 @@ export class QRReplacementRequestsService {
     return data;
   }
 
-  async markAsCompleted(
-    user: AuthenticatedUserProfile,
-    requestId: string,
-  ) {
+  async markAsCompleted(user: AuthenticatedUserProfile, requestId: string) {
     const supabase = this.supabaseService.getClient();
 
     const { data, error } = await supabase
