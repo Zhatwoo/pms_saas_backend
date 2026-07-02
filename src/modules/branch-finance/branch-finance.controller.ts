@@ -53,7 +53,12 @@ export class BranchFinanceController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Post('end-day')
   endBranchDay(
-    @Req() req: { user: AuthenticatedUserProfile; ip?: string; headers?: Record<string, unknown> },
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      ip?: string;
+      headers?: Record<string, unknown>;
+    },
     @Body() body: EndBranchDayDto,
   ) {
     return this.branchFinanceService.endBranchDay(req.user, body, {
@@ -68,7 +73,12 @@ export class BranchFinanceController {
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Post('daily-balance')
   confirmDailyBalance(
-    @Req() req: { user: AuthenticatedUserProfile; ip?: string; headers?: Record<string, unknown> },
+    @Req()
+    req: {
+      user: AuthenticatedUserProfile;
+      ip?: string;
+      headers?: Record<string, unknown>;
+    },
     @Body() body: ConfirmDailyBalanceDto,
   ) {
     return this.branchFinanceService.confirmDailyBalance(

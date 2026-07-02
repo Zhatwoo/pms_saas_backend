@@ -11,7 +11,11 @@ import {
   Patch,
 } from '@nestjs/common';
 import { InventoryService } from '../services/inventory.service';
-import { Public, Roles, AllowOpeningInventoryAudit } from '../../../common/decorators';
+import {
+  Public,
+  Roles,
+  AllowOpeningInventoryAudit,
+} from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { RequiresOpeningChecklist } from '../../../common/decorators';
@@ -85,12 +89,27 @@ export class InventoryController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @AllowOpeningInventoryAudit()
+  @Get('opening-audit/checklist')
+  findOpeningAuditChecklist(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.findOpeningAuditChecklist(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @AllowOpeningInventoryAudit()
   @Get('item/:itemId')
   findByItemId(
     @Req() req: { user: AuthenticatedUserProfile },
     @Param('itemId') itemId: string,
+    @Query('opening_audit') openingAudit?: string,
   ) {
-    return this.inventoryService.findByItemId(req.user, itemId);
+    return this.inventoryService.findByItemId(
+      req.user,
+      itemId,
+      openingAudit === '1' || openingAudit === 'true',
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -313,6 +332,24 @@ export class InventoryController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('transfers/pending-summary')
+  getPendingTransferSummary(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.getPendingTransferSummary(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Get('transfers')
+  findAllTransfers(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Query('branch') branch?: string,
+  ) {
+    return this.inventoryService.findAllTransfers(req.user, branch);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @AllowOpeningInventoryAudit()
   @Get('for-sale')
   findAllForSale(
@@ -345,6 +382,30 @@ export class InventoryController {
     @Body() dto: any,
   ) {
     return this.inventoryService.createForSale(req.user, dto);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('for-sale/:id/transfer-request')
+  createTransferRequest(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+    @Body()
+    dto: {
+      target_branch_id: string;
+      item_included?: string;
+      notes?: string;
+    },
+  ) {
+    return this.inventoryService.createTransferRequest(req.user, id, dto);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
+  @Post('transfers/:id/receive')
+  receiveTransfer(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Param('id') id: string,
+  ) {
+    return this.inventoryService.receiveTransfer(req.user, id);
   }
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)

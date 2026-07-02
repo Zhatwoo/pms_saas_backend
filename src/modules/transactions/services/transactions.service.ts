@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -16,13 +17,23 @@ import {
   isSuperAdmin,
   requireBranchId,
 } from '../../../common/utils/authorization.util';
-import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString, getPhWallClockTimeString, normalizeWallClockTimeString, resolveTransactionCalendarDate, resolveTransactionWallClockTime } from '../../../common/utils/branch-calendar-date.util';
+import {
+  effectiveBranchIdForQuery,
+  requireUserBranchId,
+} from '../../../common/utils/branch-scope.util';
+import {
+  getPhCalendarDateString,
+  getPhWallClockTimeString,
+  normalizeWallClockTimeString,
+  resolveTransactionCalendarDate,
+  resolveTransactionWallClockTime,
+} from '../../../common/utils/branch-calendar-date.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { RewardsService } from '../../rewards/services/rewards.service';
 import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
+import { UploadBuybackProofDto } from '../dto/upload-buyback-proof.dto';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
@@ -60,6 +71,7 @@ const TX_SELECT = {
   profile_photo: true,
   id_photo: true,
   id_back_photo: true,
+  buyback_proof: true,
   created_by_user_id: true,
   environment: true,
   created_by: true,
@@ -131,7 +143,6 @@ const ALLOWED_TRANSACTION_PURPOSES = new Set([
   'Pawn',
   'Buy Back',
   'Renew',
-  'Redeem',
   'Sold Item',
   'Sale',
   'Expense',
@@ -239,7 +250,7 @@ export class TransactionsService implements OnModuleInit {
       return;
     }
 
-    if (purpose === 'Buy Back' || purpose === 'Redeem') {
+    if (purpose === 'Buy Back') {
       if (amounts.cashIn <= 0 || amounts.cashOut !== 0) {
         throw new BadRequestException(
           `${purpose} transactions must be cash-in only`,
@@ -355,10 +366,12 @@ export class TransactionsService implements OnModuleInit {
 
     const createdByUser = this.encryption.decryptUsersJoin(row.users);
 
-    const [resolvedIdPhoto, resolvedIdBackPhoto] = await Promise.all([
-      this.resolveStorageUrl(row.id_photo),
-      this.resolveStorageUrl(row.id_back_photo),
-    ]);
+    const [resolvedIdPhoto, resolvedIdBackPhoto, resolvedBuybackProof] =
+      await Promise.all([
+        this.resolveStorageUrl(row.id_photo),
+        this.resolveStorageUrl(row.id_back_photo),
+        this.resolveStorageUrl(row.buyback_proof),
+      ]);
 
     return {
       ...row,
@@ -372,6 +385,7 @@ export class TransactionsService implements OnModuleInit {
       details: this.encryption.decryptTransactionDetails(row.details),
       id_photo: resolvedIdPhoto,
       id_back_photo: resolvedIdBackPhoto,
+      buyback_proof: resolvedBuybackProof,
       pawned_item: pawnedItemsDecrypted
         ? {
             ...pawnedItemsDecrypted,
@@ -553,6 +567,7 @@ export class TransactionsService implements OnModuleInit {
       profile_photo: dtoClean.profile_photo ?? null,
       id_photo: idPhotoUrl,
       id_back_photo: dtoClean.id_back_photo ?? null,
+      buyback_proof: dtoClean.buyback_proof ?? null,
       ...environmentCreateFields(user),
     };
 
@@ -566,7 +581,7 @@ export class TransactionsService implements OnModuleInit {
         status: string;
       } | null = null;
 
-      if (purpose === 'Buy Back' || purpose === 'Redeem') {
+      if (purpose === 'Buy Back') {
         linkedPawnedItem = await this.resolveLinkedPawnedItem(
           tx,
           user,
@@ -584,7 +599,9 @@ export class TransactionsService implements OnModuleInit {
           throw new BadRequestException('Pawned item is already redeemed.');
         }
 
-        const principal = Number(linkedPawnedItem.amount ?? amounts.pawnAmount ?? 0);
+        const principal = Number(
+          linkedPawnedItem.amount ?? amounts.pawnAmount ?? 0,
+        );
         if (!Number.isFinite(principal) || principal <= 0) {
           throw new BadRequestException(
             'Buy back principal amount is invalid for this pawned item.',
@@ -593,9 +610,11 @@ export class TransactionsService implements OnModuleInit {
 
         amounts.pawnAmount = Number(principal.toFixed(2));
         amounts.cashIn = Number(
-          (amounts.pawnAmount + amounts.storageFee + amounts.returnAmount).toFixed(
-            2,
-          ),
+          (
+            amounts.pawnAmount +
+            amounts.storageFee +
+            amounts.returnAmount
+          ).toFixed(2),
         );
 
         payload.related_pawned_item_id = linkedPawnedItem.id;
@@ -648,7 +667,7 @@ export class TransactionsService implements OnModuleInit {
         select: TX_SELECT,
       });
 
-      if (linkedPawnedItem && (purpose === 'Buy Back' || purpose === 'Redeem')) {
+      if (linkedPawnedItem && purpose === 'Buy Back') {
         await tx.pawned_items.update({
           where: { id: linkedPawnedItem.id },
           data: {
@@ -922,7 +941,7 @@ export class TransactionsService implements OnModuleInit {
       soldItem: rows.filter(
         (t) => t.purpose === 'Sold Item' || t.purpose === 'Sale',
       ).length,
-      redeemed: rows.filter((t) => t.purpose === 'Redeem').length,
+      boughtBack: rows.filter((t) => t.purpose === 'Buy Back').length,
       transfer: rows.filter(
         (t) => t.purpose === 'Fund Transfer' || t.purpose === 'Cash Transfer',
       ).length,
@@ -1056,10 +1075,7 @@ export class TransactionsService implements OnModuleInit {
     return signedData.signedUrl;
   }
 
-  private buildRenewalUploadPath(
-    branchId: string,
-    customerId: string,
-  ) {
+  private buildRenewalUploadPath(branchId: string, customerId: string) {
     const timestamp = Date.now();
     const rand = Math.random().toString(36).slice(2, 8);
     return `${branchId}/${customerId}/renewal_${timestamp}_${rand}.jpg`;
@@ -1123,6 +1139,159 @@ export class TransactionsService implements OnModuleInit {
     }
   }
 
+  async uploadBuybackProof(
+    user: UserWithBranch,
+    dto: UploadBuybackProofDto,
+  ): Promise<{ proofUrl: string }> {
+    console.log('=== UPLOAD BUYBACK PROOF SERVICE CALLED ===');
+    console.log('User:', user.role, user.id);
+    console.log('DTO:', {
+      transactionNo: dto.transactionNo,
+      fileName: dto.fileName,
+      fileDataLength: dto.fileData?.length,
+    });
+
+    // Authorization check
+    if (
+      user.role !== Role.SUPER_ADMIN &&
+      user.role !== Role.ADMIN &&
+      user.role !== Role.EMPLOYEE
+    ) {
+      throw new ForbiddenException(
+        'You are not allowed to upload buyback proofs',
+      );
+    }
+
+    // Determine branch ID
+    const branchId =
+      user.role === Role.SUPER_ADMIN
+        ? dto.branchId?.trim() || 'super-admin'
+        : requireUserBranchId(user);
+
+    console.log('Branch ID:', branchId);
+
+    // Get Supabase client
+    const client = this.supabase.getClient();
+
+    // Decode base64 data
+    const base64Data = dto.fileData.includes(',')
+      ? dto.fileData.split(',')[1]
+      : dto.fileData;
+    const fileBuffer = Buffer.from(base64Data, 'base64');
+
+    console.log('File buffer size:', fileBuffer.length, 'bytes');
+
+    // Extract and validate file extension
+    const extension = this.getUploadExtension(dto.fileData, dto.fileName);
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+    if (!allowedExtensions.includes(extension)) {
+      throw new BadRequestException(
+        'Invalid file extension. Only JPG, PNG, and WEBP are allowed.',
+      );
+    }
+
+    console.log('File extension:', extension);
+
+    // Extract and validate MIME type
+    const contentType = this.getUploadContentType(dto.fileData, dto.fileName);
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedMimeTypes.includes(contentType)) {
+      throw new BadRequestException(
+        'Invalid file type. Only JPEG, PNG, and WEBP are allowed.',
+      );
+    }
+
+    console.log('Content type:', contentType);
+
+    // Validate file size (4MB limit as per requirements)
+    const MAX_SIZE = 4 * 1024 * 1024;
+    if (fileBuffer.length > MAX_SIZE) {
+      throw new BadRequestException('File is too large. Maximum size is 4MB.');
+    }
+
+    // Generate unique filename: {branchId}/buyback_{transactionNo}_{timestamp}_{originalFileName}
+    const branchPart = this.sanitizePathPart(branchId);
+    const transactionPart = this.sanitizePathPart(dto.transactionNo);
+    const timestamp = Date.now();
+    const sanitizedFileName = this.sanitizePathPart(
+      dto.fileName.replace(/\.[^.]+$/, ''),
+    ); // Remove extension from original filename
+    const filePath = `${branchPart}/buyback_${transactionPart}_${timestamp}_${sanitizedFileName}.${extension}`;
+
+    console.log('File path:', filePath);
+    console.log('Uploading to Supabase storage...');
+
+    // Upload to Supabase storage with upsert enabled
+    const { error } = await client.storage
+      .from('buyback-proofs')
+      .upload(filePath, fileBuffer, {
+        upsert: true,
+        contentType: contentType,
+      });
+
+    if (error) {
+      console.error('Upload error:', error);
+      throw new InternalServerErrorException(
+        `Proof upload failed: ${error.message}`,
+      );
+    }
+
+    console.log('✓ Upload successful!');
+
+    // Get and return public URL
+    const { data } = client.storage
+      .from('buyback-proofs')
+      .getPublicUrl(filePath);
+
+    console.log('Public URL:', data.publicUrl);
+
+    return { proofUrl: data.publicUrl };
+  }
+
+  private sanitizePathPart(value: string): string {
+    return value
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  private getUploadContentType(fileData: string, fileName?: string): string {
+    if (fileData.startsWith('data:')) {
+      const header = fileData.slice(0, fileData.indexOf(','));
+      const match = header.match(/^data:([^;]+);base64$/i);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+
+    if (fileName) {
+      const ext = fileName.split('.').pop()?.toLowerCase();
+      if (ext === 'png') return 'image/png';
+      if (ext === 'webp') return 'image/webp';
+      if (ext === 'gif') return 'image/gif';
+    }
+
+    return 'image/jpeg';
+  }
+
+  private getUploadExtension(fileData: string, fileName?: string): string {
+    if (fileName && fileName.includes('.')) {
+      return fileName.split('.').pop()?.toLowerCase() ?? 'jpg';
+    }
+
+    if (fileData.startsWith('data:')) {
+      const header = fileData.slice(0, fileData.indexOf(','));
+      const match = header.match(/^data:[^/]+\/([^;]+);base64$/i);
+      if (match?.[1]) {
+        const ext = match[1].toLowerCase();
+        if (ext === 'jpeg') return 'jpg';
+        return ext;
+      }
+    }
+
+    return 'jpg';
+  }
+
   async syncPastRenewals() {
     try {
       const renewTx = await this.prisma.transactions.findMany({
@@ -1151,7 +1320,9 @@ export class TransactionsService implements OnModuleInit {
         });
 
         if (!existingRenewal) {
-          console.log(`[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date}`);
+          console.log(
+            `[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date}`,
+          );
           await this.prisma.item_renewals.create({
             data: {
               pawned_item_id: pawnedItemId,
@@ -1180,9 +1351,11 @@ export class TransactionsService implements OnModuleInit {
         if (latestRenewal) {
           const renewalDate = new Date(latestRenewal.renewal_date);
           const pawnDate = new Date(item.pawn_date);
-          
+
           if (renewalDate.getTime() > pawnDate.getTime()) {
-            console.log(`[Sync] Updating pawn_date of item ${item.item_id} from ${item.pawn_date} to ${latestRenewal.renewal_date}`);
+            console.log(
+              `[Sync] Updating pawn_date of item ${item.item_id} from ${item.pawn_date} to ${latestRenewal.renewal_date}`,
+            );
             await this.prisma.pawned_items.update({
               where: { id: item.id },
               data: {
@@ -1193,7 +1366,9 @@ export class TransactionsService implements OnModuleInit {
           }
         }
       }
-      console.log('[Sync] Past renewals synchronization completed successfully.');
+      console.log(
+        '[Sync] Past renewals synchronization completed successfully.',
+      );
     } catch (error) {
       console.error('[Sync] Failed to sync past renewals:', error);
     }

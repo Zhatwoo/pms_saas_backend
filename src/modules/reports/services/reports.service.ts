@@ -130,7 +130,9 @@ export class ReportsService {
     // Sum sales for the requested period
     const periodTotalSales = (salesData || []).reduce(
       (sum, row) =>
-        isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in),
+        isNonRevenuePurpose(row.purpose)
+          ? sum
+          : sum + this.toMoney(row.cash_in),
       0,
     );
 
@@ -144,7 +146,10 @@ export class ReportsService {
     if (branchId) todaySalesQuery = todaySalesQuery.eq('branch_id', branchId);
     const { data: todaySalesData } = await todaySalesQuery;
     const totalSalesToday = (todaySalesData || []).reduce(
-      (sum, row) => (isNonRevenuePurpose(row.purpose) ? sum : sum + this.toMoney(row.cash_in)),
+      (sum, row) =>
+        isNonRevenuePurpose(row.purpose)
+          ? sum
+          : sum + this.toMoney(row.cash_in),
       0,
     );
 

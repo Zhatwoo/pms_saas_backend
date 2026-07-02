@@ -173,10 +173,11 @@ export class BranchDaySessionService {
     branchId: string,
     businessDateStr: string,
   ): Promise<number> {
-    const amount = await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
-      branchId,
-      businessDateStr,
-    );
+    const amount =
+      await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
+        branchId,
+        businessDateStr,
+      );
     this.logger.debug(
       `[ResolveSuggestedStart] branch=${branchId} date=${businessDateStr} amount=${amount}`,
     );
@@ -427,15 +428,13 @@ export class BranchDaySessionService {
           shiftCutoff,
         );
 
-      const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
-        tx,
-        {
+      const balances =
+        await this.financeDailyBalance.persistConfirmationBalancesInTx(tx, {
           branchId: params.branchId,
           businessDateStr: todayStr,
           mode: 'starting',
           confirmedAmount,
-        },
-      );
+        });
 
       this.logger.log(
         `[StartingBalance] persisted branch=${params.branchId} businessDate=${todayStr} starting=${balances.startingBalance} ending=${balances.endingBalance} operationalCutoff=${shiftCutoff.toISOString()}`,
@@ -600,15 +599,13 @@ export class BranchDaySessionService {
           ? Number(params.physicalEndingAmount.toFixed(2))
           : Number((systemEnding ?? 0).toFixed(2));
 
-      const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
-        tx,
-        {
+      const balances =
+        await this.financeDailyBalance.persistConfirmationBalancesInTx(tx, {
           branchId: params.branchId,
           businessDateStr: closeDateStr,
           mode: 'ending',
           confirmedAmount: persistConfirmed,
-        },
-      );
+        });
 
       await this.closeBranchDaySessionInTx(tx, row.id, {
         actorUserId: params.actorUserId,
@@ -643,7 +640,7 @@ export class BranchDaySessionService {
   }
 
   /**
-   * Auto-close historical Manila sessions left open (midnight PH rollover).
+   * Auto-close open Manila sessions due for the 6 PM PH end-day sweep.
    */
   async autoCloseStaleOpenSessions(): Promise<
     Array<{
@@ -658,7 +655,7 @@ export class BranchDaySessionService {
 
     const stale = await this.prisma.branch_day_sessions.findMany({
       where: {
-        session_date: { lt: todayDate },
+        session_date: { lte: todayDate },
         is_closed: false,
       },
       select: { id: true, branch_id: true, session_date: true },
@@ -710,18 +707,14 @@ export class BranchDaySessionService {
             },
           });
 
-          await this.safeClearDailyOpeningInTx(
-            tx,
-            locked.branch_id,
-            closeDate,
-          );
+          await this.safeClearDailyOpeningInTx(tx, locked.branch_id, closeDate);
 
           await this.upsertJournalMarker(tx, {
             branchId: locked.branch_id,
             branchName: branch?.name ?? 'Unknown',
             businessDateStr: closeDateStr,
             purpose: TransactionPurpose.END,
-            details: `Branch business day auto-closed at Manila midnight — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
+            details: `Branch business day auto-closed at 6:00 PM Manila time — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
             createdByUserId: null,
           });
 
