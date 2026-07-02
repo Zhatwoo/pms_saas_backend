@@ -22,6 +22,7 @@ import {
   isStatusIncludedInInventoryValuation,
   findInterestRateGroup,
   isPawnItemWithinOpeningAuditWindow,
+  normalizeInterestRates,
   OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
 import {
@@ -143,7 +144,7 @@ export class InventoryService {
       .eq('environment', getEnvironment(user))
       .maybeSingle();
 
-    return (data?.setting_value as any[]) || [];
+    return normalizeInterestRates(data?.setting_value);
   }
 
   private async buildOpeningAuditSystemItems(
@@ -376,7 +377,7 @@ export class InventoryService {
       .eq('setting_key', 'interest_rates')
       .eq('environment', getEnvironment(user))
       .maybeSingle();
-    const interestRates = (interestRatesData?.setting_value as any[]) || [];
+    const interestRates = normalizeInterestRates(interestRatesData?.setting_value);
     const today = new Date();
 
     const filteredItems = (data || []).filter((item: any) => {

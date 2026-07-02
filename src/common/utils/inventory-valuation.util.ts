@@ -75,9 +75,30 @@ export function categoryNamesMatch(cat1: string, cat2: string): boolean {
   return vars1.some(v => vars2.includes(v));
 }
 
-export function findInterestRateGroup(interestRates: any[], category?: string): any | null {
+export function normalizeInterestRates(settingValue: unknown): any[] {
+  if (settingValue == null) {
+    return [];
+  }
+  if (Array.isArray(settingValue)) {
+    return settingValue;
+  }
+  if (typeof settingValue === 'string') {
+    try {
+      return normalizeInterestRates(JSON.parse(settingValue));
+    } catch {
+      return [];
+    }
+  }
+  if (typeof settingValue === 'object') {
+    return Object.values(settingValue as Record<string, unknown>);
+  }
+  return [];
+}
+
+export function findInterestRateGroup(interestRates: unknown, category?: string): any | null {
+  const rates = normalizeInterestRates(interestRates);
   if (!category) return null;
-  return interestRates.find((group) =>
+  return rates.find((group) =>
     group.categories?.some((cat: string) => categoryNamesMatch(cat, category))
   ) ?? null;
 }
@@ -88,7 +109,7 @@ export const OPENING_AUDIT_PAWN_WINDOW_DAYS = 7;
 export function getPawnMaturityDaysRemaining(
   pawnDate: string | Date | null | undefined,
   category: string | null | undefined,
-  interestRates: any[],
+  interestRates: unknown,
   asOf: Date = new Date(),
 ): number | null {
   if (!pawnDate) {
@@ -108,7 +129,7 @@ export function getPawnMaturityDaysRemaining(
 export function isPawnItemWithinOpeningAuditWindow(
   pawnDate: string | Date | null | undefined,
   category: string | null | undefined,
-  interestRates: any[],
+  interestRates: unknown,
   windowDays: number = OPENING_AUDIT_PAWN_WINDOW_DAYS,
   asOf: Date = new Date(),
 ): boolean {
