@@ -33,10 +33,21 @@ function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
 
+function authCookieSecure() {
+  const raw = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  if (raw === 'true' || raw === '1') {
+    return true;
+  }
+  if (raw === 'false' || raw === '0') {
+    return false;
+  }
+  return isProduction();
+}
+
 function accessCookieOptions(maxAgeSeconds?: number) {
   return {
     httpOnly: true,
-    secure: isProduction(),
+    secure: authCookieSecure(),
     sameSite: 'lax' as const,
     path: '/',
     maxAge: Math.max(1, maxAgeSeconds ?? 3600) * 1000,
@@ -46,7 +57,7 @@ function accessCookieOptions(maxAgeSeconds?: number) {
 function rememberedCookieOptions(maxAgeSeconds = 2_592_000) {
   return {
     httpOnly: false,
-    secure: isProduction(),
+    secure: authCookieSecure(),
     sameSite: 'lax' as const,
     path: '/',
     maxAge: maxAgeSeconds * 1000,
@@ -108,12 +119,12 @@ export class AuthController {
     res.clearCookie(ACCESS_TOKEN_COOKIE, {
       path: '/',
       httpOnly: true,
-      secure: isProduction(),
+      secure: authCookieSecure(),
       sameSite: 'lax',
     });
     res.clearCookie(WAS_LOGGED_IN_COOKIE, {
       path: '/',
-      secure: isProduction(),
+      secure: authCookieSecure(),
       sameSite: 'lax',
     });
     return { success: true };

@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { WebSocketLikeConstructor } from '@supabase/realtime-js';
+import WebSocket from 'ws';
 import { Role } from '../enums';
 import { PrismaService } from '../../infrastructure/prisma';
 import { EncryptionService } from '../encryption/encryption.service';
@@ -65,6 +67,9 @@ export class SupabaseService {
     this.anonKey = anonKey || '';
     this.client = createClient(url, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
+      realtime: {
+        transport: WebSocket as unknown as WebSocketLikeConstructor,
+      },
     });
   }
 
@@ -81,6 +86,9 @@ export class SupabaseService {
 
     return createClient(this.url, this.anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
+      realtime: {
+        transport: WebSocket as unknown as WebSocketLikeConstructor,
+      },
     });
   }
 
