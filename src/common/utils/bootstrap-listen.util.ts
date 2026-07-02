@@ -60,7 +60,11 @@ export async function listenNestApplication(
         `Port ${preferredPort} is already in use (EADDRINUSE). Use a different PORT in .env, stop the existing Nest/other process, set PORT_FALLBACK, or for local dev only set RELEASE_PORT_BEFORE_LISTEN=true.`,
       );
 
-      if (fallbackPort != null && fallbackPort > 0 && fallbackPort !== preferredPort) {
+      if (
+        fallbackPort != null &&
+        fallbackPort > 0 &&
+        fallbackPort !== preferredPort
+      ) {
         if (process.env.RELEASE_PORT_BEFORE_LISTEN === 'true') {
           tryReleaseListeningPort(fallbackPort, logger);
         }

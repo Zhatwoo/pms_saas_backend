@@ -1,7 +1,9 @@
 /**
  * Start/End rows are journal markers only (zero cash); they must not move operational cash totals.
  */
-export function isJournalPurposeStartEnd(purpose: string | null | undefined): boolean {
+export function isJournalPurposeStartEnd(
+  purpose: string | null | undefined,
+): boolean {
   const p = (purpose ?? '').trim().toLowerCase();
   return p === 'start' || p === 'end';
 }
@@ -25,7 +27,11 @@ export function isInboundBranchCashFundTransferRow(row: {
   }
   const unit = (row.unit ?? '').toLowerCase().trim();
   const purpose = (row.purpose ?? '').toLowerCase().trim();
-  return unit === 'fund_transfer' || purpose === 'cash transfer' || purpose === 'fund transfer';
+  return (
+    unit === 'fund_transfer' ||
+    purpose === 'cash transfer' ||
+    purpose === 'fund transfer'
+  );
 }
 
 /** Any posted fund-transfer journal row (inbound or outbound branch cash). */

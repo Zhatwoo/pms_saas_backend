@@ -1,9 +1,4 @@
-import {
-  HttpException,
-  HttpStatus,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { addManilaCalendarDays } from '../../../common/utils/branch-calendar-date.util';
 import { TransactionPurpose } from '../../../common/enums';
@@ -231,7 +226,9 @@ export class FinanceDailyBalanceService {
       ...new Set(
         rows
           .map((r) => r.branch_id)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+          .filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          ),
       ),
     ];
     if (branchIds.length === 0) {
@@ -624,14 +621,14 @@ export class FinanceDailyBalanceService {
     });
     const preOpen = rows.filter(
       (r) =>
-        isFundTransferBookRow(r) &&
-        this.txCreatedAtMs(r.created_at) < cutoffMs,
+        isFundTransferBookRow(r) && this.txCreatedAtMs(r.created_at) < cutoffMs,
     );
-    const confirmedPreOpen = await this.excludeInboundFundTransfersAwaitingReceiptRows(
-      preOpen,
-      undefined,
-      opts,
-    );
+    const confirmedPreOpen =
+      await this.excludeInboundFundTransfersAwaitingReceiptRows(
+        preOpen,
+        undefined,
+        opts,
+      );
     return Number(operationalNetFromRows(confirmedPreOpen).toFixed(2));
   }
 
@@ -770,7 +767,10 @@ export class FinanceDailyBalanceService {
     const cacheKey = `${branchId}:${businessDateStr}:${opts?.environment ?? ''}`;
     const cached = this.fullDayNetCache.get(cacheKey);
     const now = Date.now();
-    if (cached && now - cached.at < FinanceDailyBalanceService.LEDGER_READ_CACHE_MS) {
+    if (
+      cached &&
+      now - cached.at < FinanceDailyBalanceService.LEDGER_READ_CACHE_MS
+    ) {
       return cached.value;
     }
 
@@ -885,11 +885,7 @@ export class FinanceDailyBalanceService {
     } else if (row) {
       start = Number(this.dec(row.starting_balance).toFixed(2));
     } else {
-      start = await this.priorBookEndingBeforeDateInTx(
-        this.db,
-        branchId,
-        date,
-      );
+      start = await this.priorBookEndingBeforeDateInTx(this.db, branchId, date);
     }
 
     if (daySession?.is_closed && row?.ending_balance != null) {
@@ -932,9 +928,7 @@ export class FinanceDailyBalanceService {
     });
 
     if (lastClosed) {
-      const sessionDateStr = lastClosed.session_date
-        .toISOString()
-        .slice(0, 10);
+      const sessionDateStr = lastClosed.session_date.toISOString().slice(0, 10);
 
       const confirmedClosing =
         await this.confirmedClosingBalanceForBusinessDate(
@@ -964,10 +958,7 @@ export class FinanceDailyBalanceService {
             branchId,
             businessDateStr,
           );
-          amount = Math.max(
-            amount,
-            Number((priorClose + todayNet).toFixed(2)),
-          );
+          amount = Math.max(amount, Number((priorClose + todayNet).toFixed(2)));
         }
 
         const todayDb = await this.db.daily_balances.findUnique({
@@ -996,9 +987,14 @@ export class FinanceDailyBalanceService {
       if (sessionDateStr === businessDateStr) {
         const priorStr = addManilaCalendarDays(businessDateStr, -1);
         const priorDayEnding = Number(
-          (await this.ledgerBookEndingForBusinessDate(branchId, priorStr)).toFixed(2),
+          (
+            await this.ledgerBookEndingForBusinessDate(branchId, priorStr)
+          ).toFixed(2),
         );
-        const fullNet = await this.fullDayOperationalNetCash(branchId, businessDateStr);
+        const fullNet = await this.fullDayOperationalNetCash(
+          branchId,
+          businessDateStr,
+        );
         return {
           amount: Math.max(0, Number((priorDayEnding + fullNet).toFixed(2))),
           closedSessionRecordDate: sessionDateStr,
@@ -1007,10 +1003,7 @@ export class FinanceDailyBalanceService {
 
       const ledgerOnCloseDay = Number(
         (
-          await this.ledgerBookEndingForBusinessDate(
-            branchId,
-            sessionDateStr,
-          )
+          await this.ledgerBookEndingForBusinessDate(branchId, sessionDateStr)
         ).toFixed(2),
       );
 
@@ -1029,9 +1022,9 @@ export class FinanceDailyBalanceService {
     );
     const priorStr = addManilaCalendarDays(businessDateStr, -1);
     const ledgerPrior = Number(
-      (
-        await this.ledgerBookEndingForBusinessDate(branchId, priorStr)
-      ).toFixed(2),
+      (await this.ledgerBookEndingForBusinessDate(branchId, priorStr)).toFixed(
+        2,
+      ),
     );
     const todayNet = await this.fullDayOperationalNetCash(
       branchId,
@@ -1085,9 +1078,7 @@ export class FinanceDailyBalanceService {
       return { amount: 0, closedSessionDate: null };
     }
 
-    const sessionDateStr = lastClosed.session_date
-      .toISOString()
-      .slice(0, 10);
+    const sessionDateStr = lastClosed.session_date.toISOString().slice(0, 10);
 
     const balanceRow = await this.db.daily_balances.findUnique({
       where: {
@@ -1372,8 +1363,7 @@ export class FinanceDailyBalanceService {
           businessDateStr,
           delta,
           {
-            bypassOperationalSessionGate:
-              options?.bypassOperationalSessionGate,
+            bypassOperationalSessionGate: options?.bypassOperationalSessionGate,
             useIncrementalBaseline: true,
           },
         );
@@ -1403,9 +1393,7 @@ export class FinanceDailyBalanceService {
           record_date: date,
           starting_balance: carriedForCreate,
           ending_balance: next,
-          ...(options?.environment
-            ? { environment: options.environment }
-            : {}),
+          ...(options?.environment ? { environment: options.environment } : {}),
           ...(options?.createdBy !== undefined
             ? { created_by: options.createdBy }
             : {}),
@@ -1572,8 +1560,12 @@ export class FinanceDailyBalanceService {
     mode: 'starting' | 'ending';
     confirmedAmount: number;
   }): Promise<{ startingBalance: number; endingBalance: number }> {
-    return this.db.$transaction(async (client) =>
-      this.persistConfirmationBalancesInTx(client, params),
+    return this.db.$transaction(
+      async (client) => this.persistConfirmationBalancesInTx(client, params),
+      {
+        maxWait: 10_000,
+        timeout: 30_000,
+      },
     );
   }
 }

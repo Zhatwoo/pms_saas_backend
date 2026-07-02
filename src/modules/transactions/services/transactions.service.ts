@@ -17,8 +17,17 @@ import {
   isSuperAdmin,
   requireBranchId,
 } from '../../../common/utils/authorization.util';
-import { effectiveBranchIdForQuery, requireUserBranchId } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString, getPhWallClockTimeString, normalizeWallClockTimeString, resolveTransactionCalendarDate, resolveTransactionWallClockTime } from '../../../common/utils/branch-calendar-date.util';
+import {
+  effectiveBranchIdForQuery,
+  requireUserBranchId,
+} from '../../../common/utils/branch-scope.util';
+import {
+  getPhCalendarDateString,
+  getPhWallClockTimeString,
+  normalizeWallClockTimeString,
+  resolveTransactionCalendarDate,
+  resolveTransactionWallClockTime,
+} from '../../../common/utils/branch-calendar-date.util';
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { RewardsService } from '../../rewards/services/rewards.service';
@@ -357,11 +366,12 @@ export class TransactionsService implements OnModuleInit {
 
     const createdByUser = this.encryption.decryptUsersJoin(row.users);
 
-    const [resolvedIdPhoto, resolvedIdBackPhoto, resolvedBuybackProof] = await Promise.all([
-      this.resolveStorageUrl(row.id_photo),
-      this.resolveStorageUrl(row.id_back_photo),
-      this.resolveStorageUrl(row.buyback_proof),
-    ]);
+    const [resolvedIdPhoto, resolvedIdBackPhoto, resolvedBuybackProof] =
+      await Promise.all([
+        this.resolveStorageUrl(row.id_photo),
+        this.resolveStorageUrl(row.id_back_photo),
+        this.resolveStorageUrl(row.buyback_proof),
+      ]);
 
     return {
       ...row,
@@ -589,7 +599,9 @@ export class TransactionsService implements OnModuleInit {
           throw new BadRequestException('Pawned item is already redeemed.');
         }
 
-        const principal = Number(linkedPawnedItem.amount ?? amounts.pawnAmount ?? 0);
+        const principal = Number(
+          linkedPawnedItem.amount ?? amounts.pawnAmount ?? 0,
+        );
         if (!Number.isFinite(principal) || principal <= 0) {
           throw new BadRequestException(
             'Buy back principal amount is invalid for this pawned item.',
@@ -598,9 +610,11 @@ export class TransactionsService implements OnModuleInit {
 
         amounts.pawnAmount = Number(principal.toFixed(2));
         amounts.cashIn = Number(
-          (amounts.pawnAmount + amounts.storageFee + amounts.returnAmount).toFixed(
-            2,
-          ),
+          (
+            amounts.pawnAmount +
+            amounts.storageFee +
+            amounts.returnAmount
+          ).toFixed(2),
         );
 
         payload.related_pawned_item_id = linkedPawnedItem.id;
@@ -1061,10 +1075,7 @@ export class TransactionsService implements OnModuleInit {
     return signedData.signedUrl;
   }
 
-  private buildRenewalUploadPath(
-    branchId: string,
-    customerId: string,
-  ) {
+  private buildRenewalUploadPath(branchId: string, customerId: string) {
     const timestamp = Date.now();
     const rand = Math.random().toString(36).slice(2, 8);
     return `${branchId}/${customerId}/renewal_${timestamp}_${rand}.jpg`;
@@ -1134,8 +1145,12 @@ export class TransactionsService implements OnModuleInit {
   ): Promise<{ proofUrl: string }> {
     console.log('=== UPLOAD BUYBACK PROOF SERVICE CALLED ===');
     console.log('User:', user.role, user.id);
-    console.log('DTO:', { transactionNo: dto.transactionNo, fileName: dto.fileName, fileDataLength: dto.fileData?.length });
-    
+    console.log('DTO:', {
+      transactionNo: dto.transactionNo,
+      fileName: dto.fileName,
+      fileDataLength: dto.fileData?.length,
+    });
+
     // Authorization check
     if (
       user.role !== Role.SUPER_ADMIN &&
@@ -1305,7 +1320,9 @@ export class TransactionsService implements OnModuleInit {
         });
 
         if (!existingRenewal) {
-          console.log(`[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date}`);
+          console.log(
+            `[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date}`,
+          );
           await this.prisma.item_renewals.create({
             data: {
               pawned_item_id: pawnedItemId,
@@ -1334,9 +1351,11 @@ export class TransactionsService implements OnModuleInit {
         if (latestRenewal) {
           const renewalDate = new Date(latestRenewal.renewal_date);
           const pawnDate = new Date(item.pawn_date);
-          
+
           if (renewalDate.getTime() > pawnDate.getTime()) {
-            console.log(`[Sync] Updating pawn_date of item ${item.item_id} from ${item.pawn_date} to ${latestRenewal.renewal_date}`);
+            console.log(
+              `[Sync] Updating pawn_date of item ${item.item_id} from ${item.pawn_date} to ${latestRenewal.renewal_date}`,
+            );
             await this.prisma.pawned_items.update({
               where: { id: item.id },
               data: {
@@ -1347,7 +1366,9 @@ export class TransactionsService implements OnModuleInit {
           }
         }
       }
-      console.log('[Sync] Past renewals synchronization completed successfully.');
+      console.log(
+        '[Sync] Past renewals synchronization completed successfully.',
+      );
     } catch (error) {
       console.error('[Sync] Failed to sync past renewals:', error);
     }

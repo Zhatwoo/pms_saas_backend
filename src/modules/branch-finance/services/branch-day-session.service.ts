@@ -21,6 +21,12 @@ import {
 
 type Tx = Prisma.TransactionClient;
 
+/** Open/close day runs many ledger reads; default 5s Prisma tx timeout is too low on remote DB. */
+const BRANCH_DAY_TX_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 @Injectable()
 export class BranchDaySessionService {
   private readonly logger = new Logger(BranchDaySessionService.name);
@@ -167,10 +173,11 @@ export class BranchDaySessionService {
     branchId: string,
     businessDateStr: string,
   ): Promise<number> {
-    const amount = await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
-      branchId,
-      businessDateStr,
-    );
+    const amount =
+      await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
+        branchId,
+        businessDateStr,
+      );
     this.logger.debug(
       `[ResolveSuggestedStart] branch=${branchId} date=${businessDateStr} amount=${amount}`,
     );
@@ -421,15 +428,13 @@ export class BranchDaySessionService {
           shiftCutoff,
         );
 
-      const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
-        tx,
-        {
+      const balances =
+        await this.financeDailyBalance.persistConfirmationBalancesInTx(tx, {
           branchId: params.branchId,
           businessDateStr: todayStr,
           mode: 'starting',
           confirmedAmount,
-        },
-      );
+        });
 
       this.logger.log(
         `[StartingBalance] persisted branch=${params.branchId} businessDate=${todayStr} starting=${balances.startingBalance} ending=${balances.endingBalance} operationalCutoff=${shiftCutoff.toISOString()}`,
@@ -475,12 +480,6 @@ export class BranchDaySessionService {
         createdByUserId: params.actorUserId,
       });
 
-      await this.financeDailyBalance.reconcileOpenSessionDailyBalance(
-        params.branchId,
-        todayStr,
-        tx,
-      );
-
       const openingDate = this.toRecordDate(todayStr);
       await tx.daily_opening.upsert({
         where: {
@@ -512,7 +511,7 @@ export class BranchDaySessionService {
         startingBalance: balances.startingBalance,
         endingBalance: balances.endingBalance,
       };
-    });
+    }, BRANCH_DAY_TX_OPTIONS);
   }
 
   async closeTodayManual(params: {
@@ -600,15 +599,13 @@ export class BranchDaySessionService {
           ? Number(params.physicalEndingAmount.toFixed(2))
           : Number((systemEnding ?? 0).toFixed(2));
 
-      const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
-        tx,
-        {
+      const balances =
+        await this.financeDailyBalance.persistConfirmationBalancesInTx(tx, {
           branchId: params.branchId,
           businessDateStr: closeDateStr,
           mode: 'ending',
           confirmedAmount: persistConfirmed,
-        },
-      );
+        });
 
       await this.closeBranchDaySessionInTx(tx, row.id, {
         actorUserId: params.actorUserId,
@@ -639,7 +636,7 @@ export class BranchDaySessionService {
         endingBalance: balances.endingBalance,
         nextBusinessDate: closeDateStr,
       };
-    });
+    }, BRANCH_DAY_TX_OPTIONS);
   }
 
   /**
@@ -710,11 +707,7 @@ export class BranchDaySessionService {
             },
           });
 
-          await this.safeClearDailyOpeningInTx(
-            tx,
-            locked.branch_id,
-            closeDate,
-          );
+          await this.safeClearDailyOpeningInTx(tx, locked.branch_id, closeDate);
 
           await this.upsertJournalMarker(tx, {
             branchId: locked.branch_id,
@@ -726,7 +719,7 @@ export class BranchDaySessionService {
           });
 
           return balances.endingBalance;
-        });
+        }, BRANCH_DAY_TX_OPTIONS);
 
         if (r != null) {
           results.push({

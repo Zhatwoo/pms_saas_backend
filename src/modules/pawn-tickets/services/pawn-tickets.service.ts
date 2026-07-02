@@ -19,7 +19,12 @@ import {
   getEnvironment,
 } from '../../../common/utils/authorization.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
-import { getPhCalendarDateString, getPhWallClockTimeString, resolveTransactionCalendarDate, resolveTransactionWallClockTime } from '../../../common/utils/branch-calendar-date.util';
+import {
+  getPhCalendarDateString,
+  getPhWallClockTimeString,
+  resolveTransactionCalendarDate,
+  resolveTransactionWallClockTime,
+} from '../../../common/utils/branch-calendar-date.util';
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';

@@ -551,7 +551,7 @@ export class DashboardService {
         if (error) {
           throw new InternalServerErrorException(error.message);
         }
-        if (data) priorByBranch.set(bid, data as DailyBalanceRow);
+        if (data) priorByBranch.set(bid, data);
       }),
     );
     return { todayByBranch, priorByBranch };
@@ -784,8 +784,7 @@ export class DashboardService {
             branches: {
               total: branchesCount,
               active: activeBranchesCount,
-              inactive:
-                branchesCount - activeBranchesCount,
+              inactive: branchesCount - activeBranchesCount,
             },
             users: {
               total: usersCount,
@@ -1182,7 +1181,10 @@ export class DashboardService {
       .from('transactions')
       .select('cash_in, transaction_date, purpose')
       .gte('transaction_date', yearStartStr);
-    revenueTrendQuery = revenueTrendQuery.eq('environment', getEnvironment(user));
+    revenueTrendQuery = revenueTrendQuery.eq(
+      'environment',
+      getEnvironment(user),
+    );
     if (branchId)
       revenueTrendQuery = revenueTrendQuery.eq('branch_id', branchId);
 

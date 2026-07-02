@@ -12,7 +12,9 @@ export type InventoryValuationMode = 'LOAN_AMOUNT' | 'APPRAISED_VALUE';
 /**
  * Whether a pawned_items.status should contribute to inventory valuation totals.
  */
-export function isStatusIncludedInInventoryValuation(status: string | null | undefined): boolean {
+export function isStatusIncludedInInventoryValuation(
+  status: string | null | undefined,
+): boolean {
   const s = (status ?? '').trim();
   return (INVENTORY_VALUATION_STATUSES as readonly string[]).includes(s);
 }
@@ -32,7 +34,10 @@ export function inventoryLineValue(
   if (mode === 'LOAN_AMOUNT') {
     return loan;
   }
-  const appr = row.appraised_value != null ? new Prisma.Decimal(String(row.appraised_value)) : null;
+  const appr =
+    row.appraised_value != null
+      ? new Prisma.Decimal(String(row.appraised_value))
+      : null;
   const resale =
     row.estimated_resale_value != null
       ? new Prisma.Decimal(String(row.estimated_resale_value))
@@ -72,7 +77,7 @@ export function categoryNamesMatch(cat1: string, cat2: string): boolean {
   const vars1 = getVariations(c1);
   const vars2 = getVariations(c2);
 
-  return vars1.some(v => vars2.includes(v));
+  return vars1.some((v) => vars2.includes(v));
 }
 
 export function normalizeInterestRates(settingValue: unknown): any[] {
