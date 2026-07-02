@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
-import { findInterestRateGroup } from '../../../common/utils/inventory-valuation.util';
+import { findInterestRateGroup, normalizeInterestRates } from '../../../common/utils/inventory-valuation.util';
 
 @Injectable()
 export class ExpirationCronService {
@@ -38,7 +38,7 @@ export class ExpirationCronService {
         .eq('setting_key', 'interest_rates')
         .eq('environment', 'production')
         .maybeSingle();
-      const interestRates = (settingsData?.setting_value as any[]) || [];
+      const interestRates = normalizeInterestRates(settingsData?.setting_value);
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
