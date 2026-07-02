@@ -38,7 +38,8 @@ export function getPhWallClockTimeString(
   return `${pick('hour').padStart(2, '0')}:${pick('minute').padStart(2, '0')}:${pick('second').padStart(2, '0')}`;
 }
 
-const WALL_CLOCK_TIME_RE = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+const WALL_CLOCK_TIME_RE =
+  /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
 
 function padWallClockTime(h: string, m: string, s: string): string {
   return `${h.padStart(2, '0')}:${m.padStart(2, '0')}:${(s || '00').padStart(2, '0')}`;
@@ -107,7 +108,10 @@ export function resolveTransactionCalendarDate(
 }
 
 /** Add whole calendar days to a YYYY-MM-DD string (civil date arithmetic in UTC components). */
-export function addManilaCalendarDays(dateStr: string, deltaDays: number): string {
+export function addManilaCalendarDays(
+  dateStr: string,
+  deltaDays: number,
+): string {
   const [y, mo, d] = dateStr.split('-').map((x) => parseInt(x, 10));
   const js = new Date(Date.UTC(y, mo - 1, d + deltaDays));
   const yy = js.getUTCFullYear();

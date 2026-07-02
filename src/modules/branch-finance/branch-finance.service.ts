@@ -491,7 +491,11 @@ export class BranchFinanceService {
     const purpose = (row.purpose ?? '').toLowerCase().trim();
     const unit = (row.unit ?? '').toLowerCase().trim();
 
-    if (unit === 'fund_transfer' || purpose === 'cash transfer' || purpose === 'fund transfer') {
+    if (
+      unit === 'fund_transfer' ||
+      purpose === 'cash transfer' ||
+      purpose === 'fund transfer'
+    ) {
       return 'fund_transfer_in';
     }
     if (unit === 'fund_transfer_out') {
