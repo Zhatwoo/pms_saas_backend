@@ -1572,8 +1572,12 @@ export class FinanceDailyBalanceService {
     mode: 'starting' | 'ending';
     confirmedAmount: number;
   }): Promise<{ startingBalance: number; endingBalance: number }> {
-    return this.db.$transaction(async (client) =>
-      this.persistConfirmationBalancesInTx(client, params),
+    return this.db.$transaction(
+      async (client) => this.persistConfirmationBalancesInTx(client, params),
+      {
+        maxWait: 10_000,
+        timeout: 30_000,
+      },
     );
   }
 }

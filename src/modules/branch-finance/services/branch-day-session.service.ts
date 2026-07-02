@@ -21,6 +21,12 @@ import {
 
 type Tx = Prisma.TransactionClient;
 
+/** Open/close day runs many ledger reads; default 5s Prisma tx timeout is too low on remote DB. */
+const BRANCH_DAY_TX_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 @Injectable()
 export class BranchDaySessionService {
   private readonly logger = new Logger(BranchDaySessionService.name);
@@ -475,12 +481,6 @@ export class BranchDaySessionService {
         createdByUserId: params.actorUserId,
       });
 
-      await this.financeDailyBalance.reconcileOpenSessionDailyBalance(
-        params.branchId,
-        todayStr,
-        tx,
-      );
-
       const openingDate = this.toRecordDate(todayStr);
       await tx.daily_opening.upsert({
         where: {
@@ -512,7 +512,7 @@ export class BranchDaySessionService {
         startingBalance: balances.startingBalance,
         endingBalance: balances.endingBalance,
       };
-    });
+    }, BRANCH_DAY_TX_OPTIONS);
   }
 
   async closeTodayManual(params: {
@@ -639,7 +639,7 @@ export class BranchDaySessionService {
         endingBalance: balances.endingBalance,
         nextBusinessDate: closeDateStr,
       };
-    });
+    }, BRANCH_DAY_TX_OPTIONS);
   }
 
   /**
@@ -726,7 +726,7 @@ export class BranchDaySessionService {
           });
 
           return balances.endingBalance;
-        });
+        }, BRANCH_DAY_TX_OPTIONS);
 
         if (r != null) {
           results.push({
