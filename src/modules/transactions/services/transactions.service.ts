@@ -995,18 +995,31 @@ export class TransactionsService implements OnModuleInit {
 
       const needsStart = !sessionRow || sessionRow.is_closed;
       if (needsStart) {
-        const expected =
+        const isToday = balanceDateStr === getPhCalendarDateString();
+
+        // Historical or closed book day: use stored opening/closing (never copy ending → starting).
+        if (balanceData && (!isToday || sessionRow?.is_closed)) {
+          stats.startingBalance = this.toNumber(balanceData.starting_balance);
+          stats.endingBalance = this.toNumber(balanceData.ending_balance);
+          return stats;
+        }
+
+        // Today before Start Day: opening = last closed book ending (+ pre-open activity).
+        const expectedOpening =
           await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
             scoped,
             balanceDateStr,
           );
-        const storedClose =
-          balanceData?.ending_balance != null && sessionRow?.is_closed
-            ? this.toNumber(balanceData.ending_balance)
-            : 0;
-        const carryForward = Math.max(storedClose, expected);
-        stats.startingBalance = carryForward;
-        stats.endingBalance = carryForward;
+        stats.startingBalance = expectedOpening;
+
+        if (balanceData?.ending_balance != null) {
+          stats.endingBalance = Math.max(
+            expectedOpening,
+            this.toNumber(balanceData.ending_balance),
+          );
+        } else {
+          stats.endingBalance = expectedOpening;
+        }
         return stats;
       }
 
