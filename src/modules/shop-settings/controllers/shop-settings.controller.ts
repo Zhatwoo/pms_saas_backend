@@ -33,6 +33,22 @@ export class ShopSettingsController {
     @Param('key') key: string,
     @Body() value: any,
   ) {
-    return this.settingsService.setSetting(key, value, req.user);
+    // Only treat plain objects specially. Arrays (e.g. interest_rates) must be
+    // preserved as-is — spreading an array into an object corrupts it into
+    // { "0": ..., "1": ... }, which then fails Array.isArray checks on read.
+    const isPlainObject =
+      value !== null && typeof value === 'object' && !Array.isArray(value);
+    const broadcastToAllEnvironments = isPlainObject
+      ? Boolean(value.broadcastToAllEnvironments)
+      : false;
+    const payload = isPlainObject
+      ? { ...value, broadcastToAllEnvironments: undefined }
+      : value;
+
+    if (broadcastToAllEnvironments && key === 'moa_template') {
+      return this.settingsService.broadcastSetting(key, payload, req.user);
+    }
+
+    return this.settingsService.setSetting(key, payload, req.user);
   }
 }

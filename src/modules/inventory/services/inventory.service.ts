@@ -24,8 +24,8 @@ import {
   INVENTORY_VALUATION_STATUSES,
   isStatusIncludedInInventoryValuation,
   findInterestRateGroup,
-  isPawnItemWithinOpeningAuditWindow,
   normalizeInterestRates,
+  isPawnItemWithinOpeningAuditWindow,
   OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
 import {
@@ -445,6 +445,7 @@ export class InventoryService {
           itemsIncluded: item.items_included,
           condition: item.condition,
           memoryStorage: item.memory_storage,
+          interestRateSnapshot: item.interest_rate_snapshot ?? null,
         })),
       ),
       total: totalCount,

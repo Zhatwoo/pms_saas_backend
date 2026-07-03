@@ -80,32 +80,44 @@ export function categoryNamesMatch(cat1: string, cat2: string): boolean {
   return vars1.some((v) => vars2.includes(v));
 }
 
-export function normalizeInterestRates(settingValue: unknown): any[] {
-  if (settingValue == null) {
-    return [];
+export function normalizeInterestRates(value: unknown): any[] {
+  if (Array.isArray(value)) {
+    return value;
   }
-  if (Array.isArray(settingValue)) {
-    return settingValue;
-  }
-  if (typeof settingValue === 'string') {
-    try {
-      return normalizeInterestRates(JSON.parse(settingValue));
-    } catch {
-      return [];
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.groups)) {
+      return record.groups;
     }
-  }
-  if (typeof settingValue === 'object') {
-    return Object.values(settingValue as Record<string, unknown>);
+    if (Array.isArray(record.rates)) {
+      return record.rates;
+    }
+    // Heal legacy corruption where an array was accidentally stored as an object
+    // with numeric keys, e.g. { "0": {...}, "1": {...} }. Without this, callers
+    // like pawn creation see an empty list and fail to snapshot the rate group.
+    const keys = Object.keys(record);
+    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+      return keys
+        .sort((a, b) => Number(a) - Number(b))
+        .map((k) => record[k]);
+    }
   }
   return [];
 }
 
-export function findInterestRateGroup(interestRates: unknown, category?: string): any | null {
+export function findInterestRateGroup(
+  interestRates: unknown,
+  category?: string,
+): any | null {
   const rates = normalizeInterestRates(interestRates);
   if (!category) return null;
-  return rates.find((group) =>
-    group.categories?.some((cat: string) => categoryNamesMatch(cat, category))
-  ) ?? null;
+  return (
+    rates.find((group) =>
+      group.categories?.some((cat: string) =>
+        categoryNamesMatch(cat, category),
+      ),
+    ) ?? null
+  );
 }
 
 /** Pawn items within this many days of maturity are included in opening inventory QR audit. */

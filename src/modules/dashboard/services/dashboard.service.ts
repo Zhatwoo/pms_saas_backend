@@ -13,8 +13,7 @@ import { SupabaseService } from '../../../infrastructure/supabase/supabase.servi
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import {
-  findInterestRateGroup,
-  normalizeInterestRates,
+  findInterestRateGroup, normalizeInterestRates
 } from '../../../common/utils/inventory-valuation.util';
 import {
   applyEnvironmentFilter,
