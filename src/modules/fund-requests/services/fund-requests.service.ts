@@ -14,7 +14,10 @@ import {
   requireUserBranchId,
   superAdminBranchNameFilter,
 } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString, getPhWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
+import {
+  getPhCalendarDateString,
+  getPhWallClockTimeString,
+} from '../../../common/utils/branch-calendar-date.util';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import { BranchDaySessionService } from '../../branch-finance/services/branch-day-session.service';
@@ -1144,7 +1147,10 @@ export class FundRequestsService {
     const amount = this.normalizeMoney(dto.amount);
     const transferMode = dto.transferMode ?? 'cash';
     if (sourceBranch) {
-      const sourceBalance = await this.getLatestBranchBalance(sourceBranch.id, user);
+      const sourceBalance = await this.getLatestBranchBalance(
+        sourceBranch.id,
+        user,
+      );
       if (sourceBalance < amount) {
         throw new BadRequestException(
           `Source branch has insufficient cash on hand. Available: ${sourceBalance.toFixed(2)}`,
@@ -1710,7 +1716,10 @@ export class FundRequestsService {
       existing.source_branch_id,
       user,
     );
-    const destinationBranch = await this.getBranchById(existing.branch_id, user);
+    const destinationBranch = await this.getBranchById(
+      existing.branch_id,
+      user,
+    );
     const sentAmount = this.normalizeMoney(
       dto.sentAmount ??
         this.toMoneyOrNull(existing.amount_transferred) ??

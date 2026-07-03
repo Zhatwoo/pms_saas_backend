@@ -491,7 +491,11 @@ export class BranchFinanceService {
     const purpose = (row.purpose ?? '').toLowerCase().trim();
     const unit = (row.unit ?? '').toLowerCase().trim();
 
-    if (unit === 'fund_transfer' || purpose === 'cash transfer' || purpose === 'fund transfer') {
+    if (
+      unit === 'fund_transfer' ||
+      purpose === 'cash transfer' ||
+      purpose === 'fund transfer'
+    ) {
       return 'fund_transfer_in';
     }
     if (unit === 'fund_transfer_out') {
@@ -501,6 +505,9 @@ export class BranchFinanceService {
       return 'pawn';
     }
     if (purpose === 'buy back') {
+      return 'buy_back';
+    }
+    if (purpose === 'buy out' || purpose === 'redeem') {
       return 'buy_back';
     }
     if (
@@ -533,9 +540,13 @@ export class BranchFinanceService {
       case 'pawn':
         parts.push('New Pawn');
         break;
-      case 'buy_back':
-        parts.push('Buy Back');
+      case 'buy_back': {
+        const purpose = (row.purpose ?? '').trim().toLowerCase();
+        parts.push(
+          purpose === 'buy out' || purpose === 'redeem' ? 'Buy Out' : 'Buy Back',
+        );
         break;
+      }
       case 'renewal':
         parts.push('Renewal');
         break;
@@ -835,7 +846,7 @@ export class BranchFinanceService {
         let summaryCurrentBalance = ledgerEnding;
         if (dayClosedToday && todayDbRow) {
           const atRest = this.toMoney(todayDbRow.ending_balance);
-          summaryStartingBalance = atRest;
+          summaryStartingBalance = this.toMoney(todayDbRow.starting_balance);
           summaryCurrentBalance = atRest;
         } else if (todayDbRow?.ending_balance != null) {
           summaryCurrentBalance = Math.max(

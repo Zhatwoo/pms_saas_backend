@@ -12,7 +12,9 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
-import { findInterestRateGroup } from '../../../common/utils/inventory-valuation.util';
+import {
+  findInterestRateGroup, normalizeInterestRates
+} from '../../../common/utils/inventory-valuation.util';
 import {
   applyEnvironmentFilter,
   getEnvironment,
@@ -377,7 +379,7 @@ export class DashboardService {
       },
       select: { setting_value: true },
     });
-    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+    const interestRates = normalizeInterestRates(interestRatesSetting?.setting_value);
 
     return (data || []).map((item: any) => {
       const category = item.category;
@@ -548,7 +550,7 @@ export class DashboardService {
         if (error) {
           throw new InternalServerErrorException(error.message);
         }
-        if (data) priorByBranch.set(bid, data as DailyBalanceRow);
+        if (data) priorByBranch.set(bid, data);
       }),
     );
     return { todayByBranch, priorByBranch };
@@ -781,8 +783,7 @@ export class DashboardService {
             branches: {
               total: branchesCount,
               active: activeBranchesCount,
-              inactive:
-                branchesCount - activeBranchesCount,
+              inactive: branchesCount - activeBranchesCount,
             },
             users: {
               total: usersCount,
@@ -1073,7 +1074,7 @@ export class DashboardService {
       },
       select: { setting_value: true },
     });
-    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+    const interestRates = normalizeInterestRates(interestRatesSetting?.setting_value);
 
     let fromDate: string;
     let toDate: string;
@@ -1179,7 +1180,10 @@ export class DashboardService {
       .from('transactions')
       .select('cash_in, transaction_date, purpose')
       .gte('transaction_date', yearStartStr);
-    revenueTrendQuery = revenueTrendQuery.eq('environment', getEnvironment(user));
+    revenueTrendQuery = revenueTrendQuery.eq(
+      'environment',
+      getEnvironment(user),
+    );
     if (branchId)
       revenueTrendQuery = revenueTrendQuery.eq('branch_id', branchId);
 

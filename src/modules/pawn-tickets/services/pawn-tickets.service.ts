@@ -19,11 +19,20 @@ import {
   getEnvironment,
 } from '../../../common/utils/authorization.util';
 import { CreatePawnTicketDto } from '../dto/create-pawn-ticket.dto';
-import { getPhCalendarDateString, getPhWallClockTimeString, resolveTransactionCalendarDate, resolveTransactionWallClockTime } from '../../../common/utils/branch-calendar-date.util';
+import {
+  getPhCalendarDateString,
+  getPhWallClockTimeString,
+  resolveTransactionCalendarDate,
+  resolveTransactionWallClockTime,
+} from '../../../common/utils/branch-calendar-date.util';
 
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
+import {
+  findInterestRateGroup,
+  normalizeInterestRates,
+} from '../../../common/utils/inventory-valuation.util';
 
 type PawnTicketDbClient = any;
 
@@ -186,6 +195,17 @@ export class PawnTicketsService {
 
   private getTodayDateKey() {
     return getPhCalendarDateString();
+  }
+
+  private async loadInterestRates(user: AuthenticatedUserProfile) {
+    const row = await this.prisma.shop_settings.findFirst({
+      where: {
+        setting_key: 'interest_rates',
+        ...applyEnvironmentFilter(user),
+      },
+      select: { setting_value: true },
+    });
+    return normalizeInterestRates(row?.setting_value);
   }
 
   private toDbDate(value?: string | null): Date {
@@ -371,6 +391,13 @@ export class PawnTicketsService {
     }
 
     const branchName = branch.name;
+    const interestRates = await this.loadInterestRates(user);
+    const itemCategory = dto.item.category?.trim() || 'Miscellaneous';
+    const matchedRateGroup = findInterestRateGroup(interestRates, itemCategory);
+    const interestRateSnapshot = matchedRateGroup
+      ? { ...matchedRateGroup }
+      : null;
+
     const providedSerialNumber = dto.item.serialNumber?.trim();
     const serialNumber =
       providedSerialNumber && !providedSerialNumber.startsWith('PENDING')
@@ -566,7 +593,7 @@ export class PawnTicketsService {
           const itemPayload = {
             item_id: itemId,
             item_name: dto.item.unitName.trim(),
-            category: dto.item.category?.trim() || 'Miscellaneous',
+            category: itemCategory,
             branch_id: branchId,
             branch: branchName,
             pawn_date: dto.item.purchasedDate || getPhCalendarDateString(),
@@ -584,6 +611,7 @@ export class PawnTicketsService {
             condition_report: dto.item.condition?.trim() ?? '',
             customer_id: customer.id,
             amount: pawnAmount,
+            interest_rate_snapshot: interestRateSnapshot,
           };
 
           const pawnedItem = await tx.pawned_items.create({

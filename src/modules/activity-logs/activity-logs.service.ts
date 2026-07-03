@@ -111,15 +111,23 @@ export class ActivityLogsService {
       }
 
       if (startDate) {
-        where.created_at = { ...(where.created_at || {}), gte: toManilaDayBoundary(startDate, false) };
+        where.created_at = {
+          ...(where.created_at || {}),
+          gte: toManilaDayBoundary(startDate, false),
+        };
       }
 
       if (endDate) {
-        where.created_at = { ...(where.created_at || {}), lte: toManilaDayBoundary(endDate, true) };
+        where.created_at = {
+          ...(where.created_at || {}),
+          lte: toManilaDayBoundary(endDate, true),
+        };
       }
 
       if (action) {
-        where.action = action.includes(',') ? { in: action.split(',') } : action;
+        where.action = action.includes(',')
+          ? { in: action.split(',') }
+          : action;
       }
 
       if (pawnedItemId) {
@@ -130,7 +138,14 @@ export class ActivityLogsService {
         where,
         orderBy: { created_at: 'desc' },
         include: {
-          users: { select: { full_name: true, email: true, role: true, avatar_url: true } },
+          users: {
+            select: {
+              full_name: true,
+              email: true,
+              role: true,
+              avatar_url: true,
+            },
+          },
           branches: { select: { name: true } },
         },
       });

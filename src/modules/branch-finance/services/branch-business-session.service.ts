@@ -232,15 +232,16 @@ export class BranchBusinessSessionService {
     const manilaCalendarDate = getPhCalendarDateString();
     const todayDate = this.toRecordDate(manilaCalendarDate);
 
-    let todaySessionRow =
-      await this.prisma.branch_business_sessions.findUnique({
+    let todaySessionRow = await this.prisma.branch_business_sessions.findUnique(
+      {
         where: {
           branch_id_business_date: {
             branch_id: branchId,
             business_date: todayDate,
           },
         },
-      });
+      },
+    );
 
     let pendingRow = await this.prisma.branch_business_sessions.findFirst({
       where: {
@@ -265,15 +266,14 @@ export class BranchBusinessSessionService {
         `[BranchSession] No session row for Manila=${manilaCalendarDate} branch=${branchId}; creating PENDING_START_BALANCE bootstrap row.`,
       );
       await this.ensureSessionRowForManilaDate(branchId, manilaCalendarDate);
-      todaySessionRow =
-        await this.prisma.branch_business_sessions.findUnique({
-          where: {
-            branch_id_business_date: {
-              branch_id: branchId,
-              business_date: todayDate,
-            },
+      todaySessionRow = await this.prisma.branch_business_sessions.findUnique({
+        where: {
+          branch_id_business_date: {
+            branch_id: branchId,
+            business_date: todayDate,
           },
-        });
+        },
+      });
       pendingRow = await this.prisma.branch_business_sessions.findFirst({
         where: {
           branch_id: branchId,
@@ -364,7 +364,9 @@ export class BranchBusinessSessionService {
       todaySession: todaySessionRow
         ? {
             status: todaySessionRow.status,
-            businessDate: this.formatBusinessDate(todaySessionRow.business_date),
+            businessDate: this.formatBusinessDate(
+              todaySessionRow.business_date,
+            ),
             startingBalance: todaySessionRow.starting_balance
               ? Number(this.dec(todaySessionRow.starting_balance).toFixed(2))
               : null,
@@ -468,15 +470,13 @@ export class BranchBusinessSessionService {
         select: { name: true },
       });
 
-      const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
-        tx,
-        {
+      const balances =
+        await this.financeDailyBalance.persistConfirmationBalancesInTx(tx, {
           branchId: params.branchId,
           businessDateStr,
           mode: 'starting',
           confirmedAmount,
-        },
-      );
+        });
 
       await tx.branch_business_sessions.update({
         where: { id: locked.id },
@@ -720,16 +720,15 @@ export class BranchBusinessSessionService {
       return;
     }
 
-    const stalePreview =
-      await this.prisma.branch_business_sessions.findFirst({
-        where: {
-          branch_id: branchId,
-          status: BranchSessionStatus.PENDING_START_BALANCE,
-          business_date: { lt: todayDate },
-          ended_at: { not: null },
-        },
-        orderBy: { business_date: 'asc' },
-      });
+    const stalePreview = await this.prisma.branch_business_sessions.findFirst({
+      where: {
+        branch_id: branchId,
+        status: BranchSessionStatus.PENDING_START_BALANCE,
+        business_date: { lt: todayDate },
+        ended_at: { not: null },
+      },
+      orderBy: { business_date: 'asc' },
+    });
 
     if (!stalePreview) {
       return;
@@ -916,18 +915,15 @@ export class BranchBusinessSessionService {
           ? Number(params.physicalEndingAmount.toFixed(2))
           : 0;
 
-      const balances = await this.financeDailyBalance.persistConfirmationBalancesInTx(
-        tx,
-        {
+      const balances =
+        await this.financeDailyBalance.persistConfirmationBalancesInTx(tx, {
           branchId,
           businessDateStr: closeDateStr,
           mode: 'ending',
           confirmedAmount: persistConfirmed,
-        },
-      );
+        });
 
-      const sameManilaCalendarDay =
-        closeDateStr === getPhCalendarDateString();
+      const sameManilaCalendarDay = closeDateStr === getPhCalendarDateString();
 
       if (sameManilaCalendarDay) {
         await tx.branch_business_sessions.update({
@@ -1028,11 +1024,7 @@ export class BranchBusinessSessionService {
       };
     }
 
-    const closed = txResult as {
-      kind: 'closed';
-      endingBalance: number;
-      sameDayReopen: boolean;
-    };
+    const closed = txResult;
 
     return {
       skipped: false,

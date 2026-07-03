@@ -14,13 +14,17 @@ import {
   inventoryBranchFilters,
   requireUserBranchId,
 } from '../../../common/utils/branch-scope.util';
-import { getPhCalendarDateString, getPhWallClockTimeString } from '../../../common/utils/branch-calendar-date.util';
+import {
+  getPhCalendarDateString,
+  getPhWallClockTimeString,
+} from '../../../common/utils/branch-calendar-date.util';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import {
   INVENTORY_VALUATION_STATUSES,
   isStatusIncludedInInventoryValuation,
   findInterestRateGroup,
+  normalizeInterestRates,
   isPawnItemWithinOpeningAuditWindow,
   OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
@@ -143,7 +147,7 @@ export class InventoryService {
       .eq('environment', getEnvironment(user))
       .maybeSingle();
 
-    return (data?.setting_value as any[]) || [];
+    return normalizeInterestRates(data?.setting_value);
   }
 
   private async buildOpeningAuditSystemItems(
@@ -376,7 +380,7 @@ export class InventoryService {
       .eq('setting_key', 'interest_rates')
       .eq('environment', getEnvironment(user))
       .maybeSingle();
-    const interestRates = (interestRatesData?.setting_value as any[]) || [];
+    const interestRates = normalizeInterestRates(interestRatesData?.setting_value);
     const today = new Date();
 
     const filteredItems = (data || []).filter((item: any) => {
@@ -441,6 +445,7 @@ export class InventoryService {
           itemsIncluded: item.items_included,
           condition: item.condition,
           memoryStorage: item.memory_storage,
+          interestRateSnapshot: item.interest_rate_snapshot ?? null,
         })),
       ),
       total: totalCount,
@@ -563,7 +568,9 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('pawned_items')
-      .select('*, item_renewals(*), customer:customers(*), transactions(*, users!transactions_created_by_user_id_fkey(id, full_name))')
+      .select(
+        '*, item_renewals(*), customer:customers(*), transactions(*, users!transactions_created_by_user_id_fkey(id, full_name))',
+      )
       .eq('id', id)
       .eq('environment', getEnvironment(user))
       .single();
@@ -581,9 +588,15 @@ export class InventoryService {
       this.resolveStorageUrl(data.id_back_photo),
     ]);
 
-    const pawnTx = (data.transactions || []).find((t: any) => t.purpose === 'Pawn');
-    const createdByUser = pawnTx?.users ? this.encryption.decryptUsersJoin(pawnTx.users) : null;
-    const processorName = createdByUser ? this.decryptUserDisplayName(createdByUser.full_name) : null;
+    const pawnTx = (data.transactions || []).find(
+      (t: any) => t.purpose === 'Pawn',
+    );
+    const createdByUser = pawnTx?.users
+      ? this.encryption.decryptUsersJoin(pawnTx.users)
+      : null;
+    const processorName = createdByUser
+      ? this.decryptUserDisplayName(createdByUser.full_name)
+      : null;
 
     return {
       ...data,
@@ -922,7 +935,9 @@ export class InventoryService {
     const client = this.supabase.getClient();
     const { data, error } = await client
       .from('item_renewals')
-      .insert([{ pawned_item_id: itemId, ...dto, ...environmentCreateFields(user) }])
+      .insert([
+        { pawned_item_id: itemId, ...dto, ...environmentCreateFields(user) },
+      ])
       .select()
       .single();
     if (error) {
@@ -1242,9 +1257,12 @@ export class InventoryService {
 
     const client = this.supabase.getClient();
 
-    let systemItemListSource:
-      | Array<{ item_id?: string | null; item_name?: string | null; category?: string | null; status?: string | null }>
-      = [];
+    let systemItemListSource: Array<{
+      item_id?: string | null;
+      item_name?: string | null;
+      category?: string | null;
+      status?: string | null;
+    }> = [];
 
     if (checklistSource === 'sale') {
       const { data: saleItems, error: saleError } = await client
@@ -1264,7 +1282,7 @@ export class InventoryService {
         .select('item_id, item_name, category, status')
         .eq('branch_id', branchId)
         .eq('environment', getEnvironment(user))
-        .in('status', INVENTORY_VALUATION_STATUSES as unknown as string[]);
+        .in('status', INVENTORY_VALUATION_STATUSES);
       if (pawnedError) {
         throw new InternalServerErrorException(pawnedError.message);
       }
@@ -1281,11 +1299,19 @@ export class InventoryService {
 
       const boughtBackPawnedIds = new Set(
         (Array.isArray(boughtBackRows) ? boughtBackRows : [])
-          .map((row: { related_pawned_item_id?: string | null }) => row.related_pawned_item_id)
-          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+          .map(
+            (row: { related_pawned_item_id?: string | null }) =>
+              row.related_pawned_item_id,
+          )
+          .filter(
+            (value): value is string =>
+              typeof value === 'string' && value.trim().length > 0,
+          ),
       );
 
-      systemItemListSource = (Array.isArray(pawnedItems) ? pawnedItems : []).filter(
+      systemItemListSource = (
+        Array.isArray(pawnedItems) ? pawnedItems : []
+      ).filter(
         (item: { item_id?: string | null; status?: string | null }) =>
           isStatusIncludedInInventoryValuation(item.status) &&
           typeof item.item_id === 'string' &&
