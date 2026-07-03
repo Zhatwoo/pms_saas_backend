@@ -167,6 +167,7 @@ model pawned_items {
   created_by             String?          @db.Uuid
   /// Inventory-specific status used for audit/incident handling.
   inventory_status       inventory_status @default(verified)
+  interest_rate_snapshot Json?
   item_renewals          item_renewals[]
   branches               branches         @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
   customers              customers?       @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)

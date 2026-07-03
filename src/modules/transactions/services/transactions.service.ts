@@ -95,7 +95,8 @@ const TX_SELECT = {
       memory_storage: true,
       remarks: true,
       category: true,
-      item_photos: true,
+      pawn_date: true,
+      interest_rate_snapshot: true,
       customers: {
         select: {
           id: true,
@@ -142,12 +143,18 @@ type LayawayInput = {
 const ALLOWED_TRANSACTION_PURPOSES = new Set([
   'Pawn',
   'Buy Back',
+  'Buy Out',
+  'Redeem',
   'Renew',
+  'Reappraise',
+  'Reserve / Layaway',
   'Sold Item',
   'Sale',
   'Expense',
   'Cash Transfer',
   'Fund Transfer',
+  'Start',
+  'End',
 ]);
 
 @Injectable()
@@ -209,8 +216,101 @@ export class TransactionsService implements OnModuleInit {
     return Number(parsed.toFixed(2));
   }
 
+  private resolveLayawayPayload(
+    layawayInput: unknown,
+    dto: Record<string, unknown>,
+    downpayment: number,
+  ) {
+    const source =
+      layawayInput && typeof layawayInput === 'object'
+        ? (layawayInput as Record<string, unknown>)
+        : {};
+
+    let details: Record<string, unknown> = {};
+    if (dto.details && typeof dto.details === 'object') {
+      details = dto.details as Record<string, unknown>;
+    } else if (typeof dto.details === 'string' && dto.details.trim()) {
+      try {
+        details = JSON.parse(dto.details) as Record<string, unknown>;
+      } catch {
+        details = {};
+      }
+    }
+
+    const readString = (...values: unknown[]) => {
+      for (const value of values) {
+        if (typeof value === 'string' && value.trim()) {
+          return value.trim();
+        }
+      }
+      return '';
+    };
+
+    const itemPrice = this.normalizeMoney(
+      source.itemPrice ?? details.price ?? dto.pawn_amount ?? 0,
+      'item_price',
+    );
+    const resolvedDownpayment = this.normalizeMoney(
+      source.downpayment ?? details.downpayment ?? downpayment,
+      'downpayment',
+    );
+    const remainingBalance = this.normalizeMoney(
+      source.remainingBalance ??
+        details.remainingBalance ??
+        Math.max(itemPrice - resolvedDownpayment, 0),
+      'remaining_balance',
+    );
+
+    const customerFirstName = readString(
+      source.customerFirstName,
+      details.customerFirstName,
+    );
+    const customerLastName = readString(
+      source.customerLastName,
+      details.customerLastName,
+    );
+    const customerMiddleName = readString(
+      source.customerMiddleName,
+      details.customerMiddleName,
+    );
+    const customerFullName =
+      readString(source.customerFullName, details.customer) ||
+      [customerFirstName, customerMiddleName, customerLastName]
+        .filter(Boolean)
+        .join(' ');
+
+    if (!customerFirstName || !customerLastName || !customerFullName) {
+      throw new BadRequestException(
+        'Reserve / Layaway requires customer name details.',
+      );
+    }
+
+    return {
+      customerFirstName,
+      customerMiddleName: customerMiddleName || null,
+      customerLastName,
+      customerFullName,
+      customerContactNumber: readString(
+        source.customerContactNumber,
+        details.contact,
+      ),
+      customerAddress: readString(source.customerAddress, details.address),
+      itemName: readString(source.itemName, details.itemReserved, dto.unit),
+      itemCode: readString(source.itemCode, dto.unit_code) || null,
+      itemPrice,
+      downpayment: resolvedDownpayment,
+      remainingBalance,
+      terms: readString(source.terms, details.terms) || null,
+      processedByName:
+        readString(source.processedByName, details.processedBy) || null,
+    };
+  }
+
   private normalizePurpose(value: unknown): string {
     const purpose = String(value ?? '').trim();
+    if (purpose === 'Redeem') {
+      return 'Buy Out';
+    }
     if (!ALLOWED_TRANSACTION_PURPOSES.has(purpose)) {
       throw new BadRequestException('Invalid transaction purpose');
     }
@@ -250,7 +350,7 @@ export class TransactionsService implements OnModuleInit {
       return;
     }
 
-    if (purpose === 'Buy Back') {
+    if (purpose === 'Buy Back' || purpose === 'Buy Out') {
       if (amounts.cashIn <= 0 || amounts.cashOut !== 0) {
         throw new BadRequestException(
           `${purpose} transactions must be cash-in only`,
@@ -270,6 +370,29 @@ export class TransactionsService implements OnModuleInit {
       ) {
         throw new BadRequestException(
           'Renew transactions must set cash_in to storage_fee + return_amount',
+        );
+      }
+      return;
+    }
+
+    if (purpose === 'Reappraise') {
+      if (amounts.cashIn <= 0 || amounts.cashOut !== 0) {
+        throw new BadRequestException(
+          'Reappraise transactions must be cash-in only',
+        );
+      }
+      if (amounts.pawnAmount <= 0) {
+        throw new BadRequestException(
+          'Reappraise transactions must include the new pawn_amount',
+        );
+      }
+      return;
+    }
+
+    if (purpose === 'Reserve / Layaway') {
+      if (amounts.cashIn <= 0 || amounts.cashOut !== 0) {
+        throw new BadRequestException(
+          'Reserve / Layaway transactions must be cash-in only',
         );
       }
       return;
@@ -563,7 +686,11 @@ export class TransactionsService implements OnModuleInit {
       details:
         dtoClean.details == null || dtoClean.details === ''
           ? null
-          : this.encryption.encryptTransactionDetails(String(dtoClean.details)),
+          : this.encryption.encryptTransactionDetails(
+              typeof dtoClean.details === 'string'
+                ? dtoClean.details
+                : JSON.stringify(dtoClean.details),
+            ),
       profile_photo: dtoClean.profile_photo ?? null,
       id_photo: idPhotoUrl,
       id_back_photo: dtoClean.id_back_photo ?? null,
@@ -580,6 +707,49 @@ export class TransactionsService implements OnModuleInit {
         branch_id: string;
         status: string;
       } | null = null;
+
+      if (purpose === 'Buy Out') {
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(
+          tx,
+          user,
+          branchId,
+          dtoClean,
+        );
+
+        if (!linkedPawnedItem) {
+          throw new BadRequestException(
+            `${purpose} requires a valid pawned item reference.`,
+          );
+        }
+
+        if (linkedPawnedItem.status === 'Redeemed') {
+          throw new BadRequestException('Pawned item is already redeemed.');
+        }
+
+        const principal = Number(
+          linkedPawnedItem.amount ?? amounts.pawnAmount ?? 0,
+        );
+        if (!Number.isFinite(principal) || principal <= 0) {
+          throw new BadRequestException(
+            'Buy out principal amount is invalid for this pawned item.',
+          );
+        }
+
+        amounts.pawnAmount = Number(principal.toFixed(2));
+        amounts.cashIn = Number(
+          (
+            amounts.pawnAmount +
+            amounts.storageFee +
+            amounts.returnAmount
+          ).toFixed(2),
+        );
+
+        payload.related_pawned_item_id = linkedPawnedItem.id;
+        payload.unit_code = linkedPawnedItem.item_id;
+        payload.unit = linkedPawnedItem.item_name;
+        payload.pawn_amount = amounts.pawnAmount;
+        payload.cash_in = amounts.cashIn;
+      }
 
       if (purpose === 'Buy Back') {
         linkedPawnedItem = await this.resolveLinkedPawnedItem(
@@ -609,14 +779,6 @@ export class TransactionsService implements OnModuleInit {
         }
 
         amounts.pawnAmount = Number(principal.toFixed(2));
-        amounts.cashIn = Number(
-          (
-            amounts.pawnAmount +
-            amounts.storageFee +
-            amounts.returnAmount
-          ).toFixed(2),
-        );
-
         payload.related_pawned_item_id = linkedPawnedItem.id;
         payload.unit_code = linkedPawnedItem.item_id;
         payload.unit = linkedPawnedItem.item_name;
@@ -662,12 +824,124 @@ export class TransactionsService implements OnModuleInit {
         payload.unit = linkedPawnedItem.item_name;
       }
 
+      if (purpose === 'Reappraise') {
+        linkedPawnedItem = await this.resolveLinkedPawnedItem(
+          tx,
+          user,
+          branchId,
+          dtoClean,
+        );
+
+        if (!linkedPawnedItem) {
+          throw new BadRequestException(
+            'Reappraise requires a valid pawned item reference.',
+          );
+        }
+
+        await tx.pawned_items.update({
+          where: { id: linkedPawnedItem.id },
+          data: {
+            amount: amounts.pawnAmount,
+            updated_at: new Date(),
+          },
+        });
+
+        payload.related_pawned_item_id = linkedPawnedItem.id;
+        payload.unit_code = linkedPawnedItem.item_id;
+        payload.unit = linkedPawnedItem.item_name;
+        payload.pawn_amount = amounts.pawnAmount;
+      }
+
+      let reserveSaleItemId: string | null = null;
+      if (purpose === 'Reserve / Layaway') {
+        reserveSaleItemId = String(dtoClean.related_sale_item_id ?? '').trim();
+        if (!reserveSaleItemId) {
+          throw new BadRequestException(
+            'Reserve / Layaway requires a related sale item reference.',
+          );
+        }
+
+        const saleItem = await tx.sale_items.findFirst({
+          where: {
+            id: reserveSaleItemId,
+            ...(branchId ? { branch_id: branchId } : {}),
+            ...applyEnvironmentFilter(user),
+          },
+          select: {
+            id: true,
+            item_id: true,
+            item_name: true,
+            price: true,
+            status: true,
+          },
+        });
+
+        if (!saleItem) {
+          throw new BadRequestException(
+            'Selected sale item was not found for this branch.',
+          );
+        }
+
+        if ((saleItem.status ?? '').trim() !== 'Available') {
+          throw new BadRequestException(
+            'Only available sale items can be reserved or placed on layaway.',
+          );
+        }
+
+        payload.related_sale_item_id = saleItem.id;
+        payload.unit_code = saleItem.item_id;
+        payload.unit = saleItem.item_name;
+      }
+
       const created = await tx.transactions.create({
         data: payload,
         select: TX_SELECT,
       });
 
-      if (linkedPawnedItem && purpose === 'Buy Back') {
+      if (purpose === 'Reserve / Layaway' && reserveSaleItemId) {
+        const layaway = this.resolveLayawayPayload(
+          layawayInput,
+          dtoClean,
+          amounts.cashIn,
+        );
+
+        await tx.sale_items.update({
+          where: { id: reserveSaleItemId },
+          data: {
+            status: 'Reserved',
+            updated_at: new Date(),
+          },
+        });
+
+        await tx.layaway_reservations.create({
+          data: {
+            transaction_id: String(created.id),
+            related_sale_item_id: reserveSaleItemId,
+            branch_id: branchId!,
+            customer_first_name: layaway.customerFirstName,
+            customer_middle_name: layaway.customerMiddleName,
+            customer_last_name: layaway.customerLastName,
+            customer_full_name: layaway.customerFullName,
+            customer_contact_number: layaway.customerContactNumber,
+            customer_address: layaway.customerAddress,
+            item_name: layaway.itemName,
+            item_code: layaway.itemCode,
+            item_price: layaway.itemPrice,
+            downpayment: layaway.downpayment,
+            remaining_balance: layaway.remainingBalance,
+            terms: layaway.terms,
+            status: layaway.remainingBalance > 0 ? 'PARTIALLY_PAID' : 'COMPLETED',
+            processed_by_user_id: user.id ?? null,
+            processed_by_name: layaway.processedByName,
+            ...environmentCreateFields(user),
+          },
+        });
+      }
+
+      if (
+        linkedPawnedItem &&
+        (purpose === 'Buy Back' || purpose === 'Buy Out')
+      ) {
         await tx.pawned_items.update({
           where: { id: linkedPawnedItem.id },
           data: {
@@ -718,8 +992,10 @@ export class TransactionsService implements OnModuleInit {
       await this.notificationsService.create({
         title:
           purpose === 'Buy Back'
-            ? `Successful buyback completed - ${transactionNo}`
-            : `New ${purpose.toLowerCase()} created - ${transactionNo}`,
+            ? `Successful buy back completed - ${transactionNo}`
+            : purpose === 'Buy Out'
+              ? `Successful buy out completed - ${transactionNo}`
+              : `New ${purpose.toLowerCase()} created - ${transactionNo}`,
         subtitle: dtoClean.unit
           ? `Transaction Alert: ${purpose.toLowerCase()} [${dtoClean.unit}]`
           : `Transaction Alert: ${purpose.toLowerCase()}`,
@@ -728,10 +1004,12 @@ export class TransactionsService implements OnModuleInit {
         event_key: `transaction:${data.id}`,
         entity_type:
           purpose === 'Buy Back'
-            ? 'redemption'
-            : purpose === 'Renew'
-              ? 'payment'
-              : 'transaction',
+            ? 'buy_back'
+            : purpose === 'Buy Out'
+              ? 'redemption'
+              : purpose === 'Renew'
+                ? 'payment'
+                : 'transaction',
         entity_id: transactionNo,
         environment: getEnvironment(user),
         created_by: user.authId,
@@ -916,6 +1194,7 @@ export class TransactionsService implements OnModuleInit {
       stats: {
         pawnedToday: 0,
         buyBack: 0,
+        buyOut: 0,
         renewed: 0,
         soldItem: 0,
         redeemed: 0,
@@ -936,12 +1215,36 @@ export class TransactionsService implements OnModuleInit {
   ) {
     const stats = {
       pawnedToday: rows.filter((t) => t.purpose === 'Pawn').length,
-      buyBack: rows.filter((t) => t.purpose === 'Buy Back').length,
+      buyBack: rows.filter(
+        (t) =>
+          t.purpose === 'Buy Back' &&
+          String(t.details ?? '').includes('Repurchased by'),
+      ).length,
+      buyOut: rows.filter(
+        (t) =>
+          t.purpose === 'Buy Out' ||
+          t.purpose === 'Redeem' ||
+          (t.purpose === 'Buy Back' &&
+            (String(t.details ?? '').includes('Redeemed by') ||
+              String(t.details ?? '').includes('Bought out by'))),
+      ).length,
       renewed: rows.filter((t) => t.purpose === 'Renew').length,
       soldItem: rows.filter(
         (t) => t.purpose === 'Sold Item' || t.purpose === 'Sale',
       ).length,
-      boughtBack: rows.filter((t) => t.purpose === 'Buy Back').length,
+      redeemed: rows.filter(
+        (t) =>
+          t.purpose === 'Buy Out' ||
+          t.purpose === 'Redeem' ||
+          (t.purpose === 'Buy Back' &&
+            (String(t.details ?? '').includes('Redeemed by') ||
+              String(t.details ?? '').includes('Bought out by'))),
+      ).length,
+      boughtBack: rows.filter(
+        (t) =>
+          t.purpose === 'Buy Back' &&
+          String(t.details ?? '').includes('Repurchased by'),
+      ).length,
       transfer: rows.filter(
         (t) => t.purpose === 'Fund Transfer' || t.purpose === 'Cash Transfer',
       ).length,
@@ -995,18 +1298,31 @@ export class TransactionsService implements OnModuleInit {
 
       const needsStart = !sessionRow || sessionRow.is_closed;
       if (needsStart) {
-        const expected =
+        const isToday = balanceDateStr === getPhCalendarDateString();
+
+        // Historical or closed book day: use stored opening/closing (never copy ending → starting).
+        if (balanceData && (!isToday || sessionRow?.is_closed)) {
+          stats.startingBalance = this.toNumber(balanceData.starting_balance);
+          stats.endingBalance = this.toNumber(balanceData.ending_balance);
+          return stats;
+        }
+
+        // Today before Start Day: opening = last closed book ending (+ pre-open activity).
+        const expectedOpening =
           await this.financeDailyBalance.expectedOpeningCashBeforeStartDay(
             scoped,
             balanceDateStr,
           );
-        const storedClose =
-          balanceData?.ending_balance != null && sessionRow?.is_closed
-            ? this.toNumber(balanceData.ending_balance)
-            : 0;
-        const carryForward = Math.max(storedClose, expected);
-        stats.startingBalance = carryForward;
-        stats.endingBalance = carryForward;
+        stats.startingBalance = expectedOpening;
+
+        if (balanceData?.ending_balance != null) {
+          stats.endingBalance = Math.max(
+            expectedOpening,
+            this.toNumber(balanceData.ending_balance),
+          );
+        } else {
+          stats.endingBalance = expectedOpening;
+        }
         return stats;
       }
 

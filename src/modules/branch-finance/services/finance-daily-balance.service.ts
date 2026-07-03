@@ -1387,11 +1387,37 @@ export class FinanceDailyBalanceService {
         return;
       }
 
+      let startingForCreate = carriedForCreate;
+      const daySession = await client.branch_day_sessions.findUnique({
+        where: {
+          branch_id_session_date: {
+            branch_id: branchId,
+            session_date: date,
+          },
+        },
+        select: { starting_balance: true, is_closed: true },
+      });
+      if (
+        daySession &&
+        !daySession.is_closed &&
+        daySession.starting_balance != null
+      ) {
+        startingForCreate = Number(
+          this.dec(daySession.starting_balance).toFixed(2),
+        );
+      } else {
+        startingForCreate = await this.priorBookEndingBeforeDateInTx(
+          client,
+          branchId,
+          date,
+        );
+      }
+
       await client.daily_balances.create({
         data: {
           branch_id: branchId,
           record_date: date,
-          starting_balance: carriedForCreate,
+          starting_balance: startingForCreate,
           ending_balance: next,
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(options?.createdBy !== undefined
@@ -1560,8 +1586,12 @@ export class FinanceDailyBalanceService {
     mode: 'starting' | 'ending';
     confirmedAmount: number;
   }): Promise<{ startingBalance: number; endingBalance: number }> {
-    return this.db.$transaction(async (client) =>
-      this.persistConfirmationBalancesInTx(client, params),
+    return this.db.$transaction(
+      async (client) => this.persistConfirmationBalancesInTx(client, params),
+      {
+        maxWait: 10_000,
+        timeout: 30_000,
+      },
     );
   }
 }
