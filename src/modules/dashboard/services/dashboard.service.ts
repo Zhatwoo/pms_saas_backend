@@ -12,7 +12,9 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
-import { findInterestRateGroup, normalizeInterestRates } from '../../../common/utils/inventory-valuation.util';
+import {
+  findInterestRateGroup, normalizeInterestRates
+} from '../../../common/utils/inventory-valuation.util';
 import {
   applyEnvironmentFilter,
   getEnvironment,

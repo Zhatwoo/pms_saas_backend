@@ -846,7 +846,7 @@ export class BranchFinanceService {
         let summaryCurrentBalance = ledgerEnding;
         if (dayClosedToday && todayDbRow) {
           const atRest = this.toMoney(todayDbRow.ending_balance);
-          summaryStartingBalance = atRest;
+          summaryStartingBalance = this.toMoney(todayDbRow.starting_balance);
           summaryCurrentBalance = atRest;
         } else if (todayDbRow?.ending_balance != null) {
           summaryCurrentBalance = Math.max(
