@@ -9,6 +9,7 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import {
   environmentCreateFields,
   getEnvironment,
+  type DataEnvironment,
 } from '../../../common/utils/authorization.util';
 
 @Injectable()
@@ -142,39 +143,95 @@ export class ShopSettingsService {
       throw new NotFoundException(`Setting ${key} not found`);
     }
 
-    return data.setting_value;
+    return this.normalizeSettingValue(key, data.setting_value);
+  }
+
+  /** Repair legacy rows where an array setting (e.g. interest_rates) was
+   *  accidentally stored as an object like { "0": ..., "1": ... }. */
+  private normalizeSettingValue(key: string, value: any) {
+    if (
+      key === 'interest_rates' &&
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value)
+    ) {
+      const keys = Object.keys(value);
+      const looksLikeArray =
+        keys.length > 0 && keys.every((k) => /^\d+$/.test(k));
+      if (looksLikeArray) {
+        return keys
+          .sort((a, b) => Number(a) - Number(b))
+          .map((k) => value[k]);
+      }
+    }
+    return value;
   }
 
   async setSetting(key: string, value: any, user: AuthenticatedUserProfile) {
     try {
       const environment = getEnvironment(user);
-      const existing = await this.prisma.shop_settings.findFirst({
-        where: { setting_key: key, environment },
-        select: { id: true },
-      });
-
-      if (!existing) {
-        return await this.prisma.shop_settings.create({
-          data: {
-            setting_key: key,
-            setting_value: value,
-            updated_at: new Date(),
-            ...environmentCreateFields(user),
-          },
-        });
-      }
-
-      return await this.prisma.shop_settings.update({
-        where: { id: existing.id },
-        data: {
-          setting_key: key,
-          setting_value: value,
-          updated_at: new Date(),
-        },
-      });
+      return await this.upsertSettingForEnvironment(
+        key,
+        value,
+        environment,
+        user,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new InternalServerErrorException(message);
     }
+  }
+
+  /** Push a setting to every data environment so all branches see the same MOA. */
+  async broadcastSetting(
+    key: string,
+    value: any,
+    user: AuthenticatedUserProfile,
+  ) {
+    try {
+      const environments: DataEnvironment[] = ['production', 'development'];
+      const results = await Promise.all(
+        environments.map((environment) =>
+          this.upsertSettingForEnvironment(key, value, environment, user),
+        ),
+      );
+      return results;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
+    }
+  }
+
+  private async upsertSettingForEnvironment(
+    key: string,
+    value: any,
+    environment: DataEnvironment,
+    user: AuthenticatedUserProfile,
+  ) {
+    const existing = await this.prisma.shop_settings.findFirst({
+      where: { setting_key: key, environment },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return await this.prisma.shop_settings.create({
+        data: {
+          setting_key: key,
+          setting_value: value,
+          updated_at: new Date(),
+          environment,
+          created_by: user.authId ?? null,
+        },
+      });
+    }
+
+    return await this.prisma.shop_settings.update({
+      where: { id: existing.id },
+      data: {
+        setting_key: key,
+        setting_value: value,
+        updated_at: new Date(),
+      },
+    });
   }
 }

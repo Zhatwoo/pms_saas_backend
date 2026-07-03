@@ -80,13 +80,39 @@ export function categoryNamesMatch(cat1: string, cat2: string): boolean {
   return vars1.some((v) => vars2.includes(v));
 }
 
+export function normalizeInterestRates(value: unknown): any[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.groups)) {
+      return record.groups;
+    }
+    if (Array.isArray(record.rates)) {
+      return record.rates;
+    }
+    // Heal legacy corruption where an array was accidentally stored as an object
+    // with numeric keys, e.g. { "0": {...}, "1": {...} }. Without this, callers
+    // like pawn creation see an empty list and fail to snapshot the rate group.
+    const keys = Object.keys(record);
+    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+      return keys
+        .sort((a, b) => Number(a) - Number(b))
+        .map((k) => record[k]);
+    }
+  }
+  return [];
+}
+
 export function findInterestRateGroup(
-  interestRates: any[],
+  interestRates: unknown,
   category?: string,
 ): any | null {
+  const rates = normalizeInterestRates(interestRates);
   if (!category) return null;
   return (
-    interestRates.find((group) =>
+    rates.find((group) =>
       group.categories?.some((cat: string) =>
         categoryNamesMatch(cat, category),
       ),
@@ -100,7 +126,7 @@ export const OPENING_AUDIT_PAWN_WINDOW_DAYS = 7;
 export function getPawnMaturityDaysRemaining(
   pawnDate: string | Date | null | undefined,
   category: string | null | undefined,
-  interestRates: any[],
+  interestRates: unknown,
   asOf: Date = new Date(),
 ): number | null {
   if (!pawnDate) {
@@ -120,7 +146,7 @@ export function getPawnMaturityDaysRemaining(
 export function isPawnItemWithinOpeningAuditWindow(
   pawnDate: string | Date | null | undefined,
   category: string | null | undefined,
-  interestRates: any[],
+  interestRates: unknown,
   windowDays: number = OPENING_AUDIT_PAWN_WINDOW_DAYS,
   asOf: Date = new Date(),
 ): boolean {

@@ -12,7 +12,7 @@ import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
-import { findInterestRateGroup } from '../../../common/utils/inventory-valuation.util';
+import { findInterestRateGroup, normalizeInterestRates } from '../../../common/utils/inventory-valuation.util';
 import {
   applyEnvironmentFilter,
   getEnvironment,
@@ -377,7 +377,7 @@ export class DashboardService {
       },
       select: { setting_value: true },
     });
-    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+    const interestRates = normalizeInterestRates(interestRatesSetting?.setting_value);
 
     return (data || []).map((item: any) => {
       const category = item.category;
@@ -1072,7 +1072,7 @@ export class DashboardService {
       },
       select: { setting_value: true },
     });
-    const interestRates = (interestRatesSetting?.setting_value as any[]) || [];
+    const interestRates = normalizeInterestRates(interestRatesSetting?.setting_value);
 
     let fromDate: string;
     let toDate: string;
