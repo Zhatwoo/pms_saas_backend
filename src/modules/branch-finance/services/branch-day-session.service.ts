@@ -298,15 +298,18 @@ export class BranchDaySessionService {
       purpose: TransactionPurpose.START | TransactionPurpose.END;
       details: string;
       createdByUserId?: string | null;
+      /** When provided, bypasses actor-based environment resolution and uses this value directly.
+       *  Used by the auto-close cron so each session's End marker inherits the session's own environment.
+       */
+      overrideEnvironment?: DataEnvironment | null;
     },
   ): Promise<void> {
     const date = this.toRecordDate(params.businessDateStr);
     const now = new Date();
     const timeStr = getPhWallClockTimeString(now);
-    const environmentFields = await this.resolveActorEnvironmentFields(
-      tx,
-      params.createdByUserId,
-    );
+    const environmentFields = params.overrideEnvironment
+      ? { environment: params.overrideEnvironment, created_by: null as string | null }
+      : await this.resolveActorEnvironmentFields(tx, params.createdByUserId);
 
     const existing = await tx.transactions.findFirst({
       where: {
@@ -658,7 +661,7 @@ export class BranchDaySessionService {
         session_date: { lte: todayDate },
         is_closed: false,
       },
-      select: { id: true, branch_id: true, session_date: true },
+      select: { id: true, branch_id: true, session_date: true, environment: true },
     });
 
     const results: Array<{
@@ -716,6 +719,9 @@ export class BranchDaySessionService {
             purpose: TransactionPurpose.END,
             details: `Branch business day auto-closed at 6:00 PM Manila time — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
             createdByUserId: null,
+            // Use the session's own environment so dev-branch End markers stay in 'development'
+            // and are never visible to production users.
+            overrideEnvironment: (s.environment as DataEnvironment) ?? 'production',
           });
 
           return balances.endingBalance;
