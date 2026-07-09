@@ -419,8 +419,9 @@ export class BranchDaySessionService {
 
       const branch = await tx.branches.findUnique({
         where: { id: params.branchId },
-        select: { name: true },
+        select: { name: true, environment: true },
       });
+      const env = (branch?.environment as DataEnvironment) ?? 'production';
 
       const shiftCutoff = new Date();
       const sealedTransactionIds =
@@ -437,6 +438,7 @@ export class BranchDaySessionService {
           businessDateStr: todayStr,
           mode: 'starting',
           confirmedAmount,
+          environment: env,
         });
 
       this.logger.log(
@@ -460,6 +462,7 @@ export class BranchDaySessionService {
           operational_cutoff_at: shiftCutoff,
           sealed_transaction_ids: sealedTransactionIds,
           updated_at: new Date(),
+          environment: env,
         },
         update: {
           starting_balance: new Prisma.Decimal(confirmedAmount),
@@ -481,6 +484,7 @@ export class BranchDaySessionService {
         purpose: TransactionPurpose.START,
         details: `Opening balance confirmed: ₱${confirmedAmount.toLocaleString('en-PH')}`,
         createdByUserId: params.actorUserId,
+        overrideEnvironment: env,
       });
 
       const openingDate = this.toRecordDate(todayStr);
@@ -576,6 +580,8 @@ export class BranchDaySessionService {
         };
       }
 
+      const env = (row.environment as DataEnvironment) ?? 'production';
+
       const branch = await tx.branches.findUnique({
         where: { id: params.branchId },
         select: { name: true },
@@ -608,6 +614,7 @@ export class BranchDaySessionService {
           businessDateStr: closeDateStr,
           mode: 'ending',
           confirmedAmount: persistConfirmed,
+          environment: env,
         });
 
       await this.closeBranchDaySessionInTx(tx, row.id, {
@@ -630,6 +637,7 @@ export class BranchDaySessionService {
         purpose: TransactionPurpose.END,
         details: `Branch business day ended — closing balance confirmed: ₱${Number(detailAmt).toLocaleString('en-PH')}`,
         createdByUserId: params.actorUserId,
+        overrideEnvironment: env,
       });
 
       return {
@@ -698,6 +706,7 @@ export class BranchDaySessionService {
               businessDateStr: closeDateStr,
               mode: 'ending',
               confirmedAmount: 0,
+              environment: locked.environment,
             });
 
           await tx.branch_day_sessions.update({
