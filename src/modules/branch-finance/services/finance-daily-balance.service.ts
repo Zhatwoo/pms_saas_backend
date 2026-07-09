@@ -1449,6 +1449,7 @@ export class FinanceDailyBalanceService {
       businessDateStr: string;
       mode: 'starting' | 'ending';
       confirmedAmount: number;
+      environment?: string;
     },
   ): Promise<{ startingBalance: number; endingBalance: number }> {
     const { branchId, businessDateStr, mode, confirmedAmount } = params;
@@ -1564,6 +1565,7 @@ export class FinanceDailyBalanceService {
           record_date: date,
           starting_balance: starting,
           ending_balance: ending,
+          ...(params.environment ? { environment: params.environment } : {}),
         },
       });
     }

@@ -4,7 +4,6 @@ import { SupabaseService } from '../../../infrastructure/supabase/supabase.servi
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 import { effectiveBranchIdForQuery } from '../../../common/utils/branch-scope.util';
 import { isNonRevenuePurpose } from '../../../common/enums';
-import { Role } from '../../../common/enums';
 import {
   applyEnvironmentFilter,
   getEnvironment,
@@ -19,10 +18,109 @@ export class ReportsService {
     private readonly prisma: PrismaService,
   ) {}
 
-  private toMoney(val: any): number {
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') return parseFloat(val) || 0;
-    return 0;
+  private toMoney(val: unknown): number {
+    if (val == null) return 0;
+    const parsed = Number(val);
+    return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
+  }
+
+  private toRecordDate(dateStr: string): Date {
+    return new Date(`${dateStr}T00:00:00.000Z`);
+  }
+
+  /** Book opening for one branch on a calendar date (stored start, else prior ending). */
+  private async resolveBranchOpeningBalance(
+    user: AuthenticatedUserProfile,
+    branchId: string,
+    dateStr: string,
+  ): Promise<number> {
+    const date = this.toRecordDate(dateStr);
+
+    const row = await this.prisma.daily_balances.findFirst({
+      where: applyEnvironmentFilter(user, {
+        branch_id: branchId,
+        record_date: date,
+      }),
+      select: { starting_balance: true },
+    });
+    if (row?.starting_balance != null) {
+      return this.toMoney(row.starting_balance);
+    }
+
+    const prior = await this.prisma.daily_balances.findFirst({
+      where: applyEnvironmentFilter(user, {
+        branch_id: branchId,
+        record_date: { lt: date },
+      }),
+      orderBy: { record_date: 'desc' },
+      select: { ending_balance: true },
+    });
+    if (prior?.ending_balance != null) {
+      return this.toMoney(prior.ending_balance);
+    }
+
+    const branch = await this.prisma.branches.findUnique({
+      where: { id: branchId },
+      select: { opening_cash_balance: true },
+    });
+    return this.toMoney(branch?.opening_cash_balance);
+  }
+
+  /** Book closing for one branch on a calendar date (stored ending, else same-day opening). */
+  private async resolveBranchClosingBalance(
+    user: AuthenticatedUserProfile,
+    branchId: string,
+    dateStr: string,
+  ): Promise<number> {
+    const date = this.toRecordDate(dateStr);
+
+    const row = await this.prisma.daily_balances.findFirst({
+      where: applyEnvironmentFilter(user, {
+        branch_id: branchId,
+        record_date: date,
+      }),
+      select: { ending_balance: true, starting_balance: true },
+    });
+    if (row?.ending_balance != null) {
+      return this.toMoney(row.ending_balance);
+    }
+    if (row?.starting_balance != null) {
+      return this.toMoney(row.starting_balance);
+    }
+
+    return this.resolveBranchOpeningBalance(user, branchId, dateStr);
+  }
+
+  private async resolveScopedOpeningBalance(
+    user: AuthenticatedUserProfile,
+    branchId: string | null,
+    branchIds: string[],
+    dateStr: string,
+  ): Promise<number> {
+    const ids = branchId ? [branchId] : branchIds;
+    if (ids.length === 0) return 0;
+
+    let total = 0;
+    for (const id of ids) {
+      total += await this.resolveBranchOpeningBalance(user, id, dateStr);
+    }
+    return Number(total.toFixed(2));
+  }
+
+  private async resolveScopedClosingBalance(
+    user: AuthenticatedUserProfile,
+    branchId: string | null,
+    branchIds: string[],
+    dateStr: string,
+  ): Promise<number> {
+    const ids = branchId ? [branchId] : branchIds;
+    if (ids.length === 0) return 0;
+
+    let total = 0;
+    for (const id of ids) {
+      total += await this.resolveBranchClosingBalance(user, id, dateStr);
+    }
+    return Number(total.toFixed(2));
   }
 
   private resolveDateRange(
@@ -84,26 +182,6 @@ export class ReportsService {
       endDate,
     );
 
-    // When super-admin requests the system report for ALL branches and requests
-    // a weekly period, align the range to the calendar week (Monday - Sunday)
-    // instead of the last 7 days. This ensures consistent weekly reporting
-    // across branches.
-    if (
-      (period ?? '').toLowerCase() === 'weekly' &&
-      !branchQuery &&
-      user?.role === Role.SUPER_ADMIN
-    ) {
-      const today = new Date();
-      const day = today.getDay(); // 0 (Sun) .. 6 (Sat)
-      const diffToMonday = (day + 6) % 7; // 0 for Mon, 6 for Sun
-      const monday = new Date(today);
-      monday.setDate(today.getDate() - diffToMonday);
-      const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
-      fromDate = monday.toISOString().split('T')[0];
-      toDate = sunday.toISOString().split('T')[0];
-      trendDays = 7;
-    }
 
     const branchId = effectiveBranchIdForQuery(user, branchQuery);
 
@@ -305,20 +383,29 @@ export class ReportsService {
       return sum + this.toMoney(row.cash_out);
     }, 0);
 
-    // Opening balance
-    let openingQuery = client
-      .from('transactions')
-      .select('cash_in')
-      .eq('transaction_date', fromDate)
-      .eq('purpose', 'Start')
-      .limit(1);
-    openingQuery = openingQuery.eq('environment', getEnvironment(user));
-    if (branchId) openingQuery = openingQuery.eq('branch_id', branchId);
-    const { data: openingTxn } = await openingQuery;
+    const scopedBranchIds = (branches || [])
+      .filter((b) => !branchId || b.id === branchId)
+      .map((b) => b.id);
 
-    const openingBalance = openingTxn?.[0]
-      ? this.toMoney(openingTxn[0].cash_in)
-      : 0;
+    const isRange = fromDate !== toDate;
+    const openingBalance = await this.resolveScopedOpeningBalance(
+      user,
+      branchId,
+      scopedBranchIds,
+      fromDate,
+    );
+    const closingBalance = isRange
+      ? await this.resolveScopedClosingBalance(
+          user,
+          branchId,
+          scopedBranchIds,
+          toDate,
+        )
+      : null;
+    const periodNetChange =
+      closingBalance != null
+        ? Number((closingBalance - openingBalance).toFixed(2))
+        : null;
 
     return {
       stats: {
@@ -337,9 +424,15 @@ export class ReportsService {
       },
       dailyReport: {
         date: fromDate === toDate ? fromDate : `${fromDate} – ${toDate}`,
+        fromDate,
+        toDate,
+        isRange,
         openingBalance,
+        closingBalance,
+        periodNetChange,
         totalSales: periodTotalSales,
         totalExpenses,
+        totalCashOut: totalExpenses,
         netTotal: periodTotalSales - totalExpenses,
       },
     };

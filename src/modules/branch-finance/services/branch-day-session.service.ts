@@ -298,15 +298,18 @@ export class BranchDaySessionService {
       purpose: TransactionPurpose.START | TransactionPurpose.END;
       details: string;
       createdByUserId?: string | null;
+      /** When provided, bypasses actor-based environment resolution and uses this value directly.
+       *  Used by the auto-close cron so each session's End marker inherits the session's own environment.
+       */
+      overrideEnvironment?: DataEnvironment | null;
     },
   ): Promise<void> {
     const date = this.toRecordDate(params.businessDateStr);
     const now = new Date();
     const timeStr = getPhWallClockTimeString(now);
-    const environmentFields = await this.resolveActorEnvironmentFields(
-      tx,
-      params.createdByUserId,
-    );
+    const environmentFields = params.overrideEnvironment
+      ? { environment: params.overrideEnvironment, created_by: null as string | null }
+      : await this.resolveActorEnvironmentFields(tx, params.createdByUserId);
 
     const existing = await tx.transactions.findFirst({
       where: {
@@ -416,8 +419,9 @@ export class BranchDaySessionService {
 
       const branch = await tx.branches.findUnique({
         where: { id: params.branchId },
-        select: { name: true },
+        select: { name: true, environment: true },
       });
+      const env = (branch?.environment as DataEnvironment) ?? 'production';
 
       const shiftCutoff = new Date();
       const sealedTransactionIds =
@@ -434,6 +438,7 @@ export class BranchDaySessionService {
           businessDateStr: todayStr,
           mode: 'starting',
           confirmedAmount,
+          environment: env,
         });
 
       this.logger.log(
@@ -457,6 +462,7 @@ export class BranchDaySessionService {
           operational_cutoff_at: shiftCutoff,
           sealed_transaction_ids: sealedTransactionIds,
           updated_at: new Date(),
+          environment: env,
         },
         update: {
           starting_balance: new Prisma.Decimal(confirmedAmount),
@@ -478,6 +484,7 @@ export class BranchDaySessionService {
         purpose: TransactionPurpose.START,
         details: `Opening balance confirmed: ₱${confirmedAmount.toLocaleString('en-PH')}`,
         createdByUserId: params.actorUserId,
+        overrideEnvironment: env,
       });
 
       const openingDate = this.toRecordDate(todayStr);
@@ -573,6 +580,8 @@ export class BranchDaySessionService {
         };
       }
 
+      const env = (row.environment as DataEnvironment) ?? 'production';
+
       const branch = await tx.branches.findUnique({
         where: { id: params.branchId },
         select: { name: true },
@@ -605,6 +614,7 @@ export class BranchDaySessionService {
           businessDateStr: closeDateStr,
           mode: 'ending',
           confirmedAmount: persistConfirmed,
+          environment: env,
         });
 
       await this.closeBranchDaySessionInTx(tx, row.id, {
@@ -627,6 +637,7 @@ export class BranchDaySessionService {
         purpose: TransactionPurpose.END,
         details: `Branch business day ended — closing balance confirmed: ₱${Number(detailAmt).toLocaleString('en-PH')}`,
         createdByUserId: params.actorUserId,
+        overrideEnvironment: env,
       });
 
       return {
@@ -658,7 +669,7 @@ export class BranchDaySessionService {
         session_date: { lte: todayDate },
         is_closed: false,
       },
-      select: { id: true, branch_id: true, session_date: true },
+      select: { id: true, branch_id: true, session_date: true, environment: true },
     });
 
     const results: Array<{
@@ -695,6 +706,7 @@ export class BranchDaySessionService {
               businessDateStr: closeDateStr,
               mode: 'ending',
               confirmedAmount: 0,
+              environment: locked.environment,
             });
 
           await tx.branch_day_sessions.update({
@@ -716,6 +728,9 @@ export class BranchDaySessionService {
             purpose: TransactionPurpose.END,
             details: `Branch business day auto-closed at 6:00 PM Manila time — closing balance: ₱${balances.endingBalance.toLocaleString('en-PH')}`,
             createdByUserId: null,
+            // Use the session's own environment so dev-branch End markers stay in 'development'
+            // and are never visible to production users.
+            overrideEnvironment: (s.environment as DataEnvironment) ?? 'production',
           });
 
           return balances.endingBalance;

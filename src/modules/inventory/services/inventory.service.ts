@@ -26,6 +26,7 @@ import {
   findInterestRateGroup,
   normalizeInterestRates,
   isPawnItemWithinOpeningAuditWindow,
+  getPawnMaturityDaysRemaining,
   OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
 import {
@@ -160,6 +161,7 @@ export class InventoryService {
       category: string;
       source: 'pawned' | 'sale';
       status: string;
+      daysLeft?: number | null;
     }>
   > {
     const client = this.supabase.getClient();
@@ -249,12 +251,14 @@ export class InventoryService {
           item_name: string;
           category: string;
           status?: string | null;
+          pawn_date?: string | null;
         }) => ({
           item_id: item.item_id,
           item_name: item.item_name,
           category: item.category,
           source: 'pawned' as const,
           status: item.status || 'Active',
+          daysLeft: getPawnMaturityDaysRemaining(item.pawn_date, item.category, interestRates),
         }),
       ),
       ...saleItems,
@@ -281,6 +285,7 @@ export class InventoryService {
               category: item.category,
               status: item.status,
               source: item.source,
+              daysLeft: item.daysLeft,
             });
           }
           return map;
@@ -290,6 +295,7 @@ export class InventoryService {
           category: string;
           status: string;
           source: 'pawned' | 'sale';
+          daysLeft?: number | null;
         }>())
         .values(),
     );
@@ -1341,12 +1347,16 @@ export class InventoryService {
               itemId: normalizedId,
               itemName: item.item_name || item.item_id,
               category: item.category || 'Uncategorized',
+              source: item.source || 'sale',
+              daysLeft: item.daysLeft,
             });
           }
           return map;
-        }, new Map<string, { itemId: string; itemName: string; category: string }>())
+        }, new Map<string, { itemId: string; itemName: string; category: string; source: string; daysLeft?: number | null }>())
         .values(),
     );
+
+    console.log('DEBUG systemItemList in qrTally:', systemItemList);
 
     const systemIds = systemItemList.map((item) => item.itemId);
 
