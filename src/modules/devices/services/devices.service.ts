@@ -179,10 +179,10 @@ export class DevicesService {
 
     const existing = await this.prisma.authorized_devices.findFirst({
       where: {
+        employee_id: dto.employeeId,
         device_fingerprint: dto.deviceFingerprint,
         environment: getEnvironment(actor),
       },
-      orderBy: { created_at: 'desc' },
     });
 
     if (existing) {
@@ -297,51 +297,17 @@ export class DevicesService {
       return existing;
     }
 
-    const existingFingerprint = await this.prisma.authorized_devices.findFirst({
+    const blockedFingerprint = await this.prisma.authorized_devices.findFirst({
       where: {
         device_fingerprint: dto.deviceFingerprint,
+        environment: resolvedEnvironment,
+        status: 'BLOCKED',
       },
       orderBy: { created_at: 'desc' },
     });
 
-    if (existingFingerprint) {
-      if (existingFingerprint.status === 'BLOCKED') {
-        throw new ForbiddenException('Device is blocked');
-      }
-
-      const device = await this.prisma.authorized_devices.update({
-        where: { id: existingFingerprint.id },
-        data: {
-          employee_id: resolvedEmployeeId,
-          branch_id: resolvedBranchId ?? undefined,
-          device_name: dto.deviceName ?? existingFingerprint.device_name,
-          device_type: dto.deviceType ?? existingFingerprint.device_type,
-          ip_address: dto.ipAddress ?? clientIp,
-          status: 'PENDING',
-          environment: resolvedEnvironment,
-          created_by: resolvedAuthId ?? existingFingerprint.created_by,
-          updated_at: new Date(),
-        },
-      });
-
-      // Fire notification asynchronously (non-blocking)
-      // employee_id is guaranteed to be non-null here because we validated resolvedEmployeeId above
-      if (device.employee_id) {
-        this.notifyDeviceAuthorizationRequest(
-          device.id,
-          device.device_fingerprint,
-          device.device_name,
-          device.device_type,
-          device.ip_address,
-          device.employee_id,
-          device.branch_id,
-          device.environment as 'production' | 'development',
-        ).catch(() => {
-          // Error already logged in notifyDeviceAuthorizationRequest
-        });
-      }
-
-      return device;
+    if (blockedFingerprint) {
+      throw new ForbiddenException('Device is blocked');
     }
 
     const device = await this.prisma.authorized_devices.create({
