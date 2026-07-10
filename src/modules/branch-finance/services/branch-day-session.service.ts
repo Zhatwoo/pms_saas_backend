@@ -474,6 +474,7 @@ export class BranchDaySessionService {
           operational_cutoff_at: shiftCutoff,
           sealed_transaction_ids: sealedTransactionIds,
           updated_at: new Date(),
+          environment: env,
         },
       });
 
@@ -502,6 +503,7 @@ export class BranchDaySessionService {
           status: 'pending',
           employee_id: params.actorUserId,
           last_updated_by_user_id: params.actorUserId,
+          environment: env,
         },
         update: {
           starting_cash: new Prisma.Decimal(confirmedAmount),
@@ -509,6 +511,7 @@ export class BranchDaySessionService {
           employee_id: params.actorUserId,
           last_updated_by_user_id: params.actorUserId,
           updated_at: new Date(),
+          environment: env,
         },
       });
 
