@@ -16,8 +16,9 @@ export class BranchFinanceController {
   getSummary(
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
+    @Query('date') date?: string,
   ) {
-    return this.branchFinanceService.getSummary(req.user, branch);
+    return this.branchFinanceService.getSummary(req.user, branch, date);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)

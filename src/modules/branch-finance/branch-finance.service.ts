@@ -611,13 +611,14 @@ export class BranchFinanceService {
 
   async getSummary(
     user: UserWithBranch,
-    branchQuery?: string,
+    branchFilter?: string,
+    dateParam?: string,
   ): Promise<BranchFinanceSummary[]> {
-    const today = getPhCalendarDateString();
+    const today = dateParam || getPhCalendarDateString();
 
     const branchId =
       user.role === Role.SUPER_ADMIN
-        ? effectiveBranchIdForQuery(user, branchQuery)
+        ? effectiveBranchIdForQuery(user, branchFilter)
         : requireUserBranchId(user);
 
     const environment = getEnvironment(user);
