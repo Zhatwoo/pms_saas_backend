@@ -43,6 +43,10 @@ import { EncryptionModule } from './common/encryption/encryption.module';
 import { CacheModuleConfig } from './infrastructure/cache';
 import { AppController } from './app.controller';
 import { HealthController } from './modules/health/health.controller';
+import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
+import { TenantsModule } from './modules/tenants/tenants.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 
 @Module({
   // Triggering reload for new QR replacement routes
@@ -97,6 +101,9 @@ import { HealthController } from './modules/health/health.controller';
     QRReplacementRequestsModule,
     DevicesModule,
     CategoriesModule,
+    TenantsModule,
+    SubscriptionsModule,
+    WebhooksModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
@@ -119,6 +126,10 @@ import { HealthController } from './modules/health/health.controller';
     {
       provide: APP_INTERCEPTOR,
       useClass: ActivityLogInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TenantInterceptor,
     },
   ],
 })
