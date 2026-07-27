@@ -611,7 +611,7 @@ export class PasswordChangeRequestsService {
     const logs = await this.loadRequestLogs();
     const records = this.buildRecords(logs)
       .filter((record) => record.status === 'pending')
-      .filter((record) => record.targetRole === user.role)
+      .filter((record) => record.targetRole === (user.role as string))
       .filter((record) =>
         user.role === Role.ADMIN
           ? record.requesterBranchId === user.branchId
@@ -647,7 +647,7 @@ export class PasswordChangeRequestsService {
       throw new BadRequestException('Only pending requests can be reviewed');
     }
 
-    if (existing.targetRole !== reviewer.role) {
+    if (existing.targetRole !== (reviewer.role as string)) {
       throw new ForbiddenException(
         'You are not allowed to review this request',
       );
@@ -701,7 +701,7 @@ export class PasswordChangeRequestsService {
     });
 
     const approvers = await this.getApprovers(
-      existing.targetRole,
+      existing.targetRole as Role.ADMIN | Role.SUPER_ADMIN,
       existing.requesterBranchId,
     );
 

@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { PrismaService } from '../../../infrastructure/prisma';
@@ -34,7 +35,7 @@ import {
   normalizeInterestRates,
 } from '../../../common/utils/inventory-valuation.util';
 
-type PawnTicketDbClient = any;
+type PawnTicketDbClient = Prisma.TransactionClient | PrismaService;
 
 @Injectable()
 export class PawnTicketsService {
@@ -189,7 +190,7 @@ export class PawnTicketsService {
       rec.code === 'P2002' &&
       (Array.isArray(target)
         ? target.includes('item_id')
-        : String(target ?? '').includes('item_id'))
+        : typeof target === 'string' && target.includes('item_id'))
     );
   }
 
@@ -221,7 +222,7 @@ export class PawnTicketsService {
     return value ? value.toISOString().slice(0, 10) : null;
   }
 
-  private toNumber(value: any | number | string | null | undefined) {
+  private toNumber(value: Prisma.Decimal | number | string | null | undefined) {
     if (value == null) return 0;
     return Number(value);
   }
@@ -233,8 +234,12 @@ export class PawnTicketsService {
     if (typeof error === 'string' && error.trim()) {
       return error.trim();
     }
-    if (typeof error !== 'object') {
+    if (typeof error === 'number' || typeof error === 'boolean') {
       return String(error);
+    }
+    if (typeof error !== 'object') {
+      // Non-object, non-string/number/boolean primitive (e.g. bigint, symbol).
+      return 'Unknown database error';
     }
     const rec = error as Record<string, unknown>;
     const parts = [rec.message, rec.details, rec.hint, rec.code].filter(
@@ -298,7 +303,7 @@ export class PawnTicketsService {
     query: { branch?: string; status?: string; search?: string },
   ) {
     const branchId = effectiveBranchIdForQuery(user, query.branch);
-    const where: any = applyEnvironmentFilter(user);
+    const where: Prisma.pawned_itemsWhereInput = applyEnvironmentFilter(user);
     if (branchId) where.branch_id = branchId;
     if (query.status) where.status = query.status;
 
@@ -394,9 +399,10 @@ export class PawnTicketsService {
     const interestRates = await this.loadInterestRates(user);
     const itemCategory = dto.item.category?.trim() || 'Miscellaneous';
     const matchedRateGroup = findInterestRateGroup(interestRates, itemCategory);
-    const interestRateSnapshot = matchedRateGroup
-      ? { ...matchedRateGroup }
-      : null;
+    const interestRateSnapshot: Prisma.InputJsonValue | typeof Prisma.JsonNull =
+      matchedRateGroup
+        ? ({ ...matchedRateGroup } as Prisma.InputJsonValue)
+        : Prisma.JsonNull;
 
     const providedSerialNumber = dto.item.serialNumber?.trim();
     const serialNumber =
@@ -533,17 +539,20 @@ export class PawnTicketsService {
       memory_storage: true,
       id_back_photo: true,
       item_photos: true,
-    } as any;
+    } satisfies Prisma.pawned_itemsSelect;
 
     let itemId = await this.resolveItemId(
       branchId,
       branch.branch_code,
       dto.item.unitCode,
     );
+    type CreatedPawnedItem = Prisma.pawned_itemsGetPayload<{
+      select: typeof pawnedItemSelect;
+    }>;
     let result: {
       customer: { id: string; [key: string]: unknown };
-      pawnedItem: any;
-      transaction: any;
+      pawnedItem: CreatedPawnedItem;
+      transaction: Prisma.transactionsGetPayload<Record<string, never>>;
       transactionNo: string;
     } | null = null;
 
@@ -652,7 +661,7 @@ export class PawnTicketsService {
             details: this.encryption.encryptTransactionDetails(
               dto.transaction.details?.trim() ?? null,
             ),
-            related_pawned_item_id: (pawnedItem as any)?.id ?? null,
+            related_pawned_item_id: pawnedItem.id ?? null,
             created_by_user_id: user.id,
             profile_photo: profilePhotoUrl,
             id_photo: idPhotoUrl,
@@ -687,7 +696,7 @@ export class PawnTicketsService {
               action: 'PAWN_TICKET_CREATED',
               ...environmentFields,
               details: JSON.stringify({
-                pawnedItemId: (pawnedItem as any)?.id ?? null,
+                pawnedItemId: pawnedItem.id ?? null,
                 transactionId: transaction.id,
                 transactionNo: transactionPayload.transaction_no,
                 pawnAmount,
@@ -744,7 +753,7 @@ export class PawnTicketsService {
       transaction: {
         ...result.transaction,
         details: this.encryption.decryptTransactionDetails(
-          result.transaction.details as string | null,
+          result.transaction.details,
         ),
       },
     };
@@ -800,12 +809,10 @@ export class PawnTicketsService {
     const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
     const buf = Buffer.from(base64Data, 'base64');
 
-    const { data, error } = await client.storage
-      .from(bucket)
-      .upload(path, buf, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
+    const { error } = await client.storage.from(bucket).upload(path, buf, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
 
     if (error) {
       throw new InternalServerErrorException(

@@ -24,6 +24,17 @@ import {
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 
+// Rows fetched via the untyped Supabase client come back as `any`; this
+// interface pins down the shape actually selected by the queries below.
+interface PasswordChangeLogRow {
+  id: string;
+  user_id: string;
+  branch_id: string | null;
+  action: string;
+  details: unknown;
+  created_at: string;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -466,13 +477,13 @@ export class AuthService {
     };
   }
 
-  private parseActivityLogDetails(details: unknown): Record<string, any> {
+  private parseActivityLogDetails(details: unknown): Record<string, unknown> {
     if (!details) {
       return {};
     }
 
     if (typeof details === 'object' && details !== null) {
-      return details as Record<string, any>;
+      return details as Record<string, unknown>;
     }
 
     if (typeof details !== 'string') {
@@ -480,9 +491,9 @@ export class AuthService {
     }
 
     try {
-      const parsed = JSON.parse(details);
+      const parsed: unknown = JSON.parse(details);
       return typeof parsed === 'object' && parsed !== null
-        ? (parsed as Record<string, any>)
+        ? (parsed as Record<string, unknown>)
         : {};
     } catch {
       return {};
@@ -521,7 +532,8 @@ export class AuthService {
     }
 
     const approverRole = user.role;
-    const pendingLogs = (logs || []).filter((row: any) => {
+    const typedLogs = (logs ?? []) as PasswordChangeLogRow[];
+    const pendingLogs = typedLogs.filter((row) => {
       const details = this.parseActivityLogDetails(row.details);
       const requestStatus =
         typeof details.requestStatus === 'string'
@@ -530,15 +542,16 @@ export class AuthService {
       const intendedApprover =
         typeof details.approverRole === 'string' ? details.approverRole : '';
 
-      return requestStatus === 'pending' && intendedApprover === approverRole;
+      return (
+        requestStatus === 'pending' &&
+        intendedApprover === (approverRole as string)
+      );
     });
 
     const requesterIds = Array.from(
       new Set(
         pendingLogs
-          .map((row: any) =>
-            typeof row.user_id === 'string' ? row.user_id : null,
-          )
+          .map((row) => (typeof row.user_id === 'string' ? row.user_id : null))
           .filter((value: string | null): value is string => Boolean(value)),
       ),
     );
@@ -577,7 +590,7 @@ export class AuthService {
       }
     }
 
-    return pendingLogs.map((row: any) => {
+    return pendingLogs.map((row) => {
       const details = this.parseActivityLogDetails(row.details);
       const requester = userMap.get(row.user_id);
 
@@ -635,13 +648,15 @@ export class AuthService {
     }
 
     const client = this.supabaseService.getClient();
-    const { data: logRow, error: logError } = await client
+    const logResult = await client
       .from('activity_logs')
       .select('id, user_id, branch_id, action, details, created_at')
       .eq('id', requestId)
       .eq('environment', getEnvironment(reviewer))
       .eq('action', 'PASSWORD_CHANGE_REQUEST')
       .maybeSingle();
+    const logError = logResult.error;
+    const logRow: PasswordChangeLogRow | null = logResult.data;
 
     if (logError) {
       throw new InternalServerErrorException(
@@ -678,7 +693,7 @@ export class AuthService {
         ? parsedDetails.approverRole
         : null;
 
-    if (!approverRole || approverRole !== reviewer.role) {
+    if (!approverRole || approverRole !== (reviewer.role as string)) {
       throw new UnauthorizedException(
         'You are not allowed to review this request',
       );

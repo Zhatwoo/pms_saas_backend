@@ -30,7 +30,6 @@ const BRANCH_DAY_TX_OPTIONS = {
 @Injectable()
 export class BranchDaySessionService {
   private readonly logger = new Logger(BranchDaySessionService.name);
-  
 
   constructor(
     private readonly prisma: PrismaService,
@@ -50,7 +49,11 @@ export class BranchDaySessionService {
   }
 
   private dec(n: unknown): Prisma.Decimal {
-    return new Prisma.Decimal(String(n ?? 0));
+    if (n instanceof Prisma.Decimal) return n;
+    if (typeof n === 'number' || typeof n === 'string') {
+      return new Prisma.Decimal(n);
+    }
+    return new Prisma.Decimal(0);
   }
 
   private async resolveActorEnvironmentFields(
@@ -308,7 +311,10 @@ export class BranchDaySessionService {
     const now = new Date();
     const timeStr = getPhWallClockTimeString(now);
     const environmentFields = params.overrideEnvironment
-      ? { environment: params.overrideEnvironment, created_by: null as string | null }
+      ? {
+          environment: params.overrideEnvironment,
+          created_by: null as string | null,
+        }
       : await this.resolveActorEnvironmentFields(tx, params.createdByUserId);
 
     const existing = await tx.transactions.findFirst({
@@ -672,7 +678,12 @@ export class BranchDaySessionService {
         session_date: { lte: todayDate },
         is_closed: false,
       },
-      select: { id: true, branch_id: true, session_date: true, environment: true },
+      select: {
+        id: true,
+        branch_id: true,
+        session_date: true,
+        environment: true,
+      },
     });
 
     const results: Array<{
@@ -733,7 +744,8 @@ export class BranchDaySessionService {
             createdByUserId: null,
             // Use the session's own environment so dev-branch End markers stay in 'development'
             // and are never visible to production users.
-            overrideEnvironment: (s.environment as DataEnvironment) ?? 'production',
+            overrideEnvironment:
+              (s.environment as DataEnvironment) ?? 'production',
           });
 
           return balances.endingBalance;
