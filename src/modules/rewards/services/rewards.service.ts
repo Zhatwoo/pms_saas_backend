@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/prisma';
-import { Role } from '../../../common/enums';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
   applyEnvironmentFilter,

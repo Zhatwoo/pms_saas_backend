@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class ItemsService {
-  create(createItemDto: any) {
+  create(_createItemDto: Record<string, unknown>) {
     return { message: 'Item created' };
   }
 
@@ -14,7 +14,7 @@ export class ItemsService {
     return { id };
   }
 
-  update(id: string, updateItemDto: any) {
+  update(id: string, updateItemDto: Record<string, unknown>) {
     return { id, ...updateItemDto };
   }
 

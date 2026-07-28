@@ -111,7 +111,10 @@ export class NotificationEventsService {
       return true;
     }
 
-    if (notification.target_role && notification.target_role !== user.role) {
+    if (
+      notification.target_role &&
+      notification.target_role !== (user.role as string)
+    ) {
       return false;
     }
 
