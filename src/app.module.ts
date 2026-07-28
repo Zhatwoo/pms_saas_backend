@@ -52,7 +52,7 @@ import { HealthController } from './modules/health/health.controller';
     ConfigModule.forRoot({
       isGlobal: true,
       load: [appConfig, securityConfig],
-      envFilePath: '.env',
+      envFilePath: ['.env.local', '.env'],
     }),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRootAsync({
