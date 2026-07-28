@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestCacheService } from './request-cache.service';
 
@@ -16,7 +17,12 @@ export class CachedBranchService {
   /**
    * Find a branch by ID with request-scoped caching
    */
-  async findUnique(branchId: string, select?: any) {
+  async findUnique<S extends Prisma.branchesSelect | undefined = undefined>(
+    branchId: string,
+    select?: S,
+  ) {
+    type Result = Prisma.branchesGetPayload<{ select: S }>;
+
     const cacheKey = this.requestCache.createKey(
       'branch',
       branchId,
@@ -24,16 +30,16 @@ export class CachedBranchService {
     );
 
     // Check request cache first
-    let result = this.requestCache.get(cacheKey);
-    if (result !== undefined) {
-      return result;
+    const cached = this.requestCache.get<Result | null>(cacheKey);
+    if (cached !== undefined) {
+      return cached;
     }
 
     // Fall back to database
-    result = await this.prisma.branches.findUnique({
+    const result = (await this.prisma.branches.findUnique({
       where: { id: branchId },
-      select: select || true,
-    });
+      select: select ?? (true as unknown as S),
+    })) as Result | null;
 
     // Cache in request scope if found
     if (result) {
@@ -46,8 +52,11 @@ export class CachedBranchService {
   /**
    * Find branches by ID list with caching
    */
-  async findMany(branchIds: string[], select?: any) {
-    const results: any[] = [];
+  async findMany<S extends Prisma.branchesSelect | undefined = undefined>(
+    branchIds: string[],
+    select?: S,
+  ) {
+    const results: Prisma.branchesGetPayload<{ select: S }>[] = [];
 
     for (const id of branchIds) {
       const result = await this.findUnique(id, select);

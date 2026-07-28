@@ -110,7 +110,11 @@ export class BranchBusinessSessionService {
   }
 
   private dec(n: unknown): Prisma.Decimal {
-    return new Prisma.Decimal(String(n ?? 0));
+    if (n instanceof Prisma.Decimal) return n;
+    if (typeof n === 'number' || typeof n === 'string') {
+      return new Prisma.Decimal(n);
+    }
+    return new Prisma.Decimal(0);
   }
 
   async computeInventoryValuationSnapshot(

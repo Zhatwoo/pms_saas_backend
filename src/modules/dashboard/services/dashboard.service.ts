@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import nodemailer, { type Transporter } from 'nodemailer';
+import type { PostgrestFilterBuilder } from '@supabase/supabase-js';
 import { Role, isNonRevenuePurpose } from '../../../common/enums';
 import { requireUserBranchId } from '../../../common/utils/branch-scope.util';
 import { buildBranchDaySnapshotFromFetched } from '../../../common/utils/daily-balance-aggregate.util';
@@ -13,7 +14,8 @@ import { SupabaseService } from '../../../infrastructure/supabase/supabase.servi
 import { PrismaService } from '../../../infrastructure/prisma';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import {
-  findInterestRateGroup, normalizeInterestRates
+  findInterestRateGroup,
+  normalizeInterestRates,
 } from '../../../common/utils/inventory-valuation.util';
 import {
   applyEnvironmentFilter,
@@ -86,6 +88,71 @@ interface ExpirationBuckets {
   threeDays: ExpirationMonitoringItem[];
   sevenDays: ExpirationMonitoringItem[];
   thirtyDays: ExpirationMonitoringItem[];
+}
+
+/** Generic Supabase (postgrest) query builder used to type ad-hoc `.select()` chains. */
+type AnyPostgrestQuery = PostgrestFilterBuilder<any, any, any, any>;
+
+/** Row shape for `pawned_items` rows selected via the Supabase REST client (JSON-serialized). */
+interface PawnedItemEmbedCustomer {
+  full_name: string | null;
+  email: string | null;
+}
+
+interface PawnedItemForExpiration {
+  id: string;
+  item_id: string;
+  item_name: string;
+  category: string;
+  amount: number | string | null;
+  pawn_date: string | null;
+  status: string;
+  branch_id: string;
+  customers: PawnedItemEmbedCustomer | PawnedItemEmbedCustomer[] | null;
+}
+
+interface PawnedItemNearExpiration {
+  category: string | null;
+  pawn_date: string | null;
+}
+
+interface PawnedItemTrendRow {
+  status: string;
+  pawn_date: string | null;
+}
+
+interface PawnedItemAttentionRow {
+  id: string;
+  item_name: string;
+  item_id: string;
+  category: string | null;
+  amount: number | string | null;
+  pawn_date: string | null;
+  status: string;
+}
+
+interface TransactionRevenueRow {
+  cash_in: number | string | null;
+  purpose: string;
+}
+
+interface TransactionRevenueTrendRow {
+  cash_in: number | string | null;
+  transaction_date: string | null;
+  purpose: string;
+}
+
+interface TransactionSalesRow {
+  cash_in: number | string | null;
+}
+
+interface DashboardNotificationRow {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  created_at: string | null;
+  is_read: boolean | null;
+  branch_id?: string | null;
 }
 
 @Injectable()
@@ -371,6 +438,11 @@ export class DashboardService {
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
+    // The Supabase client is not typed against the DB schema, so the raw
+    // `.select()` column-list string above resolves to `any`. Assert the
+    // known shape of the columns actually selected instead of accessing
+    // `any` freely below.
+    const rows = (data ?? []) as PawnedItemForExpiration[];
 
     const interestRatesSetting = await this.prisma.shop_settings.findFirst({
       where: {
@@ -379,14 +451,16 @@ export class DashboardService {
       },
       select: { setting_value: true },
     });
-    const interestRates = normalizeInterestRates(interestRatesSetting?.setting_value);
+    const interestRates = normalizeInterestRates(
+      interestRatesSetting?.setting_value,
+    );
 
-    return (data || []).map((item: any) => {
+    return rows.map((item) => {
       const category = item.category;
       const group = findInterestRateGroup(interestRates, category);
       const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
 
-      const maturityDate = new Date(item.pawn_date);
+      const maturityDate = new Date(item.pawn_date ?? today);
       maturityDate.setDate(maturityDate.getDate() + defaultDuration);
 
       const daysRemaining = Math.ceil(
@@ -397,8 +471,8 @@ export class DashboardService {
         : item.customers;
       const customer = customerRaw
         ? (this.encryption.decryptCustomerEmbed(
-            customerRaw as Record<string, unknown>,
-          ) as typeof customerRaw)
+            customerRaw as unknown as Record<string, unknown>,
+          ) as unknown as PawnedItemEmbedCustomer)
         : null;
 
       return {
@@ -916,7 +990,7 @@ export class DashboardService {
           },
         };
       }
-      case Role.EMPLOYEE:
+      case Role.EMPLOYEE: {
         const employeeBranchId = requireUserBranchId(user);
         const [
           employeeBranchResult,
@@ -1025,6 +1099,7 @@ export class DashboardService {
               .map((row) => this.mapDashboardFundRequest(row)),
           },
         };
+      }
       default:
         return { view: 'guest', data: null };
     }
@@ -1074,7 +1149,9 @@ export class DashboardService {
       },
       select: { setting_value: true },
     });
-    const interestRates = normalizeInterestRates(interestRatesSetting?.setting_value);
+    const interestRates = normalizeInterestRates(
+      interestRatesSetting?.setting_value,
+    );
 
     let fromDate: string;
     let toDate: string;
@@ -1095,7 +1172,9 @@ export class DashboardService {
       : branchFilter || null;
 
     // Build base queries
-    const buildPawnQuery = (baseQuery: any) => {
+    const buildPawnQuery = (
+      baseQuery: AnyPostgrestQuery,
+    ): AnyPostgrestQuery => {
       let q = baseQuery.eq('environment', getEnvironment(user));
       if (branchId) q = q.eq('branch_id', branchId);
       return q;
@@ -1247,8 +1326,9 @@ export class DashboardService {
     ]);
 
     // Compute monthly revenue (only revenue-generating purposes)
-    const monthlyRevenue = (revenueResult.data || []).reduce(
-      (sum: number, row: any) =>
+    const revenueRows = (revenueResult.data ?? []) as TransactionRevenueRow[];
+    const monthlyRevenue = revenueRows.reduce(
+      (sum: number, row) =>
         isNonRevenuePurpose(row.purpose)
           ? sum
           : sum + this.toMoney(row.cash_in),
@@ -1256,13 +1336,17 @@ export class DashboardService {
     );
 
     // Compute total overall sales
-    const branchSales = (branchSalesResult.data || []).reduce(
-      (sum: number, row: any) => sum + this.toMoney(row.cash_in),
+    const branchSalesRows = (branchSalesResult.data ??
+      []) as TransactionSalesRow[];
+    const branchSales = branchSalesRows.reduce(
+      (sum: number, row) => sum + this.toMoney(row.cash_in),
       0,
     );
 
-    const allBranchSales = (allBranchSalesResult.data || []).reduce(
-      (sum: number, row: any) => sum + this.toMoney(row.cash_in),
+    const allBranchSalesRows = (allBranchSalesResult.data ??
+      []) as TransactionSalesRow[];
+    const allBranchSales = allBranchSalesRows.reduce(
+      (sum: number, row) => sum + this.toMoney(row.cash_in),
       0,
     );
 
@@ -1290,7 +1374,9 @@ export class DashboardService {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       contractTrendMap.set(key, { contracts: 0, boughtBack: 0 });
     }
-    for (const row of contractTrendResult.data || []) {
+    const contractTrendRows = (contractTrendResult.data ??
+      []) as PawnedItemTrendRow[];
+    for (const row of contractTrendRows) {
       if (!row.pawn_date) continue;
       const key = row.pawn_date.substring(0, 7);
       const entry = contractTrendMap.get(key);
@@ -1317,7 +1403,9 @@ export class DashboardService {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       revenueTrendMap.set(key, 0);
     }
-    for (const row of revenueTrendResult.data || []) {
+    const revenueTrendRows = (revenueTrendResult.data ??
+      []) as TransactionRevenueTrendRow[];
+    for (const row of revenueTrendRows) {
       if (!row.transaction_date || isNonRevenuePurpose(row.purpose)) continue;
       const key = row.transaction_date.substring(0, 7);
       const current = revenueTrendMap.get(key);
@@ -1333,12 +1421,14 @@ export class DashboardService {
     );
 
     // Build attention items
-    const attentionItems = (attentionResult.data || []).map((item: any) => {
-      const category = item.category;
+    const attentionRows = (attentionResult.data ??
+      []) as PawnedItemAttentionRow[];
+    const attentionItems = attentionRows.map((item) => {
+      const category = item.category ?? undefined;
       const group = findInterestRateGroup(interestRates, category);
       const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
 
-      const maturityDate = new Date(item.pawn_date);
+      const maturityDate = new Date(item.pawn_date ?? today);
       maturityDate.setDate(maturityDate.getDate() + defaultDuration);
       const daysRemaining = Math.ceil(
         (maturityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
@@ -1386,17 +1476,21 @@ export class DashboardService {
     }
 
     const notifResult = await notifQuery;
-    const notifications = (notifResult.data || []).map((item: any) => ({
+    const notificationRows = (notifResult.data ??
+      []) as DashboardNotificationRow[];
+    const notifications = notificationRows.map((item) => ({
       id: item.id,
       message: item.title || item.subtitle || 'Notification',
-      time: this.formatRelativeTime(item.created_at),
+      time: this.formatRelativeTime(item.created_at ?? ''),
       branchId: item.branch_id || null,
     }));
 
     let itemsNearExpiration = 0;
-    for (const item of nearExpResult.data || []) {
+    const nearExpRows = (nearExpResult.data ??
+      []) as PawnedItemNearExpiration[];
+    for (const item of nearExpRows) {
       if (!item.pawn_date) continue;
-      const category = item.category;
+      const category = item.category ?? undefined;
       const group = findInterestRateGroup(interestRates, category);
       const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
 

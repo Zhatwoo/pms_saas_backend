@@ -4,7 +4,7 @@ import {
   ExecutionContext,
   CallHandler,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
@@ -32,8 +32,8 @@ export class TransformInterceptor<T> implements NestInterceptor<
     }
 
     return next.handle().pipe(
-      map((data) => ({
-        statusCode: context.switchToHttp().getResponse().statusCode,
+      map((data: T) => ({
+        statusCode: context.switchToHttp().getResponse<Response>().statusCode,
         data,
       })),
     );

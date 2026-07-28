@@ -30,7 +30,7 @@ export type NotificationCreateInput = {
   event_key?: string | null;
   target_role?: string | null;
   target_url?: string | null;
-  entity_type?: NotificationEntityType | string | null;
+  entity_type?: NotificationEntityType | (string & {}) | null;
   entity_id?: string | null;
   environment?: string | null;
   created_by?: string | null;
