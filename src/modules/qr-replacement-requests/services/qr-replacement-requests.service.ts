@@ -13,6 +13,24 @@ import {
   requireBranchId,
 } from '../../../common/utils/authorization.util';
 
+export interface QrReplacementRequestRow {
+  id: string;
+  pawned_item_id: string;
+  requested_by: string;
+  branch_id: string;
+  reason: string;
+  description: string | null;
+  status: string;
+  created_at: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approval_notes?: string | null;
+  rejection_reason?: string | null;
+  completed_at?: string | null;
+  environment?: string;
+  [key: string]: unknown;
+}
+
 @Injectable()
 export class QRReplacementRequestsService {
   constructor(private readonly supabaseService: SupabaseService) {}
@@ -21,11 +39,14 @@ export class QRReplacementRequestsService {
     user: AuthenticatedUserProfile,
     pawnedItemId: string,
     dto: CreateQRReplacementRequestDto,
-  ) {
+  ): Promise<QrReplacementRequestRow> {
     const supabase = this.supabaseService.getClient();
     const branchId = requireBranchId(user);
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    }: { data: QrReplacementRequestRow | null; error: unknown } = await supabase
       .from('qr_replacement_requests')
       .insert({
         pawned_item_id: pawnedItemId,
@@ -42,60 +63,83 @@ export class QRReplacementRequestsService {
 
     if (error)
       throw new Error(
-        `Failed to create QR replacement request: ${error.message}`,
+        `Failed to create QR replacement request: ${this.errorMessage(error)}`,
       );
+    if (!data) throw new Error('Failed to create QR replacement request');
     return data;
   }
 
-  async getRequestsByBranch(user: AuthenticatedUserProfile, branchId: string) {
+  async getRequestsByBranch(
+    user: AuthenticatedUserProfile,
+    branchId: string,
+  ): Promise<QrReplacementRequestRow[]> {
     const supabase = this.supabaseService.getClient();
     assertBranchAccess(user, branchId);
 
-    const { data, error } = await supabase
-      .from('qr_replacement_requests')
-      .select(
-        '*, requested_by_user:requested_by(id, full_name, email), pawned_item:pawned_item_id(qr_code, item_id)',
-      )
-      .eq('branch_id', branchId)
-      .eq('environment', getEnvironment(user))
-      .order('created_at', { ascending: false });
+    const {
+      data,
+      error,
+    }: { data: QrReplacementRequestRow[] | null; error: unknown } =
+      await supabase
+        .from('qr_replacement_requests')
+        .select(
+          '*, requested_by_user:requested_by(id, full_name, email), pawned_item:pawned_item_id(qr_code, item_id)',
+        )
+        .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
+        .order('created_at', { ascending: false });
 
-    if (error) throw new Error(`Failed to fetch requests: ${error.message}`);
-    return data;
+    if (error)
+      throw new Error(`Failed to fetch requests: ${this.errorMessage(error)}`);
+    return data ?? [];
   }
 
   async getRequestsByStatus(
     user: AuthenticatedUserProfile,
     branchId: string,
     status: string,
-  ) {
+  ): Promise<QrReplacementRequestRow[]> {
     const supabase = this.supabaseService.getClient();
     assertBranchAccess(user, branchId);
 
-    const { data, error } = await supabase
-      .from('qr_replacement_requests')
-      .select('*, requested_by_user:requested_by(id, full_name, email)')
-      .eq('branch_id', branchId)
-      .eq('environment', getEnvironment(user))
-      .eq('status', status)
-      .order('created_at', { ascending: false });
+    const {
+      data,
+      error,
+    }: { data: QrReplacementRequestRow[] | null; error: unknown } =
+      await supabase
+        .from('qr_replacement_requests')
+        .select('*, requested_by_user:requested_by(id, full_name, email)')
+        .eq('branch_id', branchId)
+        .eq('environment', getEnvironment(user))
+        .eq('status', status)
+        .order('created_at', { ascending: false });
 
     if (error)
-      throw new Error(`Failed to fetch requests by status: ${error.message}`);
-    return data;
+      throw new Error(
+        `Failed to fetch requests by status: ${this.errorMessage(error)}`,
+      );
+    return data ?? [];
   }
 
-  async getRequestById(user: AuthenticatedUserProfile, requestId: string) {
+  async getRequestById(
+    user: AuthenticatedUserProfile,
+    requestId: string,
+  ): Promise<QrReplacementRequestRow> {
     const supabase = this.supabaseService.getClient();
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    }: { data: QrReplacementRequestRow | null; error: unknown } = await supabase
       .from('qr_replacement_requests')
       .select('*')
       .eq('id', requestId)
       .eq('environment', getEnvironment(user))
       .single();
 
-    if (error) throw new Error(`Failed to fetch request: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to fetch request: ${this.errorMessage(error)}`);
+    if (!data) throw new Error('QR replacement request not found');
     return data;
   }
 
@@ -103,10 +147,13 @@ export class QRReplacementRequestsService {
     requestId: string,
     user: AuthenticatedUserProfile,
     dto: ApproveQRReplacementRequestDto,
-  ) {
+  ): Promise<QrReplacementRequestRow> {
     const supabase = this.supabaseService.getClient();
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    }: { data: QrReplacementRequestRow | null; error: unknown } = await supabase
       .from('qr_replacement_requests')
       .update({
         status: 'approved',
@@ -119,7 +166,9 @@ export class QRReplacementRequestsService {
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to approve request: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to approve request: ${this.errorMessage(error)}`);
+    if (!data) throw new Error('QR replacement request not found');
     return data;
   }
 
@@ -127,10 +176,13 @@ export class QRReplacementRequestsService {
     requestId: string,
     user: AuthenticatedUserProfile,
     dto: RejectQRReplacementRequestDto,
-  ) {
+  ): Promise<QrReplacementRequestRow> {
     const supabase = this.supabaseService.getClient();
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    }: { data: QrReplacementRequestRow | null; error: unknown } = await supabase
       .from('qr_replacement_requests')
       .update({
         status: 'rejected',
@@ -143,14 +195,22 @@ export class QRReplacementRequestsService {
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to reject request: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to reject request: ${this.errorMessage(error)}`);
+    if (!data) throw new Error('QR replacement request not found');
     return data;
   }
 
-  async markAsCompleted(user: AuthenticatedUserProfile, requestId: string) {
+  async markAsCompleted(
+    user: AuthenticatedUserProfile,
+    requestId: string,
+  ): Promise<QrReplacementRequestRow> {
     const supabase = this.supabaseService.getClient();
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    }: { data: QrReplacementRequestRow | null; error: unknown } = await supabase
       .from('qr_replacement_requests')
       .update({
         status: 'completed',
@@ -162,8 +222,19 @@ export class QRReplacementRequestsService {
       .single();
 
     if (error)
-      throw new Error(`Failed to mark request as completed: ${error.message}`);
+      throw new Error(
+        `Failed to mark request as completed: ${this.errorMessage(error)}`,
+      );
+    if (!data) throw new Error('QR replacement request not found');
     return data;
+  }
+
+  private errorMessage(error: unknown): string {
+    if (error && typeof error === 'object' && 'message' in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string') return message;
+    }
+    return 'Unknown error';
   }
 
   async checkIfQRCanBeGenerated(

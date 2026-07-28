@@ -4,6 +4,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { ActivityLogsService } from './activity-logs.service';
+import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
 
 @Controller('activity-logs')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -13,7 +14,7 @@ export class ActivityLogsController {
   @Get()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   async getLogs(
-    @Request() req: any,
+    @Request() req: { user: AuthenticatedUserProfile },
     @Query('branchId') qBranchId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -28,7 +29,7 @@ export class ActivityLogsController {
     if (roleNorm === 'admin' || roleNorm === 'employee') {
       return this.activityLogsService.getLogs(
         user,
-        user.branchId,
+        user.branchId ?? undefined,
         roleNorm,
         startDate,
         endDate,
