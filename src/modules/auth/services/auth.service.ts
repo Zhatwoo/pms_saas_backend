@@ -281,6 +281,7 @@ export class AuthService {
                 email: loginDto.email,
               },
               clientIp ?? '',
+              userEnvironment,
             );
             autoRequested = true;
           } catch (reqErr) {
