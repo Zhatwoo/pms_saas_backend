@@ -33,6 +33,19 @@ interface UpdateIncidentTicketDto {
   resolutionNotes?: string | null;
 }
 
+export interface RaiseIncidentTicketResult {
+  id: string;
+  [key: string]: unknown;
+}
+
+interface IncidentTicketRow {
+  id: string;
+  branch_id: string;
+  status: string;
+  escalation_owner_user_id: string | null;
+  [key: string]: unknown;
+}
+
 interface IncidentTicketEventPayload {
   ticketId: string;
   branchId: string;
@@ -166,45 +179,49 @@ export class IncidentTicketsService {
       ? await this.resolveManagerId(branchId)
       : null;
 
-    const { data, error } = await this.supabaseService
-      .getClient()
-      .rpc('raise_incident_ticket', {
-        p_title: dto.title.trim(),
-        p_summary: dto.summary.trim(),
-        p_category: dto.category.trim(),
-        p_branch_id: branchId,
-        p_priority: dto.priority ?? 'medium',
-        p_source: 'manual',
-        p_user_id: dto.userId || user.id,
-        p_reported_by_user_id: user.id,
-        p_escalation_owner_user_id: escalationOwnerUserId,
-        p_related_transaction_id: null,
-        p_transaction_ref: dto.transactionRef?.trim() || null,
-        p_inventory_item_ref: dto.inventoryItemRef?.trim() || null,
-        p_amount_impact:
-          typeof dto.amountImpact === 'number' &&
-          Number.isFinite(dto.amountImpact)
-            ? dto.amountImpact
-            : null,
-        p_requires_manager_escalation: Boolean(dto.requiresManagerEscalation),
-        p_status: dto.requiresManagerEscalation ? 'escalated' : 'open',
-        p_metadata: {
-          created_from: 'backend-incident-tickets-api',
-          ...(dto.metadata ?? {}),
-          itemStatus: dto.itemStatus ?? null,
-        },
-      });
+    const rpcResult: {
+      data: RaiseIncidentTicketResult | null;
+      error: unknown;
+    } = await this.supabaseService.getClient().rpc('raise_incident_ticket', {
+      p_title: dto.title.trim(),
+      p_summary: dto.summary.trim(),
+      p_category: dto.category.trim(),
+      p_branch_id: branchId,
+      p_priority: dto.priority ?? 'medium',
+      p_source: 'manual',
+      p_user_id: dto.userId || user.id,
+      p_reported_by_user_id: user.id,
+      p_escalation_owner_user_id: escalationOwnerUserId,
+      p_related_transaction_id: null,
+      p_transaction_ref: dto.transactionRef?.trim() || null,
+      p_inventory_item_ref: dto.inventoryItemRef?.trim() || null,
+      p_amount_impact:
+        typeof dto.amountImpact === 'number' &&
+        Number.isFinite(dto.amountImpact)
+          ? dto.amountImpact
+          : null,
+      p_requires_manager_escalation: Boolean(dto.requiresManagerEscalation),
+      p_status: dto.requiresManagerEscalation ? 'escalated' : 'open',
+      p_metadata: {
+        created_from: 'backend-incident-tickets-api',
+        ...(dto.metadata ?? {}),
+        itemStatus: dto.itemStatus ?? null,
+      },
+    });
+    const data: RaiseIncidentTicketResult | null = rpcResult.data;
+    const error: unknown = rpcResult.error;
 
     if (error) {
-      this.logger.error(`Failed to create incident ticket: ${error.message}`);
+      const message = this.extractErrorMessage(error);
+      this.logger.error(`Failed to create incident ticket: ${message}`);
       throw new InternalServerErrorException(
-        error.message || 'Failed to create incident ticket',
+        message || 'Failed to create incident ticket',
       );
     }
 
     if (data?.id) {
       await this.recordEvent({
-        ticketId: data.id as string,
+        ticketId: data.id,
         branchId,
         action: 'reported',
         actorUserId: user.id,
@@ -214,7 +231,7 @@ export class IncidentTicketsService {
 
       if (escalationOwnerUserId) {
         await this.recordEvent({
-          ticketId: data.id as string,
+          ticketId: data.id,
           branchId,
           action: 'escalated',
           actorUserId: user.id,
@@ -234,7 +251,16 @@ export class IncidentTicketsService {
   ) {
     const client = this.supabaseService.getClient();
 
-    const { data: existing, error: fetchError } = await client
+    const {
+      data: existing,
+      error: fetchError,
+    }: {
+      data: Pick<
+        IncidentTicketRow,
+        'id' | 'branch_id' | 'status' | 'escalation_owner_user_id'
+      > | null;
+      error: unknown;
+    } = await client
       .from('incident_tickets')
       .select('id, branch_id, status, escalation_owner_user_id')
       .eq('id', id)
@@ -242,7 +268,7 @@ export class IncidentTicketsService {
 
     if (fetchError) {
       this.logger.error(
-        `Failed to fetch incident ticket ${id}: ${fetchError.message}`,
+        `Failed to fetch incident ticket ${id}: ${this.extractErrorMessage(fetchError)}`,
       );
       throw new InternalServerErrorException('Failed to load incident ticket');
     }
@@ -329,7 +355,10 @@ export class IncidentTicketsService {
       }
     }
 
-    const { data, error } = await client
+    const {
+      data,
+      error,
+    }: { data: Record<string, unknown> | null; error: unknown } = await client
       .from('incident_tickets')
       .update(patch)
       .eq('id', id)
@@ -371,7 +400,7 @@ export class IncidentTicketsService {
 
     if (error) {
       this.logger.error(
-        `Failed to update incident ticket ${id}: ${error.message}`,
+        `Failed to update incident ticket ${id}: ${this.extractErrorMessage(error)}`,
       );
       throw new InternalServerErrorException(
         'Failed to update incident ticket',
@@ -417,7 +446,10 @@ export class IncidentTicketsService {
       throw new BadRequestException('Selected assignee was not found.');
     }
 
-    if (data.role !== Role.ADMIN || data.branch_id !== ticketBranchId) {
+    if (
+      data.role !== (Role.ADMIN as string) ||
+      data.branch_id !== ticketBranchId
+    ) {
       throw new ForbiddenException(
         'Incident tickets can only be assigned to branch admins.',
       );
@@ -443,5 +475,13 @@ export class IncidentTicketsService {
         `Failed to record incident ticket event for ${payload.ticketId}: ${error.message}`,
       );
     }
+  }
+
+  private extractErrorMessage(error: unknown): string {
+    if (error && typeof error === 'object' && 'message' in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string') return message;
+    }
+    return 'Unknown error';
   }
 }

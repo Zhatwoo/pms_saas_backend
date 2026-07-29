@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/prisma';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -28,7 +29,7 @@ export class ShopSettingsService {
 
     if (!data) {
       // Auto-seed defaults for missing keys to avoid throwing 404/crashing the frontend
-      let defaultValue: any = null;
+      let defaultValue: Prisma.InputJsonValue | null = null;
 
       if (key === 'moa_template') {
         defaultValue = {
@@ -148,26 +149,29 @@ export class ShopSettingsService {
 
   /** Repair legacy rows where an array setting (e.g. interest_rates) was
    *  accidentally stored as an object like { "0": ..., "1": ... }. */
-  private normalizeSettingValue(key: string, value: any) {
+  private normalizeSettingValue(key: string, value: Prisma.JsonValue) {
     if (
       key === 'interest_rates' &&
       value !== null &&
       typeof value === 'object' &&
       !Array.isArray(value)
     ) {
-      const keys = Object.keys(value);
+      const record = value as Record<string, Prisma.JsonValue>;
+      const keys = Object.keys(record);
       const looksLikeArray =
         keys.length > 0 && keys.every((k) => /^\d+$/.test(k));
       if (looksLikeArray) {
-        return keys
-          .sort((a, b) => Number(a) - Number(b))
-          .map((k) => value[k]);
+        return keys.sort((a, b) => Number(a) - Number(b)).map((k) => record[k]);
       }
     }
     return value;
   }
 
-  async setSetting(key: string, value: any, user: AuthenticatedUserProfile) {
+  async setSetting(
+    key: string,
+    value: Prisma.InputJsonValue,
+    user: AuthenticatedUserProfile,
+  ) {
     try {
       const environment = getEnvironment(user);
       return await this.upsertSettingForEnvironment(
@@ -185,7 +189,7 @@ export class ShopSettingsService {
   /** Push a setting to every data environment so all branches see the same MOA. */
   async broadcastSetting(
     key: string,
-    value: any,
+    value: Prisma.InputJsonValue,
     user: AuthenticatedUserProfile,
   ) {
     try {
@@ -204,7 +208,7 @@ export class ShopSettingsService {
 
   private async upsertSettingForEnvironment(
     key: string,
-    value: any,
+    value: Prisma.InputJsonValue,
     environment: DataEnvironment,
     user: AuthenticatedUserProfile,
   ) {

@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { Roles, Public } from '../../../common/decorators';
 import { Role } from '../../../common/enums';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
@@ -19,12 +20,12 @@ import { AuthorizeDeviceDto } from '../dto/authorize-device.dto';
 import { UpdateDeviceDto } from '../dto/update-device.dto';
 import { RequestAuthorizationDto } from '../dto/request-authorization.dto';
 
-function getClientIp(req: any): string {
-  return (
-    req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() ||
-    req.socket?.remoteAddress ||
-    ''
-  );
+function getClientIp(req: Request): string {
+  const forwardedFor = req.headers?.['x-forwarded-for'];
+  const forwarded = Array.isArray(forwardedFor)
+    ? forwardedFor[0]
+    : forwardedFor;
+  return forwarded?.split(',')[0]?.trim() || req.socket?.remoteAddress || '';
 }
 
 @Controller('devices')
@@ -52,7 +53,10 @@ export class DevicesController {
    *  Employee email in the body is used to look up their DB id. */
   @Public()
   @Post('request-authorization')
-  requestAuthorization(@Req() req: any, @Body() dto: RequestAuthorizationDto) {
+  requestAuthorization(
+    @Req() req: Request,
+    @Body() dto: RequestAuthorizationDto,
+  ) {
     return this.devicesService.requestAuthorization(
       null,
       dto,

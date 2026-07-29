@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { addManilaCalendarDays } from '../../../common/utils/branch-calendar-date.util';
 import { TransactionPurpose } from '../../../common/enums';
 import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
@@ -12,7 +13,7 @@ import {
 } from '../utils/finance-ledger.util';
 import { BranchFinanceSessionGateService } from './branch-finance-session-gate.service';
 
-export type FinanceDailyBalanceTx = any;
+export type FinanceDailyBalanceTx = Prisma.TransactionClient;
 type Tx = FinanceDailyBalanceTx;
 
 /**
@@ -33,8 +34,8 @@ export class FinanceDailyBalanceService {
   >();
   private static readonly LEDGER_READ_CACHE_MS = 8000;
 
-  private get db(): any {
-    return this.prisma as any;
+  private get db(): PrismaService {
+    return this.prisma;
   }
 
   constructor(
@@ -48,7 +49,13 @@ export class FinanceDailyBalanceService {
   }
 
   private dec(n: unknown): number {
-    const value = Number(String(n ?? 0));
+    const raw =
+      n instanceof Prisma.Decimal
+        ? n.toString()
+        : typeof n === 'number' || typeof n === 'string'
+          ? n
+          : 0;
+    const value = Number(raw);
     return Number.isFinite(value) ? Number(value.toFixed(2)) : 0;
   }
 
@@ -1435,7 +1442,7 @@ export class FinanceDailyBalanceService {
     await this.db.$transaction(run, {
       maxWait: 10_000,
       timeout: 30_000,
-      isolationLevel: 'ReadCommitted' as any,
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
     });
   }
 

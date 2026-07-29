@@ -5,12 +5,11 @@ import {
   Patch,
   Body,
   Param,
-  Query,
   Req,
   Res,
   BadRequestException,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { AUTH_STRICT_THROTTLE } from '../../../config/throttle-auth.constants';
 import { AuthService } from '../services/auth.service';
@@ -93,12 +92,14 @@ export class AuthController {
   async login(
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) res: Response,
-    @Req() req: any,
+    @Req() req: Request,
   ) {
+    const forwardedFor = req.headers?.['x-forwarded-for'];
+    const forwardedForValue = Array.isArray(forwardedFor)
+      ? forwardedFor[0]
+      : forwardedFor;
     const clientIp: string =
-      (req.headers?.['x-forwarded-for'] as string | undefined)
-        ?.split(',')[0]
-        ?.trim() ||
+      forwardedForValue?.split(',')[0]?.trim() ||
       req.socket?.remoteAddress ||
       '';
     const session = await this.authService.login(loginDto, clientIp);
@@ -131,14 +132,17 @@ export class AuthController {
   }
 
   @Get('me')
-  getMe(@Req() req: any) {
+  getMe(@Req() req: { user: AuthenticatedUserProfile }) {
     return this.authService.getProfile(req.user.id);
   }
 
   /** Confirms possession of password before sensitive actions — rate-limit like login. */
   @Throttle(AUTH_STRICT_THROTTLE)
   @Post('verify-password')
-  async verify(@Req() req: any, @Body() dto: VerifyPasswordDto) {
+  async verify(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: VerifyPasswordDto,
+  ) {
     const isValid = await this.authService.verifyPassword(
       req.user.authId,
       req.user.email,
@@ -193,10 +197,7 @@ export class AuthController {
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get('password-change-requests')
-  getPasswordChangeRequests(
-    @Req() req: { user: AuthenticatedUserProfile },
-    @Query('status') _status?: string,
-  ) {
+  getPasswordChangeRequests(@Req() req: { user: AuthenticatedUserProfile }) {
     return this.authService.getPasswordChangeRequests(req.user);
   }
 

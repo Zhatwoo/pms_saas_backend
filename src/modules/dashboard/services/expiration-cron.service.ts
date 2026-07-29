@@ -1,8 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { NotificationsService } from '../../notifications/services/notifications.service';
-import { findInterestRateGroup, normalizeInterestRates } from '../../../common/utils/inventory-valuation.util';
+import {
+  findInterestRateGroup,
+  normalizeInterestRates,
+} from '../../../common/utils/inventory-valuation.util';
+
+interface PawnedItemExpirationRow {
+  id: string;
+  item_id: string;
+  item_name: string;
+  branch_id: string;
+  pawn_date: string | null;
+  category: string | null;
+}
 
 @Injectable()
 export class ExpirationCronService {
@@ -21,7 +33,7 @@ export class ExpirationCronService {
 
     try {
       // Fetch active pawned items
-      const { data: items, error } = await client
+      const { data: rawItems, error } = await client
         .from('pawned_items')
         .select('id, item_id, item_name, branch_id, pawn_date, category')
         .eq('status', 'Active');
@@ -31,6 +43,8 @@ export class ExpirationCronService {
         return;
       }
 
+      const items: PawnedItemExpirationRow[] | null = rawItems;
+
       // Fetch interest rates settings
       const { data: settingsData } = await client
         .from('shop_settings')
@@ -38,7 +52,8 @@ export class ExpirationCronService {
         .eq('setting_key', 'interest_rates')
         .eq('environment', 'production')
         .maybeSingle();
-      const interestRates = normalizeInterestRates(settingsData?.setting_value);
+      const settingValue: unknown = settingsData?.setting_value;
+      const interestRates = normalizeInterestRates(settingValue);
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -49,7 +64,7 @@ export class ExpirationCronService {
       for (const item of items || []) {
         if (!item.pawn_date) continue;
 
-        const category = item.category;
+        const category = item.category ?? undefined;
         const group = findInterestRateGroup(interestRates, category);
         const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
 

@@ -218,17 +218,23 @@ export class DevicesService {
   }
 
   /** Employee self-requests authorization for their unknown device. Creates PENDING record.
-   *  Can be called unauthenticated (employeeId = null) — employee email used to resolve their DB id. */
+   *  Can be called unauthenticated (employeeId = null) — employee email used to resolve their DB id.
+   *  `knownEnvironment`, when provided, is used as-is instead of being re-derived from the DB —
+   *  callers that already computed the login-time environment (e.g. the auto-request triggered
+   *  from `AuthService.loginInternal`) must pass it through so the request lands in the same
+   *  environment bucket the login attempt itself was evaluated against. */
   async requestAuthorization(
     employeeId: string | null,
     dto: RequestAuthorizationDto,
     clientIp: string,
+    knownEnvironment?: 'production' | 'development',
   ) {
     // Resolve employee id from email when called from the unauthenticated login screen
     let resolvedEmployeeId = employeeId;
     let resolvedBranchId: string | null = null;
     let resolvedAuthId: string | null = null;
-    let resolvedEnvironment: 'production' | 'development' = 'production';
+    let resolvedEnvironment: 'production' | 'development' =
+      knownEnvironment ?? 'production';
     if (!resolvedEmployeeId && dto.email) {
       const user = await this.prisma.users.findUnique({
         where: { email: dto.email.trim().toLowerCase() },
@@ -243,12 +249,14 @@ export class DevicesService {
       resolvedEmployeeId = user?.id ?? null;
       resolvedBranchId = user?.branch_id ?? null;
       resolvedAuthId = user?.auth_id ?? null;
-      resolvedEnvironment = user
-        ? getEnvironment({
-            email: user.email,
-            isDeveloper: user.is_developer,
-          })
-        : 'production';
+      resolvedEnvironment =
+        knownEnvironment ??
+        (user
+          ? getEnvironment({
+              email: user.email,
+              isDeveloper: user.is_developer,
+            })
+          : 'production');
     }
 
     if (resolvedEmployeeId && !resolvedBranchId) {
@@ -263,12 +271,14 @@ export class DevicesService {
       });
       resolvedBranchId = user?.branch_id ?? null;
       resolvedAuthId = user?.auth_id ?? null;
-      resolvedEnvironment = user
-        ? getEnvironment({
-            email: user.email,
-            isDeveloper: user.is_developer,
-          })
-        : resolvedEnvironment;
+      resolvedEnvironment =
+        knownEnvironment ??
+        (user
+          ? getEnvironment({
+              email: user.email,
+              isDeveloper: user.is_developer,
+            })
+          : resolvedEnvironment);
     }
 
     if (!resolvedEmployeeId) {
