@@ -1038,7 +1038,10 @@ export class TransactionsService implements OnModuleInit {
     customerId?: string,
   ) {
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
-    const where: Prisma.transactionsWhereInput = applyEnvironmentFilter(user);
+    const where: Prisma.transactionsWhereInput = {
+      voided_at: null,
+      ...applyEnvironmentFilter(user),
+    };
 
     if (scoped) where.branch_id = scoped;
     if (!isSuperAdmin(user)) Object.assign(where, buildBranchFilter(user));
@@ -1402,12 +1405,21 @@ export class TransactionsService implements OnModuleInit {
       const path = parts.slice(1).join('/');
 
       try {
-        const { data } = await this.supabase
+        const { data, error } = await this.supabase
           .getClient()
           .storage.from(bucket)
           .createSignedUrl(path, 60 * 60 * 24 * 7);
 
-        return data?.signedUrl || storedUrl;
+        if (!error && data?.signedUrl) {
+          return data.signedUrl;
+        }
+
+        const { data: pubData } = this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .getPublicUrl(path);
+
+        return pubData?.publicUrl || storedUrl;
       } catch {
         return storedUrl;
       }
@@ -1415,9 +1427,16 @@ export class TransactionsService implements OnModuleInit {
 
     try {
       const parsedUrl = new URL(storedUrl);
-      const storagePrefix = '/storage/v1/object/public/';
+      const publicPrefix = '/storage/v1/object/public/';
+      const signedPrefix = '/storage/v1/object/sign/';
 
-      if (!parsedUrl.pathname.includes(storagePrefix)) {
+      const storagePrefix = parsedUrl.pathname.includes(publicPrefix)
+        ? publicPrefix
+        : parsedUrl.pathname.includes(signedPrefix)
+          ? signedPrefix
+          : null;
+
+      if (!storagePrefix) {
         return storedUrl;
       }
 
@@ -1452,14 +1471,6 @@ export class TransactionsService implements OnModuleInit {
     user: UserWithBranch,
     dto: UploadBuybackProofDto,
   ): Promise<{ proofUrl: string }> {
-    console.log('=== UPLOAD BUYBACK PROOF SERVICE CALLED ===');
-    console.log('User:', user.role, user.id);
-    console.log('DTO:', {
-      transactionNo: dto.transactionNo,
-      fileName: dto.fileName,
-      fileDataLength: dto.fileData?.length,
-    });
-
     // Authorization check
     if (
       user.role !== Role.SUPER_ADMIN &&
@@ -1477,8 +1488,6 @@ export class TransactionsService implements OnModuleInit {
         ? dto.branchId?.trim() || 'super-admin'
         : requireUserBranchId(user);
 
-    console.log('Branch ID:', branchId);
-
     // Get Supabase client
     const client = this.supabase.getClient();
 
@@ -1487,8 +1496,6 @@ export class TransactionsService implements OnModuleInit {
       ? dto.fileData.split(',')[1]
       : dto.fileData;
     const fileBuffer = Buffer.from(base64Data, 'base64');
-
-    console.log('File buffer size:', fileBuffer.length, 'bytes');
 
     // Extract and validate file extension
     const extension = this.getUploadExtension(dto.fileData, dto.fileName);
@@ -1499,8 +1506,6 @@ export class TransactionsService implements OnModuleInit {
       );
     }
 
-    console.log('File extension:', extension);
-
     // Extract and validate MIME type
     const contentType = this.getUploadContentType(dto.fileData, dto.fileName);
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -1509,8 +1514,6 @@ export class TransactionsService implements OnModuleInit {
         'Invalid file type. Only JPEG, PNG, and WEBP are allowed.',
       );
     }
-
-    console.log('Content type:', contentType);
 
     // Validate file size (4MB limit as per requirements)
     const MAX_SIZE = 4 * 1024 * 1024;
@@ -1527,9 +1530,6 @@ export class TransactionsService implements OnModuleInit {
     ); // Remove extension from original filename
     const filePath = `${branchPart}/buyback_${transactionPart}_${timestamp}_${sanitizedFileName}.${extension}`;
 
-    console.log('File path:', filePath);
-    console.log('Uploading to Supabase storage...');
-
     // Upload to Supabase storage with upsert enabled
     const { error } = await client.storage
       .from('buyback-proofs')
@@ -1545,14 +1545,10 @@ export class TransactionsService implements OnModuleInit {
       );
     }
 
-    console.log('✓ Upload successful!');
-
     // Get and return public URL
     const { data } = client.storage
       .from('buyback-proofs')
       .getPublicUrl(filePath);
-
-    console.log('Public URL:', data.publicUrl);
 
     return { proofUrl: data.publicUrl };
   }

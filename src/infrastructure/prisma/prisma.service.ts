@@ -38,60 +38,66 @@ export class PrismaService
           : ['query', 'warn', 'error'],
     });
 
-    this.$use(async (params, next) => {
-      const tenantId = getTenantId();
-      const modelsWithTenant = [
-        'users',
-        'branches',
-        'customers',
-        'transactions',
-        'pawned_items',
-        'activity_logs',
-        'tenant_subscriptions',
-      ];
+    const extendedClient = this.$extends({
+      query: {
+        $allModels: {
+          async $allOperations({ model, operation, args, query }) {
+            const tenantId = getTenantId();
+            const modelsWithTenant = [
+              'users',
+              'branches',
+              'customers',
+              'transactions',
+              'pawned_items',
+              'activity_logs',
+              'tenant_subscriptions',
+            ];
 
-      if (tenantId && modelsWithTenant.includes(params.model as string)) {
-        if (!params.args) {
-          params.args = {};
-        }
+            if (tenantId && modelsWithTenant.includes(model)) {
+              const a = (args ?? {}) as any;
+              const isReadOrUpdate = [
+                'findFirst',
+                'findMany',
+                'update',
+                'updateMany',
+                'delete',
+                'deleteMany',
+                'count',
+                'aggregate',
+                'groupBy',
+                'findUnique',
+                'findUniqueOrThrow',
+              ].includes(operation);
 
-        const isReadOrUpdate = [
-          'findFirst',
-          'findMany',
-          'update',
-          'updateMany',
-          'delete',
-          'deleteMany',
-          'count',
-          'aggregate',
-          'groupBy',
-        ].includes(params.action);
+              if (isReadOrUpdate) {
+                a.where = { ...a.where, tenant_id: tenantId };
+              }
 
-        if (isReadOrUpdate) {
-          params.args.where = { ...params.args.where, tenant_id: tenantId };
-        }
-
-        // findUnique can only filter by unique fields. Change to findFirst.
-        if (params.action === 'findUnique' || params.action === 'findUniqueOrThrow') {
-          params.action = params.action === 'findUnique' ? 'findFirst' : 'findFirstOrThrow';
-          params.args.where = { ...params.args.where, tenant_id: tenantId };
-        }
-
-        const isCreate = ['create', 'createMany'].includes(params.action);
-        if (isCreate) {
-          if (params.action === 'createMany') {
-            if (Array.isArray(params.args.data)) {
-              params.args.data = params.args.data.map((d: any) => ({ ...d, tenant_id: tenantId }));
-            } else {
-              params.args.data = { ...params.args.data, tenant_id: tenantId };
+              const isCreate = ['create', 'createMany'].includes(operation);
+              if (isCreate && a.data) {
+                if (operation === 'createMany' && Array.isArray(a.data)) {
+                  a.data = a.data.map((d: any) => ({ ...d, tenant_id: tenantId }));
+                } else {
+                  a.data = { ...a.data, tenant_id: tenantId };
+                }
+              }
+              return query(a);
             }
-          } else {
-            params.args.data = { ...params.args.data, tenant_id: tenantId };
-          }
-        }
-      }
 
-      return next(params);
+            return query(args);
+          },
+        },
+      },
+    });
+
+    return new Proxy(this, {
+      get(target, prop, receiver) {
+        if (prop in extendedClient) {
+          const val = Reflect.get(extendedClient, prop, extendedClient);
+          return typeof val === 'function' ? val.bind(extendedClient) : val;
+        }
+        return Reflect.get(target, prop, receiver);
+      },
     });
   }
 
