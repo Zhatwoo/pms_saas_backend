@@ -186,6 +186,10 @@ export class PawnTicketsService {
     }
 
     const rec = error as Record<string, unknown>;
+    if (rec.code !== 'P2002') {
+      return false;
+    }
+
     const meta = rec.meta as Record<string, unknown> | undefined;
     const target = meta?.target;
     const message = typeof rec.message === 'string' ? rec.message : '';
@@ -607,6 +611,18 @@ export class PawnTicketsService {
               data: customerWrite as typeof customerPayload,
               select: { id: true },
             });
+          }
+
+          const itemIdTaken = await tx.pawned_items.findUnique({
+            where: { item_id: itemId },
+            select: { id: true },
+          });
+          if (itemIdTaken) {
+            itemId = await this.generateNextItemIdForBranch(
+              branchId,
+              branch.branch_code,
+              tx,
+            );
           }
 
           const itemPayload = {
