@@ -9,6 +9,21 @@ export const INVENTORY_VALUATION_STATUSES = [
 
 export type InventoryValuationMode = 'LOAN_AMOUNT' | 'APPRAISED_VALUE';
 
+/** Shape of a single interest-rate group as stored in shop_settings.setting_value. */
+export interface InterestRateGroup {
+  categories?: string[];
+  defaultDuration?: number;
+  [key: string]: unknown;
+}
+
+/** Stringifies a Prisma.Decimal/number/string DB value for safe Decimal construction. */
+function toDecimalInput(value: unknown): string {
+  if (value instanceof Prisma.Decimal) return value.toString();
+  if (typeof value === 'number' || typeof value === 'string')
+    return String(value);
+  return '0';
+}
+
 /**
  * Whether a pawned_items.status should contribute to inventory valuation totals.
  */
@@ -25,22 +40,22 @@ export function isStatusIncludedInInventoryValuation(
 export function inventoryLineValue(
   row: {
     amount: unknown;
-    appraised_value?: unknown | null;
-    estimated_resale_value?: unknown | null;
+    appraised_value?: unknown;
+    estimated_resale_value?: unknown;
   },
   mode: InventoryValuationMode,
 ): Prisma.Decimal {
-  const loan = new Prisma.Decimal(String(row.amount ?? 0));
+  const loan = new Prisma.Decimal(toDecimalInput(row.amount ?? 0));
   if (mode === 'LOAN_AMOUNT') {
     return loan;
   }
   const appr =
     row.appraised_value != null
-      ? new Prisma.Decimal(String(row.appraised_value))
+      ? new Prisma.Decimal(toDecimalInput(row.appraised_value))
       : null;
   const resale =
     row.estimated_resale_value != null
-      ? new Prisma.Decimal(String(row.estimated_resale_value))
+      ? new Prisma.Decimal(toDecimalInput(row.estimated_resale_value))
       : null;
   if (appr != null && !appr.equals(0)) {
     return appr;
@@ -80,17 +95,17 @@ export function categoryNamesMatch(cat1: string, cat2: string): boolean {
   return vars1.some((v) => vars2.includes(v));
 }
 
-export function normalizeInterestRates(value: unknown): any[] {
+export function normalizeInterestRates(value: unknown): InterestRateGroup[] {
   if (Array.isArray(value)) {
-    return value;
+    return value as InterestRateGroup[];
   }
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     if (Array.isArray(record.groups)) {
-      return record.groups;
+      return record.groups as InterestRateGroup[];
     }
     if (Array.isArray(record.rates)) {
-      return record.rates;
+      return record.rates as InterestRateGroup[];
     }
     // Heal legacy corruption where an array was accidentally stored as an object
     // with numeric keys, e.g. { "0": {...}, "1": {...} }. Without this, callers
@@ -99,7 +114,7 @@ export function normalizeInterestRates(value: unknown): any[] {
     if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
       return keys
         .sort((a, b) => Number(a) - Number(b))
-        .map((k) => record[k]);
+        .map((k) => record[k]) as InterestRateGroup[];
     }
   }
   return [];
@@ -108,7 +123,7 @@ export function normalizeInterestRates(value: unknown): any[] {
 export function findInterestRateGroup(
   interestRates: unknown,
   category?: string,
-): any | null {
+): InterestRateGroup | null {
   const rates = normalizeInterestRates(interestRates);
   if (!category) return null;
   return (

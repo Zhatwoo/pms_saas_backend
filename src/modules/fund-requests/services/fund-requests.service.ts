@@ -447,7 +447,6 @@ export class FundRequestsService {
     table: 'fund_requests' | 'transactions',
     column: 'request_no' | 'transaction_no',
     prefix: string,
-    user: AuthenticatedUserProfile,
   ): Promise<string> {
     const { data, error } = await this.supabaseService
       .getClient()
@@ -455,7 +454,8 @@ export class FundRequestsService {
       .select(column)
       .ilike(column, `${prefix}%`)
       .order(column, { ascending: false })
-      .limit(1);
+      .limit(1)
+      .returns<Record<string, string>[]>();
 
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -729,7 +729,6 @@ export class FundRequestsService {
       'transactions',
       'transaction_no',
       prefix,
-      params.user,
     );
     const isInbound = params.direction === 'in';
     const detailsParts = isInbound
@@ -803,7 +802,6 @@ export class FundRequestsService {
       'transactions',
       'transaction_no',
       prefix,
-      params.user,
     );
 
     const details = [
@@ -867,7 +865,6 @@ export class FundRequestsService {
         'transactions',
         'transaction_no',
         prefix,
-        params.user,
       );
       const { data, error } = await this.supabaseService
         .getClient()
@@ -1045,7 +1042,6 @@ export class FundRequestsService {
       'fund_requests',
       'request_no',
       `FR-${this.phDateKey(now)}-`,
-      user,
     );
 
     const { data, error } = await this.supabaseService
@@ -1142,7 +1138,6 @@ export class FundRequestsService {
       'fund_requests',
       'request_no',
       `DF-${this.phDateKey(now)}-`,
-      user,
     );
     const amount = this.normalizeMoney(dto.amount);
     const transferMode = dto.transferMode ?? 'cash';

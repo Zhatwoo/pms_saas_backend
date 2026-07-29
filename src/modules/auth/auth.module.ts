@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
+import type { StringValue } from 'ms';
 import { BranchesModule } from '../branches/branches.module';
 import { BranchFinanceModule } from '../branch-finance/branch-finance.module';
 import { UsersModule } from '../users/users.module';
@@ -22,7 +23,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
         secret: configService.get<string>('jwt.secret'),
         signOptions: {
           expiresIn: (configService.get<string>('jwt.expiresIn') ??
-            '1d') as any,
+            '1d') as StringValue,
         },
       }),
       inject: [ConfigService],

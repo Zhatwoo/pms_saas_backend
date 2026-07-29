@@ -51,8 +51,19 @@ interface TransactionRow {
 /** Subset for getSummary aggregation + shared classify/description helpers. */
 type SummaryTxRow = Pick<
   TransactionRow,
-  'purpose' | 'unit' | 'cash_in' | 'cash_out' | 'unit_code' | 'details'
+  | 'purpose'
+  | 'unit'
+  | 'cash_in'
+  | 'cash_out'
+  | 'unit_code'
+  | 'details'
+  | 'branch_id'
 > & { voided_at?: string | null };
+
+interface FundRequestBranchStatusRow {
+  branch_id: string;
+  status: string;
+}
 
 interface DailyBalanceRow {
   branch_id: string;
@@ -60,14 +71,6 @@ interface DailyBalanceRow {
   starting_balance: number | string | null;
   ending_balance: number | string | null;
   updated_at?: string | null;
-}
-
-interface BranchRow {
-  id: string;
-  name: string;
-  branch_code: string | null;
-  status: string | null;
-  opening_cash_balance?: Prisma.Decimal | number | string | null;
 }
 
 export type LedgerEntryType =
@@ -543,7 +546,9 @@ export class BranchFinanceService {
       case 'buy_back': {
         const purpose = (row.purpose ?? '').trim().toLowerCase();
         parts.push(
-          purpose === 'buy out' || purpose === 'redeem' ? 'Buy Out' : 'Buy Back',
+          purpose === 'buy out' || purpose === 'redeem'
+            ? 'Buy Out'
+            : 'Buy Back',
         );
         break;
       }
@@ -772,12 +777,12 @@ export class BranchFinanceService {
           priorRow: priorByBranch.get(branch.id),
           openingCashFallback: openingFallback,
         });
-        const branchTx = (todayTxResult.data ?? []).filter(
-          (t: any) => t.branch_id === branch.id,
+        const branchTx = ((todayTxResult.data ?? []) as SummaryTxRow[]).filter(
+          (t) => t.branch_id === branch.id,
         );
-        const branchFundReqs = (fundReqResult.data ?? []).filter(
-          (f: any) => f.branch_id === branch.id,
-        );
+        const branchFundReqs = (
+          (fundReqResult.data ?? []) as FundRequestBranchStatusRow[]
+        ).filter((f) => f.branch_id === branch.id);
 
         const breakdown = {
           pawnOut: 0,

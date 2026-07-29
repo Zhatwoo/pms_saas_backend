@@ -51,6 +51,6 @@ export function isNonRevenuePurpose(
   return (
     JOURNAL_PURPOSES.has(p) ||
     TRANSFER_PURPOSES.has(p) ||
-    p === TransactionPurpose.PAWN
+    p === (TransactionPurpose.PAWN as string)
   );
 }
