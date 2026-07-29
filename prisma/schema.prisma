@@ -10,7 +10,7 @@ datasource db {
 
 model branches {
   id                                                       String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  branch_code                                              String                     @unique @default(dbgenerated("lpad((nextval('branch_code_seq'::regclass))::text, 3, '0'::text)"))
+  branch_code                                              String                     @default(dbgenerated("lpad((nextval('branch_code_seq'::regclass))::text, 3, '0'::text)"))
   name                                                     String                     @unique
   location                                                 String
   status                                                   String                     @default("Active")
@@ -46,7 +46,10 @@ model branches {
   transfer_items_transfer_items_source_branch_idTobranches transfer_items[]           @relation("transfer_items_source_branch_idTobranches")
   transfer_items_transfer_items_target_branch_idTobranches transfer_items[]           @relation("transfer_items_target_branch_idTobranches")
   users                                                    users[]
+  tenant_id                                                String?                    @db.Uuid
+  tenant                                                   tenants?                   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
+  @@unique([tenant_id, branch_code], map: "branches_tenant_branch_code_key")
   @@index([created_by], map: "idx_branches_created_by")
   @@index([environment], map: "idx_branches_environment")
   @@schema("public")
@@ -99,6 +102,8 @@ model users {
   transfer_items_transfer_items_requested_by_user_idTousers            transfer_items[]           @relation("transfer_items_requested_by_user_idTousers")
   users                                                                auth_users                 @relation(fields: [auth_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   branches                                                             branches?                  @relation(fields: [branch_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenant_id                                                            String?                    @db.Uuid
+  tenant                                                               tenants?                   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([auth_id])
   @@index([created_by], map: "idx_users_created_by")
@@ -129,6 +134,8 @@ model customers {
   pawned_items         pawned_items[]
   sale_items           sale_items[]
   transactions         transactions[]
+  tenant_id            String?                @db.Uuid
+  tenant               tenants?               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([branch_id, deleted_at, created_at(sort: Desc)], map: "idx_customers_branch_deleted_created")
   @@index([created_by], map: "idx_customers_created_by")
@@ -173,6 +180,8 @@ model pawned_items {
   customers              customers?       @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   sale_items             sale_items?
   transactions           transactions[]
+  tenant_id              String?          @db.Uuid
+  tenant                 tenants?         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([branch_id, status], map: "idx_pawned_items_branch_status")
   @@index([item_name(ops: raw("gin_trgm_ops"))], map: "idx_pawned_items_item_name_trgm", type: Gin)
@@ -221,6 +230,8 @@ model transactions {
   pawned_items           pawned_items?          @relation(fields: [related_pawned_item_id], references: [id], onUpdate: NoAction)
   sale_items             sale_items?            @relation(fields: [related_sale_item_id], references: [id], onUpdate: NoAction)
   voided_by_user         users?                 @relation("transactions_voided_by_user_idTousers", fields: [voided_by_user_id], references: [id], onUpdate: NoAction)
+  tenant_id              String?                @db.Uuid
+  tenant                 tenants?               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([branch_id, created_at(sort: Desc)], map: "idx_transactions_branch_created_at")
   @@index([branch_id, transaction_date(sort: Desc)], map: "idx_transactions_branch_transaction_date")
@@ -344,6 +355,8 @@ model activity_logs {
   created_by  String?   @db.Uuid
   branches    branches? @relation(fields: [branch_id], references: [id], onUpdate: NoAction)
   users       users?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  tenant_id   String?   @db.Uuid
+  tenant      tenants?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([created_at], map: "idx_activity_logs_created_at")
   @@index([created_by], map: "idx_activity_logs_created_by")
@@ -1432,6 +1445,50 @@ enum user_role {
 enum user_status {
   Active
   Inactive
+
+  @@schema("public")
+}
+
+model tenants {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  users         users[]
+  branches      branches[]
+  customers     customers[]
+  transactions  transactions[]
+  pawned_items  pawned_items[]
+  activity_logs activity_logs[]
+  subscriptions tenant_subscriptions?
+
+  @@schema("public")
+}
+
+model subscription_plans {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                 String
+  price_monthly        Decimal                @db.Decimal(10, 2)
+  max_branches         Int
+  max_users            Int
+  stripe_price_id      String?                @unique
+  tenant_subscriptions tenant_subscriptions[]
+
+  @@schema("public")
+}
+
+model tenant_subscriptions {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id              String   @unique @db.Uuid
+  plan_id                String   @db.Uuid
+  status                 String
+  current_period_end     DateTime @db.Timestamptz(6)
+  stripe_customer_id     String?  @unique
+  stripe_subscription_id String?  @unique
+
+  tenant tenants            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  plan   subscription_plans @relation(fields: [plan_id], references: [id])
 
   @@schema("public")
 }

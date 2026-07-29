@@ -24,6 +24,7 @@ interface UserRecord {
   notification_sound: string | null;
   account_status: AccountStatus | null;
   is_developer: boolean | null;
+  tenant_id: string | null;
   branches?: { name: string } | null;
 }
 
@@ -38,6 +39,7 @@ export interface AuthenticatedUserProfile {
   avatarUrl: string | null;
   notificationSound: string | null;
   isDeveloper: boolean;
+  tenantId: string | null;
 }
 
 @Injectable()
@@ -127,6 +129,7 @@ export class SupabaseService {
       isDeveloper:
         Boolean(user.is_developer) ||
         user.email.trim().toLowerCase().endsWith('@dev.com'),
+      tenantId: user.tenant_id,
     };
   }
 
@@ -164,6 +167,7 @@ export class SupabaseService {
           notification_sound: true,
           account_status: true,
           is_developer: true,
+          tenant_id: true,
           branches: { select: { name: true } },
         },
       });
