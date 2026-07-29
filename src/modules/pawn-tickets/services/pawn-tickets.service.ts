@@ -103,14 +103,6 @@ export class PawnTicketsService {
     return `PAWN-${Date.now()}`;
   }
 
-  private normalizeProvidedItemId(unitCode?: string) {
-    const value = unitCode?.trim();
-    if (value && !value.startsWith('PENDING')) {
-      return value.toUpperCase();
-    }
-    return null;
-  }
-
   private parseUnitCodeSequence(itemId: string, branchCode: string) {
     const match = itemId
       .trim()
@@ -157,41 +149,32 @@ export class PawnTicketsService {
     return `${normalizedCode}-JCLB-${Date.now()}`;
   }
 
-  private async resolveItemId(
-    branchId: string,
-    branchCode: string,
-    unitCode?: string,
-  ) {
-    const provided = this.normalizeProvidedItemId(unitCode);
-    if (provided) {
-      const existing = await this.prisma.pawned_items.findUnique({
-        where: { item_id: provided },
-        select: { id: true },
-      });
-
-      if (!existing) {
-        return provided;
-      }
-    }
-
-    return this.generateNextItemIdForBranch(branchId, branchCode);
-  }
-
   private isItemIdUniqueError(error: unknown) {
     if (!error || typeof error !== 'object') {
       return false;
     }
 
     const rec = error as Record<string, unknown>;
+    if (rec.code !== 'P2002') {
+      return false;
+    }
+
     const meta = rec.meta as Record<string, unknown> | undefined;
     const target = meta?.target;
 
-    return (
-      rec.code === 'P2002' &&
-      (Array.isArray(target)
-        ? target.includes('item_id')
-        : typeof target === 'string' && target.includes('item_id'))
-    );
+    if (Array.isArray(target)) {
+      return target.includes('item_id');
+    }
+    if (typeof target === 'string') {
+      return target.includes('item_id');
+    }
+
+    // Some Prisma driver paths omit `meta.target` for constraint violations
+    // raised inside interactive transactions. Since item_id is the only
+    // unique field this service writes to inside the retry-guarded
+    // transaction, treat an untargeted P2002 here as an item_id collision
+    // rather than silently falling through and surfacing a raw 500.
+    return true;
   }
 
   private getTodayDateKey() {
@@ -541,10 +524,9 @@ export class PawnTicketsService {
       item_photos: true,
     } satisfies Prisma.pawned_itemsSelect;
 
-    let itemId = await this.resolveItemId(
+    let itemId = await this.generateNextItemIdForBranch(
       branchId,
       branch.branch_code,
-      dto.item.unitCode,
     );
     type CreatedPawnedItem = Prisma.pawned_itemsGetPayload<{
       select: typeof pawnedItemSelect;
@@ -556,7 +538,7 @@ export class PawnTicketsService {
       transactionNo: string;
     } | null = null;
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         result = await this.prisma.$transaction(async (tx) => {
           const manilaDate = getPhCalendarDateString();
@@ -597,6 +579,18 @@ export class PawnTicketsService {
               data: customerWrite as typeof customerPayload,
               select: { id: true },
             });
+          }
+
+          const itemIdTaken = await tx.pawned_items.findUnique({
+            where: { item_id: itemId },
+            select: { id: true },
+          });
+          if (itemIdTaken) {
+            itemId = await this.generateNextItemIdForBranch(
+              branchId,
+              branch.branch_code,
+              tx,
+            );
           }
 
           const itemPayload = {
@@ -716,7 +710,10 @@ export class PawnTicketsService {
         });
         break;
       } catch (e) {
-        if (this.isItemIdUniqueError(e) && attempt === 0) {
+        if (this.isItemIdUniqueError(e) && attempt < 2) {
+          console.warn(
+            `[PawnTicketsService] item_id collision on "${itemId}" (attempt ${attempt + 1}); regenerating and retrying.`,
+          );
           itemId = await this.generateNextItemIdForBranch(
             branchId,
             branch.branch_code,
