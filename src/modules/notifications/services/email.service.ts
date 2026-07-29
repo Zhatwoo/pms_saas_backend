@@ -60,6 +60,62 @@ export class EmailService {
     this.resendApiKey = this.configService.get<string>('RESEND_API_KEY') || '';
   }
 
+  /**
+   * Sends a single plain email via Resend. Reuses the same sandbox override
+   * as sendExpirationBlast: while RESEND_API_KEY is on a non-verified Resend
+   * domain, Resend only accepts sends to VERIFIED_EMAIL, so all mail is
+   * redirected there regardless of `to` until the sending domain is verified.
+   */
+  async sendPlainEmail(
+    to: string,
+    subject: string,
+    html: string,
+  ): Promise<{ success: boolean; message: string }> {
+    if (!this.resendApiKey) {
+      return {
+        success: false,
+        message: 'Email service not configured (RESEND_API_KEY missing)',
+      };
+    }
+
+    const toEmail = this.VERIFIED_EMAIL;
+    const testNotice =
+      to !== toEmail
+        ? ` [TEST MODE] Sending to verified email. Actual recipient: ${to}`
+        : '';
+
+    try {
+      const response = await fetch(this.RESEND_API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'JCLB Pawnshop <onboarding@resend.dev>',
+          to: toEmail,
+          subject,
+          html,
+        }),
+      });
+
+      if (!response.ok) {
+        const error: unknown = await response.json();
+        this.logger.error(`Resend API error for ${toEmail}:`, error);
+        return { success: false, message: 'Failed to send email' };
+      }
+
+      this.logger.log(`✓ Email sent to ${toEmail}.${testNotice}`);
+      return { success: true, message: 'Email sent' };
+    } catch (error) {
+      this.logger.error(
+        `Email sending error for ${to}:`,
+        error instanceof Error ? error.message : 'Unknown error',
+      );
+      return { success: false, message: 'Failed to send email' };
+    }
+  }
+
   async sendExpirationBlast(
     user: AuthenticatedUserProfile,
     payload: EmailBlastPayload,
