@@ -9,6 +9,69 @@ import { PrismaClient } from '@prisma/client';
 import { sanitizePostgresConnectionStringTimezone } from '../../common/utils/timezone.util';
 import { getTenantId } from '../../common/utils/tenant-context.util';
 
+const TENANT_SCOPED_MODELS = [
+  'users',
+  'branches',
+  'customers',
+  'transactions',
+  'pawned_items',
+  'activity_logs',
+  'tenant_subscriptions',
+];
+
+const READ_OR_UPDATE_OPERATIONS = [
+  'findFirst',
+  'findMany',
+  'update',
+  'updateMany',
+  'delete',
+  'deleteMany',
+  'count',
+  'aggregate',
+  'groupBy',
+];
+
+const CREATE_OPERATIONS = ['create', 'createMany'];
+
+function withTenantScope() {
+  return {
+    query: {
+      $allModels: {
+        async $allOperations({ model, operation, args, query }: any) {
+          const tenantId = getTenantId();
+
+          if (!tenantId || !TENANT_SCOPED_MODELS.includes(model)) {
+            return query(args);
+          }
+
+          if (READ_OR_UPDATE_OPERATIONS.includes(operation)) {
+            args.where = { ...args.where, tenant_id: tenantId };
+          }
+
+          // findUnique can only filter by unique fields, so it cannot take
+          // an additional tenant_id constraint directly. Fall back to the
+          // findFirst/findFirstOrThrow variant, which supports arbitrary
+          // where clauses, to enforce tenant isolation.
+          if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
+            args.where = { ...args.where, tenant_id: tenantId };
+            return (this as any)[operation === 'findUnique' ? 'findFirst' : 'findFirstOrThrow'](args);
+          }
+
+          if (CREATE_OPERATIONS.includes(operation)) {
+            if (operation === 'createMany' && Array.isArray(args.data)) {
+              args.data = args.data.map((d: any) => ({ ...d, tenant_id: tenantId }));
+            } else {
+              args.data = { ...args.data, tenant_id: tenantId };
+            }
+          }
+
+          return query(args);
+        },
+      },
+    },
+  };
+}
+
 @Injectable()
 export class PrismaService
   extends PrismaClient
@@ -38,61 +101,7 @@ export class PrismaService
           : ['query', 'warn', 'error'],
     });
 
-    this.$use(async (params, next) => {
-      const tenantId = getTenantId();
-      const modelsWithTenant = [
-        'users',
-        'branches',
-        'customers',
-        'transactions',
-        'pawned_items',
-        'activity_logs',
-        'tenant_subscriptions',
-      ];
-
-      if (tenantId && modelsWithTenant.includes(params.model as string)) {
-        if (!params.args) {
-          params.args = {};
-        }
-
-        const isReadOrUpdate = [
-          'findFirst',
-          'findMany',
-          'update',
-          'updateMany',
-          'delete',
-          'deleteMany',
-          'count',
-          'aggregate',
-          'groupBy',
-        ].includes(params.action);
-
-        if (isReadOrUpdate) {
-          params.args.where = { ...params.args.where, tenant_id: tenantId };
-        }
-
-        // findUnique can only filter by unique fields. Change to findFirst.
-        if (params.action === 'findUnique' || params.action === 'findUniqueOrThrow') {
-          params.action = params.action === 'findUnique' ? 'findFirst' : 'findFirstOrThrow';
-          params.args.where = { ...params.args.where, tenant_id: tenantId };
-        }
-
-        const isCreate = ['create', 'createMany'].includes(params.action);
-        if (isCreate) {
-          if (params.action === 'createMany') {
-            if (Array.isArray(params.args.data)) {
-              params.args.data = params.args.data.map((d: any) => ({ ...d, tenant_id: tenantId }));
-            } else {
-              params.args.data = { ...params.args.data, tenant_id: tenantId };
-            }
-          } else {
-            params.args.data = { ...params.args.data, tenant_id: tenantId };
-          }
-        }
-      }
-
-      return next(params);
-    });
+    return this.$extends(withTenantScope()) as unknown as PrismaService;
   }
 
   async onModuleInit() {
