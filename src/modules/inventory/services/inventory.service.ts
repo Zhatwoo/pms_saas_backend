@@ -191,7 +191,30 @@ export class InventoryService {
     }
 
     if (!storedUrl.startsWith('http')) {
-      return storedUrl;
+      const parts = storedUrl.split('/');
+      if (parts.length < 2) return storedUrl;
+      const bucket = parts[0];
+      const path = parts.slice(1).join('/');
+
+      try {
+        const { data, error } = await this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+        if (!error && data?.signedUrl) {
+          return data.signedUrl;
+        }
+
+        const { data: pubData } = this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .getPublicUrl(path);
+
+        return pubData?.publicUrl || storedUrl;
+      } catch {
+        return storedUrl;
+      }
     }
 
     try {
