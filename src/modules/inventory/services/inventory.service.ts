@@ -18,6 +18,7 @@ import {
   getPhCalendarDateString,
   getPhWallClockTimeString,
 } from '../../../common/utils/branch-calendar-date.util';
+import * as fs from 'fs';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
 import { FinanceDailyBalanceService } from '../../branch-finance/services/finance-daily-balance.service';
 import {
@@ -29,6 +30,7 @@ import {
   getPawnMaturityDaysRemaining,
   OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
+import type { InterestRateGroup } from '../../../common/utils/inventory-valuation.util';
 import {
   environmentCreateFields,
   getEnvironment,
@@ -43,6 +45,135 @@ interface QueryFilters {
   date?: string; // ISO date string YYYY-MM-DD for single-day filter
   page: number;
   limit: number;
+}
+
+/**
+ * Row shapes below mirror the Postgres tables as returned over the
+ * Supabase/PostgREST client (numbers/strings/plain JSON — NOT Prisma.Decimal),
+ * which is why they are declared locally instead of importing the Prisma
+ * model types (those model numeric columns as Prisma.Decimal).
+ */
+
+export interface ItemRenewalRow {
+  id: string;
+  pawned_item_id: string;
+  renewal_date: string;
+  amount_paid: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PawnedItemRow {
+  id: string;
+  item_id: string;
+  item_name: string;
+  category: string;
+  branch_id: string;
+  branch: string;
+  pawn_date: string | null;
+  status: string;
+  remarks?: string | null;
+  qr_code?: string | null;
+  condition_report?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  customer_id?: string | null;
+  profile_photo?: string | null;
+  id_photo?: string | null;
+  id_back_photo?: string | null;
+  amount?: number | null;
+  serial_number?: string | null;
+  items_included?: string | null;
+  condition?: string | null;
+  memory_storage?: string | null;
+  item_photos?: Array<string | null> | string | null;
+  interest_rate_snapshot?: unknown;
+  customers?: Record<string, unknown> | null;
+  item_renewals?: ItemRenewalRow[] | null;
+  transactions?: TransactionWithUserRow[] | null;
+}
+
+export interface SaleItemRow {
+  id: string;
+  item_id: string;
+  item_name: string;
+  category: string;
+  branch_id: string;
+  branch: string;
+  available_date?: string | null;
+  price?: number | null;
+  stock_level?: number | null;
+  status: string;
+  original_pawn_id?: string | null;
+  image_url?: string | null;
+  customer_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface TransferItemRow {
+  id: string;
+  sale_item_id: string;
+  item_id: string;
+  item_name: string;
+  source_branch_id: string;
+  target_branch_id: string;
+  status: string;
+  item_included?: string | null;
+  notes?: string | null;
+  requested_at?: string | null;
+  received_at?: string | null;
+}
+
+interface BranchNameRow {
+  id: string;
+  name: string;
+}
+
+interface CustomerContactRow {
+  full_name: string;
+  address: string;
+  barangay?: string | null;
+  city?: string | null;
+  region?: string | null;
+  contact_number?: string | null;
+  id_presented?: string | null;
+  [key: string]: unknown;
+}
+
+export interface TransactionWithUserRow {
+  id?: string;
+  purpose?: string | null;
+  users?: {
+    id?: string;
+    full_name?: string | null;
+    email?: string | null;
+  } | null;
+}
+
+interface ActivityLogRow {
+  id: string;
+  action: string;
+  details: string | null;
+}
+
+/** Client-submitted payload for creating/updating a pawned item (loosely validated at the edge). */
+interface PawnedItemWriteDto {
+  branch_id?: string;
+  [key: string]: unknown;
+}
+
+/** Client-submitted payload for creating/updating a sale item (loosely validated at the edge). */
+interface SaleItemWriteDto {
+  branch_id?: string;
+  branch?: string;
+  item_id?: string;
+  item_name?: string;
+  category?: string;
+  price?: number;
+  status?: string;
+  image_url?: string;
+  [key: string]: unknown;
 }
 
 @Injectable()
@@ -60,7 +191,30 @@ export class InventoryService {
     }
 
     if (!storedUrl.startsWith('http')) {
-      return storedUrl;
+      const parts = storedUrl.split('/');
+      if (parts.length < 2) return storedUrl;
+      const bucket = parts[0];
+      const path = parts.slice(1).join('/');
+
+      try {
+        const { data, error } = await this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .createSignedUrl(path, 60 * 60 * 24 * 7);
+
+        if (!error && data?.signedUrl) {
+          return data.signedUrl;
+        }
+
+        const { data: pubData } = this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .getPublicUrl(path);
+
+        return pubData?.publicUrl || storedUrl;
+      } catch {
+        return storedUrl;
+      }
     }
 
     try {
@@ -139,7 +293,9 @@ export class InventoryService {
     );
   }
 
-  private async loadInterestRates(user: UserWithBranch): Promise<any[]> {
+  private async loadInterestRates(
+    user: UserWithBranch,
+  ): Promise<InterestRateGroup[]> {
     const { data } = await this.supabase
       .getClient()
       .from('shop_settings')
@@ -196,7 +352,9 @@ export class InventoryService {
       throw new InternalServerErrorException(saleResult.error.message);
     }
     if (pendingTransfersResult.error) {
-      throw new InternalServerErrorException(pendingTransfersResult.error.message);
+      throw new InternalServerErrorException(
+        pendingTransfersResult.error.message,
+      );
     }
 
     const pendingTransferSaleIds = new Set(
@@ -206,9 +364,8 @@ export class InventoryService {
       ).map((row: { sale_item_id?: string | null }) => row.sale_item_id),
     );
 
-    const pawnedItems = (Array.isArray(pawnedResult.data)
-      ? pawnedResult.data
-      : []
+    const pawnedItems = (
+      Array.isArray(pawnedResult.data) ? pawnedResult.data : []
     ).filter(
       (item: {
         item_id?: string | null;
@@ -231,18 +388,20 @@ export class InventoryService {
           item.item_id.trim().length > 0 &&
           !pendingTransferSaleIds.has(item.id ?? ''),
       )
-      .map((item: {
-        item_id: string;
-        item_name: string;
-        category: string;
-        status?: string | null;
-      }) => ({
-        item_id: item.item_id,
-        item_name: item.item_name,
-        category: item.category,
-        source: 'sale' as const,
-        status: item.status || 'Available',
-      }));
+      .map(
+        (item: {
+          item_id: string;
+          item_name: string;
+          category: string;
+          status?: string | null;
+        }) => ({
+          item_id: item.item_id,
+          item_name: item.item_name,
+          category: item.category,
+          source: 'sale' as const,
+          status: item.status || 'Available',
+        }),
+      );
 
     return [
       ...pawnedItems.map(
@@ -258,7 +417,11 @@ export class InventoryService {
           category: item.category,
           source: 'pawned' as const,
           status: item.status || 'Active',
-          daysLeft: getPawnMaturityDaysRemaining(item.pawn_date, item.category, interestRates),
+          daysLeft: getPawnMaturityDaysRemaining(
+            item.pawn_date,
+            item.category,
+            interestRates,
+          ),
         }),
       ),
       ...saleItems,
@@ -268,7 +431,9 @@ export class InventoryService {
   async findOpeningAuditChecklist(user: UserWithBranch, branch?: string) {
     const { branchId } = inventoryBranchFilters(user, branch);
     if (!branchId) {
-      throw new BadRequestException('A single branch is required for opening audit');
+      throw new BadRequestException(
+        'A single branch is required for opening audit',
+      );
     }
 
     assertResourceBranch(user, branchId);
@@ -276,27 +441,33 @@ export class InventoryService {
 
     const uniqueItems = Array.from(
       items
-        .reduce((map, item) => {
-          const normalizedId = item.item_id.trim().toUpperCase();
-          if (!map.has(normalizedId)) {
-            map.set(normalizedId, {
-              itemId: normalizedId,
-              itemName: item.item_name,
-              category: item.category,
-              status: item.status,
-              source: item.source,
-              daysLeft: item.daysLeft,
-            });
-          }
-          return map;
-        }, new Map<string, {
-          itemId: string;
-          itemName: string;
-          category: string;
-          status: string;
-          source: 'pawned' | 'sale';
-          daysLeft?: number | null;
-        }>())
+        .reduce(
+          (map, item) => {
+            const normalizedId = item.item_id.trim().toUpperCase();
+            if (!map.has(normalizedId)) {
+              map.set(normalizedId, {
+                itemId: normalizedId,
+                itemName: item.item_name,
+                category: item.category,
+                status: item.status,
+                source: item.source,
+                daysLeft: item.daysLeft,
+              });
+            }
+            return map;
+          },
+          new Map<
+            string,
+            {
+              itemId: string;
+              itemName: string;
+              category: string;
+              status: string;
+              source: 'pawned' | 'sale';
+              daysLeft?: number | null;
+            }
+          >(),
+        )
         .values(),
     );
 
@@ -310,9 +481,11 @@ export class InventoryService {
       pawnDate?: string | null;
       category?: string | null;
     },
-    interestRates: any[],
+    interestRates: InterestRateGroup[],
   ): boolean {
-    const normalizedStatus = String(item.status || '').trim().toLowerCase();
+    const normalizedStatus = String(item.status || '')
+      .trim()
+      .toLowerCase();
 
     if (item.type === 'SALE' || normalizedStatus === 'available') {
       return normalizedStatus === 'available';
@@ -375,7 +548,7 @@ export class InventoryService {
         .lt('pawn_date', this.nextDay(filters.date));
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.returns<PawnedItemRow[]>();
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
@@ -386,10 +559,12 @@ export class InventoryService {
       .eq('setting_key', 'interest_rates')
       .eq('environment', getEnvironment(user))
       .maybeSingle();
-    const interestRates = normalizeInterestRates(interestRatesData?.setting_value);
+    const interestRates = normalizeInterestRates(
+      interestRatesData?.setting_value,
+    );
     const today = new Date();
 
-    const filteredItems = (data || []).filter((item: any) => {
+    const filteredItems = (data || []).filter((item: PawnedItemRow) => {
       if (item.status !== 'Active') {
         return true;
       }
@@ -411,7 +586,7 @@ export class InventoryService {
     });
 
     // Order by created_at descending in memory
-    filteredItems.sort((a: any, b: any) => {
+    filteredItems.sort((a: PawnedItemRow, b: PawnedItemRow) => {
       const dateA = new Date(a.created_at || 0).getTime();
       const dateB = new Date(b.created_at || 0).getTime();
       return dateB - dateA;
@@ -423,7 +598,7 @@ export class InventoryService {
 
     return {
       items: await Promise.all(
-        paginatedItems.map(async (item: any) => ({
+        paginatedItems.map(async (item: PawnedItemRow) => ({
           id: item.id,
           itemId: item.item_id,
           itemName: item.item_name,
@@ -432,7 +607,7 @@ export class InventoryService {
           pawnDate: item.pawn_date,
           status: item.status,
           renewalCount: (item.item_renewals || []).length,
-          renewals: (item.item_renewals || []).map((r: any) => ({
+          renewals: (item.item_renewals || []).map((r: ItemRenewalRow) => ({
             date: r.renewal_date,
             amount: r.amount_paid,
           })),
@@ -443,9 +618,7 @@ export class InventoryService {
           conditionReport: item.condition_report || '',
           amount: item.amount || 0,
           customers: item.customers
-            ? this.encryption.decryptCustomerEmbed(
-                item.customers as Record<string, unknown>,
-              )
+            ? this.encryption.decryptCustomerEmbed(item.customers)
             : item.customers,
           serialNumber: item.serial_number,
           itemsIncluded: item.items_included,
@@ -484,7 +657,8 @@ export class InventoryService {
         .lt('pawn_date', this.nextDay(date));
     }
 
-    const { data, error } = await query;
+    const { data, error } =
+      await query.returns<Array<Pick<PawnedItemRow, 'category'>>>();
     if (error) throw new InternalServerErrorException(error.message);
 
     const counts: Record<string, number> = {};
@@ -539,7 +713,7 @@ export class InventoryService {
     return counts;
   }
 
-  async createPawned(user: UserWithBranch, dto: any) {
+  async createPawned(user: UserWithBranch, dto: PawnedItemWriteDto) {
     const client = this.supabase.getClient();
     const payload =
       user.role === Role.SUPER_ADMIN
@@ -553,6 +727,7 @@ export class InventoryService {
       .from('pawned_items')
       .insert([payload])
       .select()
+      .returns<PawnedItemRow[]>()
       .single();
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -579,6 +754,13 @@ export class InventoryService {
       )
       .eq('id', id)
       .eq('environment', getEnvironment(user))
+      .returns<
+        Array<
+          PawnedItemRow & {
+            customer?: Record<string, unknown> | null;
+          }
+        >
+      >()
       .single();
 
     if (error) {
@@ -595,7 +777,7 @@ export class InventoryService {
     ]);
 
     const pawnTx = (data.transactions || []).find(
-      (t: any) => t.purpose === 'Pawn',
+      (t: TransactionWithUserRow) => t.purpose === 'Pawn',
     );
     const createdByUser = pawnTx?.users
       ? this.encryption.decryptUsersJoin(pawnTx.users)
@@ -607,16 +789,14 @@ export class InventoryService {
     return {
       ...data,
       customer: data.customer
-        ? this.encryption.decryptCustomerEmbed(
-            data.customer as Record<string, unknown>,
-          )
+        ? this.encryption.decryptCustomerEmbed(data.customer)
         : data.customer,
       profile_photo: profilePhoto,
       item_photos: itemPhotos,
       id_photo: idPhoto,
       id_back_photo: idBackPhoto,
       renewalCount: (data.item_renewals || []).length,
-      renewals: (data.item_renewals || []).map((r: any) => ({
+      renewals: (data.item_renewals || []).map((r: ItemRenewalRow) => ({
         date: r.renewal_date,
         amount: r.amount_paid,
       })),
@@ -677,9 +857,9 @@ export class InventoryService {
     }
 
     const [pawnedResult, saleResult, transferResult] = await Promise.all([
-      pawnedQuery.limit(1),
-      saleQuery.limit(1),
-      transferQuery.limit(1),
+      pawnedQuery.limit(1).returns<PawnedItemRow[]>(),
+      saleQuery.limit(1).returns<SaleItemRow[]>(),
+      transferQuery.limit(1).returns<TransferItemRow[]>(),
     ]);
 
     const { data: pawnedRows, error: pawnedError } = pawnedResult;
@@ -711,7 +891,8 @@ export class InventoryService {
     }
 
     const pawnedStatus = String(pawnedData?.status || '').trim();
-    const pawnedIsCurrentInventory = isStatusIncludedInInventoryValuation(pawnedStatus);
+    const pawnedIsCurrentInventory =
+      isStatusIncludedInInventoryValuation(pawnedStatus);
     const interestRates = openingAudit
       ? await this.loadInterestRates(user)
       : [];
@@ -740,6 +921,7 @@ export class InventoryService {
           .eq('sale_item_id', item.saleItemId)
           .eq('status', 'pending')
           .eq('environment', getEnvironment(user))
+          .returns<Array<Pick<TransferItemRow, 'id'>>>()
           .maybeSingle();
 
         if (pendingTransfer) {
@@ -799,6 +981,7 @@ export class InventoryService {
         .select('name')
         .eq('id', transferData.target_branch_id)
         .eq('environment', getEnvironment(user))
+        .returns<Array<{ name: string }>>()
         .maybeSingle();
 
       return {
@@ -819,17 +1002,7 @@ export class InventoryService {
     if (pawnedData && pawnedIsCurrentInventory) {
       assertResourceBranch(user, pawnedData.branch_id);
 
-      type CustomerSnapshot = {
-        full_name: string;
-        address: string;
-        barangay?: string | null;
-        city?: string | null;
-        region?: string | null;
-        contact_number?: string | null;
-        id_presented?: string | null;
-      };
-
-      let customerData: CustomerSnapshot | null = null;
+      let customerData: CustomerContactRow | null = null;
 
       if (pawnedData.customer_id) {
         const { data: customer, error: customerError } = await client
@@ -839,6 +1012,7 @@ export class InventoryService {
           )
           .eq('id', pawnedData.customer_id)
           .eq('environment', getEnvironment(user))
+          .returns<CustomerContactRow[]>()
           .maybeSingle();
 
         if (customerError) {
@@ -902,7 +1076,11 @@ export class InventoryService {
     );
   }
 
-  async updatePawned(user: UserWithBranch, id: string, dto: any) {
+  async updatePawned(
+    user: UserWithBranch,
+    id: string,
+    dto: PawnedItemWriteDto,
+  ) {
     await this.findOnePawned(user, id);
     const client = this.supabase.getClient();
     const { data, error } = await client
@@ -911,6 +1089,7 @@ export class InventoryService {
       .eq('id', id)
       .eq('environment', getEnvironment(user))
       .select()
+      .returns<PawnedItemRow[]>()
       .single();
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -945,6 +1124,7 @@ export class InventoryService {
         { pawned_item_id: itemId, ...dto, ...environmentCreateFields(user) },
       ])
       .select()
+      .returns<ItemRenewalRow[]>()
       .single();
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -961,6 +1141,7 @@ export class InventoryService {
       .eq('id', itemId)
       .eq('environment', getEnvironment(user))
       .select()
+      .returns<PawnedItemRow[]>()
       .single();
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -976,6 +1157,7 @@ export class InventoryService {
       .select('*')
       .eq('id', itemId)
       .eq('environment', getEnvironment(user))
+      .returns<PawnedItemRow[]>()
       .single();
     if (fetchErr || !pawnedItem) {
       throw new NotFoundException('Pawned item not found');
@@ -988,6 +1170,7 @@ export class InventoryService {
         .select('*')
         .eq('original_pawn_id', pawnedItem.id)
         .eq('environment', getEnvironment(user))
+        .returns<SaleItemRow[]>()
         .maybeSingle();
 
     if (existingSaleItemError) {
@@ -1045,6 +1228,7 @@ export class InventoryService {
         },
       ])
       .select()
+      .returns<SaleItemRow[]>()
       .single();
     if (insertErr) {
       if (/duplicate|unique/i.test(insertErr.message)) {
@@ -1099,6 +1283,14 @@ export class InventoryService {
       .select('id, item_id, item_name, branch, branch_id, status')
       .eq('id', itemId)
       .eq('environment', getEnvironment(user))
+      .returns<
+        Array<
+          Pick<
+            PawnedItemRow,
+            'id' | 'item_id' | 'item_name' | 'branch' | 'branch_id' | 'status'
+          >
+        >
+      >()
       .single();
 
     if (fetchErr || !pawnedItem) {
@@ -1165,6 +1357,7 @@ export class InventoryService {
       .select('id, action, details')
       .eq('id', requestId)
       .eq('environment', getEnvironment(user))
+      .returns<ActivityLogRow[]>()
       .maybeSingle();
 
     if (requestLogError) {
@@ -1268,6 +1461,8 @@ export class InventoryService {
       item_name?: string | null;
       category?: string | null;
       status?: string | null;
+      source?: string | null;
+      daysLeft?: number | null;
     }> = [];
 
     if (checklistSource === 'sale') {
@@ -1276,7 +1471,8 @@ export class InventoryService {
         .select('item_id, item_name, category')
         .eq('branch_id', branchId)
         .eq('environment', getEnvironment(user))
-        .in('status', ['Available', 'available']);
+        .in('status', ['Available', 'available'])
+        .returns<Pick<SaleItemRow, 'item_id' | 'item_name' | 'category'>[]>();
       if (saleError) {
         throw new InternalServerErrorException(saleError.message);
       }
@@ -1288,7 +1484,10 @@ export class InventoryService {
         .select('item_id, item_name, category, status')
         .eq('branch_id', branchId)
         .eq('environment', getEnvironment(user))
-        .in('status', INVENTORY_VALUATION_STATUSES);
+        .in('status', INVENTORY_VALUATION_STATUSES)
+        .returns<
+          Pick<PawnedItemRow, 'item_id' | 'item_name' | 'category' | 'status'>[]
+        >();
       if (pawnedError) {
         throw new InternalServerErrorException(pawnedError.message);
       }
@@ -1298,7 +1497,8 @@ export class InventoryService {
         .select('related_pawned_item_id')
         .eq('branch_id', branchId)
         .eq('environment', getEnvironment(user))
-        .in('purpose', ['Buy Back']);
+        .in('purpose', ['Buy Back'])
+        .returns<Array<{ related_pawned_item_id: string | null }>>();
       if (boughtBackError) {
         throw new InternalServerErrorException(boughtBackError.message);
       }
@@ -1337,10 +1537,10 @@ export class InventoryService {
     const systemItemList = Array.from(
       (systemItemListSource || [])
         .filter(
-          (item: any) =>
+          (item): item is typeof item & { item_id: string } =>
             typeof item?.item_id === 'string' && item.item_id.trim().length > 0,
         )
-        .reduce((map, item: any) => {
+        .reduce((map, item) => {
           const normalizedId = normalizeId(item.item_id);
           if (!map.has(normalizedId)) {
             map.set(normalizedId, {
@@ -1405,12 +1605,10 @@ export class InventoryService {
     const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
     const buf = Buffer.from(base64Data, 'base64');
 
-    const { data, error } = await client.storage
-      .from(bucket)
-      .upload(path, buf, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
+    const { error } = await client.storage.from(bucket).upload(path, buf, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
 
     if (error) {
       throw new InternalServerErrorException(
@@ -1429,7 +1627,7 @@ export class InventoryService {
     return signedData.signedUrl;
   }
 
-  async createForSale(user: UserWithBranch, dto: any) {
+  async createForSale(user: UserWithBranch, dto: SaleItemWriteDto) {
     const client = this.supabase.getClient();
 
     // Ensure branch_id is set
@@ -1450,6 +1648,7 @@ export class InventoryService {
         .select('name')
         .eq('id', branchId)
         .eq('environment', getEnvironment(user))
+        .returns<Array<{ name: string }>>()
         .single();
       branchName = branchData?.name || 'Unknown';
     }
@@ -1477,14 +1676,12 @@ export class InventoryService {
         },
       ])
       .select()
+      .returns<SaleItemRow[]>()
       .single();
 
     if (error) {
       console.error('SUPABASE INSERT ERROR:', error);
-      require('fs').appendFileSync(
-        'supabase-error.log',
-        JSON.stringify(error) + '\n',
-      );
+      fs.appendFileSync('supabase-error.log', JSON.stringify(error) + '\n');
       throw new InternalServerErrorException(error.message);
     }
     return data;
@@ -1537,21 +1734,24 @@ export class InventoryService {
     const from = (filters.page - 1) * filters.limit;
     query = query.range(from, from + filters.limit - 1);
 
-    const { data, error, count } = await query;
+    const { data, error, count } = await query.returns<SaleItemRow[]>();
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
     let rows = Array.isArray(data) ? data : [];
-    const statusFilter = String(filters.status || '').trim().toLowerCase();
+    const statusFilter = String(filters.status || '')
+      .trim()
+      .toLowerCase();
     if (statusFilter === 'available' && rows.length > 0) {
-      const saleItemIds = rows.map((item: { id: string }) => item.id);
+      const saleItemIds = rows.map((item) => item.id);
       const { data: pendingTransfers, error: pendingError } = await client
         .from('transfer_items')
         .select('sale_item_id')
         .in('sale_item_id', saleItemIds)
         .eq('status', 'pending')
-        .eq('environment', getEnvironment(user));
+        .eq('environment', getEnvironment(user))
+        .returns<Array<Pick<TransferItemRow, 'sale_item_id'>>>();
 
       if (pendingError) {
         throw new InternalServerErrorException(pendingError.message);
@@ -1559,16 +1759,14 @@ export class InventoryService {
 
       const pendingSaleItemIds = new Set(
         (Array.isArray(pendingTransfers) ? pendingTransfers : []).map(
-          (row: { sale_item_id: string }) => row.sale_item_id,
+          (row) => row.sale_item_id,
         ),
       );
-      rows = rows.filter(
-        (item: { id: string }) => !pendingSaleItemIds.has(item.id),
-      );
+      rows = rows.filter((item) => !pendingSaleItemIds.has(item.id));
     }
 
     return {
-      items: rows.map((item: any) => ({
+      items: rows.map((item) => ({
         id: item.id,
         itemId: item.item_id,
         itemName: item.item_name,
@@ -1634,7 +1832,7 @@ export class InventoryService {
       );
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.returns<TransferItemRow[]>();
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
@@ -1652,7 +1850,8 @@ export class InventoryService {
         .from('branches')
         .select('id, name')
         .in('id', branchIds)
-        .eq('environment', getEnvironment(user));
+        .eq('environment', getEnvironment(user))
+        .returns<BranchNameRow[]>();
 
       if (branchError) {
         throw new InternalServerErrorException(branchError.message);
@@ -1727,7 +1926,9 @@ export class InventoryService {
     }
 
     const item = await this.findOneForSale(user, saleItemId);
-    const normalizedStatus = String(item.status || '').trim().toLowerCase();
+    const normalizedStatus = String(item.status || '')
+      .trim()
+      .toLowerCase();
     if (normalizedStatus !== 'available') {
       throw new BadRequestException('Only available items can be transferred');
     }
@@ -1747,6 +1948,7 @@ export class InventoryService {
       .eq('sale_item_id', saleItemId)
       .eq('status', 'pending')
       .eq('environment', getEnvironment(user))
+      .returns<Array<Pick<TransferItemRow, 'id'>>>()
       .maybeSingle();
 
     if (pendingError) {
@@ -1761,6 +1963,7 @@ export class InventoryService {
       .select('id, name')
       .eq('id', targetBranchId)
       .eq('environment', getEnvironment(user))
+      .returns<BranchNameRow[]>()
       .maybeSingle();
 
     if (targetBranchError) {
@@ -1797,6 +2000,7 @@ export class InventoryService {
         },
       ])
       .select()
+      .returns<TransferItemRow[]>()
       .single();
 
     if (insertError) {
@@ -1868,7 +2072,10 @@ export class InventoryService {
 
     return {
       message: 'Transfer request created',
-      transfer: this.mapTransferRow(transfer, new Map([[targetBranchId, targetBranch.name]])),
+      transfer: this.mapTransferRow(
+        transfer,
+        new Map([[targetBranchId, targetBranch.name]]),
+      ),
     };
   }
 
@@ -1883,6 +2090,7 @@ export class InventoryService {
       .select('*')
       .eq('id', transferId)
       .eq('environment', getEnvironment(user))
+      .returns<TransferItemRow[]>()
       .single();
 
     if (error || !transfer) {
@@ -1900,6 +2108,7 @@ export class InventoryService {
       .select('name')
       .eq('id', transfer.target_branch_id)
       .eq('environment', getEnvironment(user))
+      .returns<Array<{ name: string }>>()
       .maybeSingle();
 
     if (targetBranchError) {
@@ -1914,6 +2123,7 @@ export class InventoryService {
       .select('name')
       .eq('id', transfer.source_branch_id)
       .eq('environment', getEnvironment(user))
+      .returns<Array<{ name: string }>>()
       .maybeSingle();
 
     if (sourceBranchError) {
@@ -2010,7 +2220,10 @@ export class InventoryService {
     else if (branchNameIlike)
       query = query.ilike('branch', `%${branchNameIlike}%`);
 
-    const { data, error } = await query;
+    const { data, error } =
+      await query.returns<
+        Array<Pick<SaleItemRow, 'status' | 'price' | 'available_date'>>
+      >();
     if (error) throw new InternalServerErrorException(error.message);
 
     const now = new Date();
@@ -2069,11 +2282,29 @@ export class InventoryService {
         .eq('environment', 'production')
         .eq('status', 'Available')
         .gt('price', 0)
-        .order('created_at', { ascending: false }),
+        .order('created_at', { ascending: false })
+        .returns<
+          Array<
+            Pick<
+              SaleItemRow,
+              | 'id'
+              | 'item_id'
+              | 'item_name'
+              | 'category'
+              | 'branch'
+              | 'branch_id'
+              | 'available_date'
+              | 'price'
+              | 'status'
+              | 'image_url'
+            >
+          >
+        >(),
       client
         .from('branches')
         .select('id, name, location')
-        .eq('environment', 'production'),
+        .eq('environment', 'production')
+        .returns<Array<{ id: string; name: string; location: string }>>(),
     ]);
 
     if (saleResult.error) {
@@ -2093,7 +2324,7 @@ export class InventoryService {
     }
 
     const items = await Promise.all(
-      (saleResult.data || []).map(async (item: any) => {
+      (saleResult.data || []).map(async (item) => {
         const branchInfo = branchLookup.get(String(item.branch_id));
         const imageUrl = await this.resolveStorageUrl(item.image_url);
 
@@ -2104,7 +2335,7 @@ export class InventoryService {
           category: item.category,
           branch: branchInfo?.name || item.branch || 'Branch',
           branchLocation: branchInfo?.location || '',
-          availableDate: item.available_date,
+          availableDate: item.available_date || '',
           price: Number(item.price || 0),
           status: item.status || 'Available',
           imageUrl,
@@ -2133,7 +2364,8 @@ export class InventoryService {
     else if (branchNameIlike)
       query = query.ilike('branch', `%${branchNameIlike}%`);
 
-    const { data, error } = await query;
+    const { data, error } =
+      await query.returns<Array<Pick<SaleItemRow, 'category'>>>();
     if (error) throw new InternalServerErrorException(error.message);
 
     const counts: Record<string, number> = {};
@@ -2263,6 +2495,7 @@ export class InventoryService {
       .select('*')
       .eq('id', id)
       .eq('environment', getEnvironment(user))
+      .returns<SaleItemRow[]>()
       .single();
     if (error) {
       throw new NotFoundException('Item not found');
@@ -2271,7 +2504,7 @@ export class InventoryService {
     return data;
   }
 
-  async updateForSale(user: UserWithBranch, id: string, dto: any) {
+  async updateForSale(user: UserWithBranch, id: string, dto: SaleItemWriteDto) {
     await this.findOneForSale(user, id);
     const client = this.supabase.getClient();
     const { data, error } = await client
@@ -2280,6 +2513,7 @@ export class InventoryService {
       .eq('id', id)
       .eq('environment', getEnvironment(user))
       .select()
+      .returns<SaleItemRow[]>()
       .single();
     if (error) {
       throw new InternalServerErrorException(error.message);
@@ -2300,6 +2534,14 @@ export class InventoryService {
       .select('id, item_id, item_name, branch, branch_id')
       .eq('id', itemId)
       .eq('environment', getEnvironment(user))
+      .returns<
+        Array<
+          Pick<
+            PawnedItemRow,
+            'id' | 'item_id' | 'item_name' | 'branch' | 'branch_id'
+          >
+        >
+      >()
       .single();
 
     if (fetchErr || !pawnedItem) {
@@ -2351,13 +2593,24 @@ export class InventoryService {
       .select('*')
       .eq('id', requestId)
       .eq('environment', getEnvironment(user))
+      .returns<
+        Array<{
+          id: string;
+          action: string;
+          details: string | null;
+          branch_id?: string | null;
+        }>
+      >()
       .single();
 
     if (requestLogError || !requestLog) {
       throw new NotFoundException('Replacement request not found');
     }
 
-    const parsedDetails = JSON.parse(requestLog.details || '{}');
+    const parsedDetails = JSON.parse(requestLog.details || '{}') as Record<
+      string,
+      unknown
+    >;
     if (parsedDetails.requestStatus !== 'pending') {
       throw new ConflictException('Request already processed');
     }

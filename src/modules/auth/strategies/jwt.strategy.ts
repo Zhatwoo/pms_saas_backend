@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { passportJwtSecret } from 'jwks-rsa';
+import type { Request } from 'express';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import { parseCookieHeader } from '../../../common/utils/cookie.util';
 
@@ -29,12 +30,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
 
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([
-        (req) => {
+      jwtFromRequest: ExtractJwt.fromExtractors<Request>([
+        (req: Request) => {
           const cookies = parseCookieHeader(req?.headers?.cookie);
           return cookies.pms_access_token || null;
         },
-        (req) =>
+        (req: Request) =>
           process.env.ALLOW_BEARER_AUTH === 'true'
             ? ExtractJwt.fromAuthHeaderAsBearerToken()(req)
             : null,
@@ -68,7 +69,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             return done(null, supabaseJwtSecret);
           }
 
-          return jwksSecretProvider(_req, rawJwtToken, done as any);
+          return jwksSecretProvider(_req, rawJwtToken, done);
         } catch (error) {
           return done(error as Error);
         }

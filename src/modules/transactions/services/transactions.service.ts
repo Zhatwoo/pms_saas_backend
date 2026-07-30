@@ -6,6 +6,7 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../infrastructure/prisma';
 import type { UserWithBranch } from '../../../common/utils/branch-scope.util';
 import {
@@ -31,7 +32,6 @@ import {
 import { Role } from '../../../common/enums';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { RewardsService } from '../../rewards/services/rewards.service';
-import { normalizeCustomerFullName } from '../../../common/utils/customer-name.util';
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { UploadBuybackProofDto } from '../dto/upload-buyback-proof.dto';
 import { EncryptionService } from '../../../common/encryption/encryption.service';
@@ -123,21 +123,34 @@ const TX_SELECT = {
       id_presented: true,
     },
   },
-} as any;
+} satisfies Prisma.transactionsSelect;
 
-type LayawayInput = {
-  customer?: {
-    firstName?: string;
-    middleName?: string;
-    lastName?: string;
-    contactNo?: string;
-    address?: string;
-  };
-  terms?: string;
-  itemPrice?: number;
-  downpayment?: number;
-  remainingBalance?: number;
-  processedByName?: string;
+type TxRow = Prisma.transactionsGetPayload<{ select: typeof TX_SELECT }>;
+
+const LINKED_PAWNED_ITEM_SELECT = {
+  id: true,
+  item_id: true,
+  item_name: true,
+  amount: true,
+  branch_id: true,
+  status: true,
+} satisfies Prisma.pawned_itemsSelect;
+
+type LinkedPawnedItem = Prisma.pawned_itemsGetPayload<{
+  select: typeof LINKED_PAWNED_ITEM_SELECT;
+}>;
+
+/**
+ * Shape actually read off the incoming create() payload at runtime.
+ * The controller passes `createTransactionDto as any`, and this service
+ * also reads a few fields (e.g. `related_sale_item_id`, `layaway`) that
+ * are not declared on CreateTransactionDto. This type documents what is
+ * actually accessed here without changing validation/runtime behavior.
+ */
+type CreateTransactionInput = Partial<CreateTransactionDto> & {
+  related_sale_item_id?: string;
+  layaway?: unknown;
+  [key: string]: unknown;
 };
 
 const ALLOWED_TRANSACTION_PURPOSES = new Set([
@@ -168,7 +181,7 @@ export class TransactionsService implements OnModuleInit {
     private readonly supabase: SupabaseService,
   ) {}
 
-  async onModuleInit() {
+  onModuleInit() {
     // Run retroactive sync on startup
     void this.syncPastRenewals();
   }
@@ -191,7 +204,7 @@ export class TransactionsService implements OnModuleInit {
     return normalizeWallClockTimeString(value);
   }
 
-  private toNumber(value: any | number | string | null | undefined) {
+  private toNumber(value: unknown) {
     if (value == null) return 0;
     return Number(value);
   }
@@ -307,7 +320,7 @@ export class TransactionsService implements OnModuleInit {
   }
 
   private normalizePurpose(value: unknown): string {
-    const purpose = String(value ?? '').trim();
+    const purpose = (typeof value === 'string' ? value : '').trim();
     if (purpose === 'Redeem') {
       return 'Buy Out';
     }
@@ -422,13 +435,19 @@ export class TransactionsService implements OnModuleInit {
   }
 
   private async resolveLinkedPawnedItem(
-    tx: any,
+    tx: Prisma.TransactionClient,
     user: UserWithBranch,
     branchId: string | null,
     dto: Record<string, unknown>,
-  ) {
-    const relatedPawnedItemId = String(dto.related_pawned_item_id ?? '').trim();
-    const unitCode = String(dto.unit_code ?? '').trim();
+  ): Promise<LinkedPawnedItem | null> {
+    const relatedPawnedItemId = (
+      typeof dto.related_pawned_item_id === 'string'
+        ? dto.related_pawned_item_id
+        : ''
+    ).trim();
+    const unitCode = (
+      typeof dto.unit_code === 'string' ? dto.unit_code : ''
+    ).trim();
 
     if (relatedPawnedItemId) {
       return tx.pawned_items.findFirst({
@@ -437,14 +456,7 @@ export class TransactionsService implements OnModuleInit {
           ...(branchId ? { branch_id: branchId } : {}),
           ...applyEnvironmentFilter(user),
         },
-        select: {
-          id: true,
-          item_id: true,
-          item_name: true,
-          amount: true,
-          branch_id: true,
-          status: true,
-        },
+        select: LINKED_PAWNED_ITEM_SELECT,
       });
     }
 
@@ -455,36 +467,25 @@ export class TransactionsService implements OnModuleInit {
           ...(branchId ? { branch_id: branchId } : {}),
           ...applyEnvironmentFilter(user),
         },
-        select: {
-          id: true,
-          item_id: true,
-          item_name: true,
-          amount: true,
-          branch_id: true,
-          status: true,
-        },
+        select: LINKED_PAWNED_ITEM_SELECT,
       });
     }
 
     return null;
   }
 
-  private async mapTransaction(row: any) {
+  private async mapTransaction(row: TxRow) {
     const pawnedItemsDecrypted = row.pawned_items
       ? {
           ...row.pawned_items,
           customers: row.pawned_items.customers
-            ? this.encryption.decryptCustomerEmbed(
-                row.pawned_items.customers as Record<string, unknown>,
-              )
+            ? this.encryption.decryptCustomerEmbed(row.pawned_items.customers)
             : row.pawned_items.customers,
         }
       : null;
 
     const customersDecrypted = row.customers
-      ? this.encryption.decryptCustomerEmbed(
-          row.customers as Record<string, unknown>,
-        )
+      ? this.encryption.decryptCustomerEmbed(row.customers)
       : null;
 
     const createdByUser = this.encryption.decryptUsersJoin(row.users);
@@ -516,13 +517,14 @@ export class TransactionsService implements OnModuleInit {
           }
         : null,
       customer: customersDecrypted ?? null,
-      created_by_user: createdByUser
-        ? {
-            id: row.users.id,
-            full_name: this.decryptUserDisplayName(createdByUser.full_name),
-            role: row.users.role,
-          }
-        : null,
+      created_by_user:
+        createdByUser && row.users
+          ? {
+              id: row.users.id,
+              full_name: this.decryptUserDisplayName(createdByUser.full_name),
+              role: row.users.role,
+            }
+          : null,
       pawned_items: undefined,
       customers: undefined,
       users: undefined,
@@ -584,11 +586,10 @@ export class TransactionsService implements OnModuleInit {
     };
   }
 
-  async create(user: UserWithBranch, dto: any) {
+  async create(user: UserWithBranch, dto: CreateTransactionInput) {
     // Drop client-only fields that are not real DB columns.
     // This prevents 500s when UI sends extra metadata.
     const { layaway: layawayInput, ...dtoClean } = dto ?? {};
-    const isLayaway = !!layawayInput;
     const purpose = this.normalizePurpose(dtoClean.purpose);
     const amounts = {
       cashIn: this.normalizeMoney(dtoClean.cash_in, 'cash_in'),
@@ -666,7 +667,7 @@ export class TransactionsService implements OnModuleInit {
       recordedAt,
     );
 
-    const payload: any = {
+    const payload: Prisma.transactionsUncheckedCreateInput = {
       transaction_no: transactionNo,
       branch_id: branchId,
       branch: branchName,
@@ -699,14 +700,7 @@ export class TransactionsService implements OnModuleInit {
     };
 
     const data = await this.prisma.$transaction(async (tx) => {
-      let linkedPawnedItem: {
-        id: string;
-        item_id: string;
-        item_name: string;
-        amount: number;
-        branch_id: string;
-        status: string;
-      } | null = null;
+      let linkedPawnedItem: LinkedPawnedItem | null = null;
 
       if (purpose === 'Buy Out') {
         linkedPawnedItem = await this.resolveLinkedPawnedItem(
@@ -930,7 +924,8 @@ export class TransactionsService implements OnModuleInit {
             downpayment: layaway.downpayment,
             remaining_balance: layaway.remainingBalance,
             terms: layaway.terms,
-            status: layaway.remainingBalance > 0 ? 'PARTIALLY_PAID' : 'COMPLETED',
+            status:
+              layaway.remainingBalance > 0 ? 'PARTIALLY_PAID' : 'COMPLETED',
             processed_by_user_id: user.id ?? null,
             processed_by_name: layaway.processedByName,
             ...environmentCreateFields(user),
@@ -1043,7 +1038,10 @@ export class TransactionsService implements OnModuleInit {
     customerId?: string,
   ) {
     const scoped = effectiveBranchIdForQuery(user, branchQuery);
-    const where: any = applyEnvironmentFilter(user);
+    const where: Prisma.transactionsWhereInput = {
+      voided_at: null,
+      ...applyEnvironmentFilter(user),
+    };
 
     if (scoped) where.branch_id = scoped;
     if (!isSuperAdmin(user)) Object.assign(where, buildBranchFilter(user));
@@ -1053,7 +1051,7 @@ export class TransactionsService implements OnModuleInit {
       : null;
 
     if (customerId && !customerScope) {
-      return this.emptyList(scoped, date);
+      return this.emptyList();
     }
 
     if (!customerId) {
@@ -1103,7 +1101,7 @@ export class TransactionsService implements OnModuleInit {
       select: TX_SELECT,
     });
     if (!data) throw new NotFoundException('Transaction not found');
-    assertBranchAccess(user, (data as any).branch_id);
+    assertBranchAccess(user, data.branch_id);
     return await this.mapTransaction(data);
   }
 
@@ -1121,7 +1119,7 @@ export class TransactionsService implements OnModuleInit {
       );
     }
 
-    const where: any = {
+    const where: Prisma.transactionsWhereInput = {
       purpose: 'Pawn',
       ...(isSuperAdmin(user) ? {} : buildBranchFilter(user)),
       ...applyEnvironmentFilter(user),
@@ -1140,7 +1138,7 @@ export class TransactionsService implements OnModuleInit {
     });
 
     if (!row) return null;
-    assertBranchAccess(user, (row as any).branch_id);
+    assertBranchAccess(user, row.branch_id);
     return await this.mapTransaction(row);
   }
 
@@ -1188,7 +1186,7 @@ export class TransactionsService implements OnModuleInit {
     );
   }
 
-  private emptyList(scoped: string | null, date?: string) {
+  private emptyList() {
     return {
       transactions: [],
       stats: {
@@ -1367,12 +1365,10 @@ export class TransactionsService implements OnModuleInit {
     const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
     const buf = Buffer.from(base64Data, 'base64');
 
-    const { data, error } = await client.storage
-      .from(bucket)
-      .upload(path, buf, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
+    const { error } = await client.storage.from(bucket).upload(path, buf, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
 
     if (error) {
       throw new InternalServerErrorException(
@@ -1409,12 +1405,21 @@ export class TransactionsService implements OnModuleInit {
       const path = parts.slice(1).join('/');
 
       try {
-        const { data } = await this.supabase
+        const { data, error } = await this.supabase
           .getClient()
           .storage.from(bucket)
           .createSignedUrl(path, 60 * 60 * 24 * 7);
 
-        return data?.signedUrl || storedUrl;
+        if (!error && data?.signedUrl) {
+          return data.signedUrl;
+        }
+
+        const { data: pubData } = this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .getPublicUrl(path);
+
+        return pubData?.publicUrl || storedUrl;
       } catch {
         return storedUrl;
       }
@@ -1422,9 +1427,16 @@ export class TransactionsService implements OnModuleInit {
 
     try {
       const parsedUrl = new URL(storedUrl);
-      const storagePrefix = '/storage/v1/object/public/';
+      const publicPrefix = '/storage/v1/object/public/';
+      const signedPrefix = '/storage/v1/object/sign/';
 
-      if (!parsedUrl.pathname.includes(storagePrefix)) {
+      const storagePrefix = parsedUrl.pathname.includes(publicPrefix)
+        ? publicPrefix
+        : parsedUrl.pathname.includes(signedPrefix)
+          ? signedPrefix
+          : null;
+
+      if (!storagePrefix) {
         return storedUrl;
       }
 
@@ -1459,14 +1471,6 @@ export class TransactionsService implements OnModuleInit {
     user: UserWithBranch,
     dto: UploadBuybackProofDto,
   ): Promise<{ proofUrl: string }> {
-    console.log('=== UPLOAD BUYBACK PROOF SERVICE CALLED ===');
-    console.log('User:', user.role, user.id);
-    console.log('DTO:', {
-      transactionNo: dto.transactionNo,
-      fileName: dto.fileName,
-      fileDataLength: dto.fileData?.length,
-    });
-
     // Authorization check
     if (
       user.role !== Role.SUPER_ADMIN &&
@@ -1484,8 +1488,6 @@ export class TransactionsService implements OnModuleInit {
         ? dto.branchId?.trim() || 'super-admin'
         : requireUserBranchId(user);
 
-    console.log('Branch ID:', branchId);
-
     // Get Supabase client
     const client = this.supabase.getClient();
 
@@ -1494,8 +1496,6 @@ export class TransactionsService implements OnModuleInit {
       ? dto.fileData.split(',')[1]
       : dto.fileData;
     const fileBuffer = Buffer.from(base64Data, 'base64');
-
-    console.log('File buffer size:', fileBuffer.length, 'bytes');
 
     // Extract and validate file extension
     const extension = this.getUploadExtension(dto.fileData, dto.fileName);
@@ -1506,8 +1506,6 @@ export class TransactionsService implements OnModuleInit {
       );
     }
 
-    console.log('File extension:', extension);
-
     // Extract and validate MIME type
     const contentType = this.getUploadContentType(dto.fileData, dto.fileName);
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -1516,8 +1514,6 @@ export class TransactionsService implements OnModuleInit {
         'Invalid file type. Only JPEG, PNG, and WEBP are allowed.',
       );
     }
-
-    console.log('Content type:', contentType);
 
     // Validate file size (4MB limit as per requirements)
     const MAX_SIZE = 4 * 1024 * 1024;
@@ -1534,9 +1530,6 @@ export class TransactionsService implements OnModuleInit {
     ); // Remove extension from original filename
     const filePath = `${branchPart}/buyback_${transactionPart}_${timestamp}_${sanitizedFileName}.${extension}`;
 
-    console.log('File path:', filePath);
-    console.log('Uploading to Supabase storage...');
-
     // Upload to Supabase storage with upsert enabled
     const { error } = await client.storage
       .from('buyback-proofs')
@@ -1552,14 +1545,10 @@ export class TransactionsService implements OnModuleInit {
       );
     }
 
-    console.log('✓ Upload successful!');
-
     // Get and return public URL
     const { data } = client.storage
       .from('buyback-proofs')
       .getPublicUrl(filePath);
-
-    console.log('Public URL:', data.publicUrl);
 
     return { proofUrl: data.publicUrl };
   }
@@ -1637,7 +1626,7 @@ export class TransactionsService implements OnModuleInit {
 
         if (!existingRenewal) {
           console.log(
-            `[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date}`,
+            `[Sync] Creating missing item_renewal for pawned item ${pawnedItemId} on date ${tx.transaction_date.toISOString()}`,
           );
           await this.prisma.item_renewals.create({
             data: {
@@ -1670,7 +1659,7 @@ export class TransactionsService implements OnModuleInit {
 
           if (renewalDate.getTime() > pawnDate.getTime()) {
             console.log(
-              `[Sync] Updating pawn_date of item ${item.item_id} from ${item.pawn_date} to ${latestRenewal.renewal_date}`,
+              `[Sync] Updating pawn_date of item ${item.item_id} from ${pawnDate.toISOString()} to ${renewalDate.toISOString()}`,
             );
             await this.prisma.pawned_items.update({
               where: { id: item.id },

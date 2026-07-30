@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/prisma';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
 import { EncryptionService } from '../../common/encryption/encryption.service';
@@ -89,7 +90,9 @@ export class ActivityLogsService {
     userId?: string,
   ) {
     try {
-      const where: any = { environment: getEnvironment(viewer) };
+      const where: Prisma.activity_logsWhereInput = {
+        environment: getEnvironment(viewer),
+      };
 
       if (role === 'admin' || role === 'employee' || role === 'branch') {
         if (!branchId) {
@@ -110,18 +113,18 @@ export class ActivityLogsService {
         where.branch_id = branchId;
       }
 
+      const createdAtFilter: Prisma.DateTimeFilter<'activity_logs'> = {};
+
       if (startDate) {
-        where.created_at = {
-          ...(where.created_at || {}),
-          gte: toManilaDayBoundary(startDate, false),
-        };
+        createdAtFilter.gte = toManilaDayBoundary(startDate, false);
       }
 
       if (endDate) {
-        where.created_at = {
-          ...(where.created_at || {}),
-          lte: toManilaDayBoundary(endDate, true),
-        };
+        createdAtFilter.lte = toManilaDayBoundary(endDate, true);
+      }
+
+      if (startDate || endDate) {
+        where.created_at = createdAtFilter;
       }
 
       if (action) {

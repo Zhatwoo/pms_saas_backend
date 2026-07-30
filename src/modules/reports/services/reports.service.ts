@@ -11,6 +11,28 @@ import {
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
+interface SalesRow {
+  cash_in: number | string | null;
+  purpose: string | null;
+}
+
+interface CashOutRow {
+  cash_out: number | string | null;
+  purpose: string | null;
+}
+
+interface BranchTxnRow {
+  branch_id: string;
+  cash_in: number | string | null;
+  purpose: string | null;
+}
+
+interface TrendRow {
+  cash_in: number | string | null;
+  transaction_date: string | null;
+  purpose: string | null;
+}
+
 @Injectable()
 export class ReportsService {
   constructor(
@@ -176,12 +198,11 @@ export class ReportsService {
     endDate?: string,
   ) {
     const client = this.supabaseService.getClient();
-    let { fromDate, toDate, trendDays } = this.resolveDateRange(
+    const { fromDate, toDate } = this.resolveDateRange(
       period,
       startDate,
       endDate,
     );
-
 
     const branchId = effectiveBranchIdForQuery(user, branchQuery);
 
@@ -203,7 +224,8 @@ export class ReportsService {
       .lte('transaction_date', toDate);
     salesQuery = salesQuery.eq('environment', getEnvironment(user));
     if (branchId) salesQuery = salesQuery.eq('branch_id', branchId);
-    const { data: salesData } = await salesQuery;
+    const { data: rawSalesData } = await salesQuery;
+    const salesData: SalesRow[] | null = rawSalesData;
 
     // Sum sales for the requested period
     const periodTotalSales = (salesData || []).reduce(
@@ -222,7 +244,8 @@ export class ReportsService {
       .eq('transaction_date', todayStr);
     todaySalesQuery = todaySalesQuery.eq('environment', getEnvironment(user));
     if (branchId) todaySalesQuery = todaySalesQuery.eq('branch_id', branchId);
-    const { data: todaySalesData } = await todaySalesQuery;
+    const { data: rawTodaySalesData } = await todaySalesQuery;
+    const todaySalesData: SalesRow[] | null = rawTodaySalesData;
     const totalSalesToday = (todaySalesData || []).reduce(
       (sum, row) =>
         isNonRevenuePurpose(row.purpose)
@@ -263,7 +286,8 @@ export class ReportsService {
       .lte('transaction_date', toDate);
     periodTxnQuery = periodTxnQuery.eq('environment', getEnvironment(user));
     if (branchId) periodTxnQuery = periodTxnQuery.eq('branch_id', branchId);
-    const { data: periodTxns } = await periodTxnQuery;
+    const { data: rawPeriodTxns } = await periodTxnQuery;
+    const periodTxns: BranchTxnRow[] | null = rawPeriodTxns;
 
     for (const txn of periodTxns || []) {
       const entry = branchSalesMap.get(txn.branch_id);
@@ -299,7 +323,8 @@ export class ReportsService {
       .order('transaction_date', { ascending: true });
     trendQuery = trendQuery.eq('environment', getEnvironment(user));
     if (branchId) trendQuery = trendQuery.eq('branch_id', branchId);
-    const { data: trendData } = await trendQuery;
+    const { data: rawTrendData } = await trendQuery;
+    const trendData: TrendRow[] | null = rawTrendData;
 
     const trendMap = new Map<string, number>();
     // Build a map for every day in the range
@@ -375,7 +400,8 @@ export class ReportsService {
       .lte('transaction_date', toDate);
     cashOutQuery = cashOutQuery.eq('environment', getEnvironment(user));
     if (branchId) cashOutQuery = cashOutQuery.eq('branch_id', branchId);
-    const { data: cashOutData } = await cashOutQuery;
+    const { data: rawCashOutData } = await cashOutQuery;
+    const cashOutData: CashOutRow[] | null = rawCashOutData;
 
     const totalExpenses = (cashOutData || []).reduce((sum, row) => {
       const p = (row.purpose ?? '').trim().toLowerCase();

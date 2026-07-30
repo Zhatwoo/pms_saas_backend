@@ -19,7 +19,7 @@ export class ItemsController {
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Post()
-  create(@Body() createItemDto: any) {
+  create(@Body() createItemDto: Record<string, unknown>) {
     return this.itemsService.create(createItemDto);
   }
 
@@ -35,7 +35,10 @@ export class ItemsController {
 
   @Roles(Role.ADMIN, Role.EMPLOYEE)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateItemDto: any) {
+  update(
+    @Param('id') id: string,
+    @Body() updateItemDto: Record<string, unknown>,
+  ) {
     return this.itemsService.update(id, updateItemDto);
   }
 

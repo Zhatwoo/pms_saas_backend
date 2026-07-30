@@ -49,9 +49,6 @@ export class TransactionsController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Body() dto: UploadBuybackProofDto,
   ) {
-    console.log('--- UPLOAD BUYBACK PROOF CONTROLLER HIT ---');
-    console.log('FileName:', dto.fileName);
-    console.log('FileData length:', dto.fileData?.length);
     return this.transactionsService.uploadBuybackProof(req.user, dto);
   }
 

@@ -8,6 +8,44 @@ interface EmailBlastPayload {
   branchId?: string;
 }
 
+interface ExpirationItemRow {
+  ticket_no: string;
+  item_description: string;
+  days_remaining: number;
+  maturity_date: string;
+  total_due: number;
+  customers?: Array<{
+    id?: string;
+    email?: string | null;
+    full_name?: string | null;
+  }> | null;
+  branches?: { id?: string } | { id?: string }[] | null;
+}
+
+interface NormalizedExpirationItem {
+  ticket_no: string;
+  item_description: string;
+  days_remaining: number;
+  maturity_date: string;
+  total_due: number;
+  customer_email: string;
+  customer_name: string;
+}
+
+interface CustomerGroupItem {
+  ticketNo: string;
+  item: string;
+  daysRemaining: number;
+  maturityDate: string;
+  totalDue: number;
+}
+
+interface CustomerGroup {
+  email: string;
+  customerName: string;
+  items: CustomerGroupItem[];
+}
+
 @Injectable()
 export class EmailService {
   private logger = new Logger('EmailService');
@@ -20,6 +58,62 @@ export class EmailService {
     private configService: ConfigService,
   ) {
     this.resendApiKey = this.configService.get<string>('RESEND_API_KEY') || '';
+  }
+
+  /**
+   * Sends a single plain email via Resend. Reuses the same sandbox override
+   * as sendExpirationBlast: while RESEND_API_KEY is on a non-verified Resend
+   * domain, Resend only accepts sends to VERIFIED_EMAIL, so all mail is
+   * redirected there regardless of `to` until the sending domain is verified.
+   */
+  async sendPlainEmail(
+    to: string,
+    subject: string,
+    html: string,
+  ): Promise<{ success: boolean; message: string }> {
+    if (!this.resendApiKey) {
+      return {
+        success: false,
+        message: 'Email service not configured (RESEND_API_KEY missing)',
+      };
+    }
+
+    const toEmail = this.VERIFIED_EMAIL;
+    const testNotice =
+      to !== toEmail
+        ? ` [TEST MODE] Sending to verified email. Actual recipient: ${to}`
+        : '';
+
+    try {
+      const response = await fetch(this.RESEND_API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'JCLB Pawnshop <onboarding@resend.dev>',
+          to: toEmail,
+          subject,
+          html,
+        }),
+      });
+
+      if (!response.ok) {
+        const error: unknown = await response.json();
+        this.logger.error(`Resend API error for ${toEmail}:`, error);
+        return { success: false, message: 'Failed to send email' };
+      }
+
+      this.logger.log(`✓ Email sent to ${toEmail}.${testNotice}`);
+      return { success: true, message: 'Email sent' };
+    } catch (error) {
+      this.logger.error(
+        `Email sending error for ${to}:`,
+        error instanceof Error ? error.message : 'Unknown error',
+      );
+      return { success: false, message: 'Failed to send email' };
+    }
   }
 
   async sendExpirationBlast(
@@ -53,18 +147,6 @@ export class EmailService {
       }
 
       // Group by unique customer email
-      interface CustomerGroup {
-        email: string;
-        customerName: string;
-        items: Array<{
-          ticketNo: string;
-          item: string;
-          daysRemaining: number;
-          maturityDate: string;
-          totalDue: number;
-        }>;
-      }
-
       const uniqueCustomers: CustomerGroup[] = Array.from(
         new Map(
           items.map((item) => [
@@ -138,7 +220,9 @@ export class EmailService {
     }
   }
 
-  private async getExpirationItems(payload: EmailBlastPayload) {
+  private async getExpirationItems(
+    payload: EmailBlastPayload,
+  ): Promise<NormalizedExpirationItem[]> {
     const client = this.supabase.getClient();
 
     let query = client
@@ -192,19 +276,26 @@ export class EmailService {
       return [];
     }
 
-    return (data || []).map((item: any) => ({
-      ticket_no: item.ticket_no,
-      item_description: item.item_description,
-      days_remaining: item.days_remaining,
-      maturity_date: item.maturity_date,
-      total_due: item.total_due,
-      customer_email: item.customers?.[0]?.email || '',
-      customer_name: item.customers?.[0]?.full_name || 'Valued Customer',
-    }));
+    const rows = (data ?? []) as ExpirationItemRow[];
+
+    return rows.map((item) => {
+      const customer = Array.isArray(item.customers)
+        ? item.customers[0]
+        : undefined;
+      return {
+        ticket_no: item.ticket_no,
+        item_description: item.item_description,
+        days_remaining: item.days_remaining,
+        maturity_date: item.maturity_date,
+        total_due: item.total_due,
+        customer_email: customer?.email || '',
+        customer_name: customer?.full_name || 'Valued Customer',
+      };
+    });
   }
 
   private async sendExpirationEmail(
-    customer: any,
+    customer: CustomerGroup,
     category: string,
   ): Promise<boolean> {
     try {
@@ -243,7 +334,7 @@ export class EmailService {
       });
 
       if (!response.ok) {
-        const error = await response.json();
+        const error: unknown = await response.json();
         this.logger.error(`Resend API error for ${toEmail}:`, error);
         return false;
       }
@@ -261,7 +352,7 @@ export class EmailService {
 
   private generateEmailHtml(
     customerName: string,
-    items: any[],
+    items: CustomerGroupItem[],
     category: string,
   ): string {
     const itemsList = items
