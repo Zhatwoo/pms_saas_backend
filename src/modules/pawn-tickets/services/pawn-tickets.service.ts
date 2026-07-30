@@ -103,12 +103,17 @@ export class PawnTicketsService {
     return `PAWN-${Date.now()}`;
   }
 
-  private parseUnitCodeSequence(itemId: string, branchCode: string) {
-    const match = itemId
-      .trim()
-      .match(new RegExp(`^${branchCode}-JCLB-(\\d+)$`, 'i'));
-    if (!match) return 0;
+  private normalizeProvidedItemId(unitCode?: string) {
+    const value = unitCode?.trim();
+    if (value && !value.startsWith('PENDING')) {
+      return value.toUpperCase();
+    }
+    return null;
+  }
 
+  private parseUnitCodeSequence(itemId: string) {
+    const match = itemId.trim().match(/(\d+)$/);
+    if (!match) return 0;
     const sequenceNumber = Number.parseInt(match[1], 10);
     return Number.isNaN(sequenceNumber) ? 0 : sequenceNumber;
   }
@@ -118,35 +123,61 @@ export class PawnTicketsService {
     branchCode: string,
     client: PawnTicketDbClient = this.prisma,
   ) {
-    const normalizedCode = branchCode?.toUpperCase();
-    if (!normalizedCode) {
-      throw new InternalServerErrorException('Branch code not found');
-    }
+    const normalizedCode = branchCode?.toUpperCase() || '001';
 
+    // Query globally across all pawned_items matching prefix (item_id is globally @unique)
     const items = await client.pawned_items.findMany({
       where: {
-        branch_id: branchId,
-        item_id: { startsWith: `${normalizedCode}-JCLB-`, mode: 'insensitive' },
+        item_id: { startsWith: `${normalizedCode}-`, mode: 'insensitive' },
       },
       select: { item_id: true },
-      take: 1000,
+      take: 5000,
     });
 
     const used = new Set(items.map((item) => item.item_id.toUpperCase()));
-    const maxNumber = items.reduce(
-      (max, item) =>
-        Math.max(max, this.parseUnitCodeSequence(item.item_id, normalizedCode)),
-      0,
-    );
+    let maxNumber = 0;
+    for (const item of items) {
+      const seq = this.parseUnitCodeSequence(item.item_id);
+      if (seq > maxNumber) maxNumber = seq;
+    }
 
-    for (let next = maxNumber + 1; next < maxNumber + 1000; next += 1) {
+    for (let next = maxNumber + 1; next < maxNumber + 10000; next += 1) {
       const candidate = `${normalizedCode}-JCLB-${String(next).padStart(5, '0')}`;
       if (!used.has(candidate)) {
-        return candidate;
+        const exists = await client.pawned_items.findFirst({
+          where: { item_id: { equals: candidate, mode: 'insensitive' } },
+          select: { id: true },
+        });
+        if (!exists) {
+          return candidate;
+        }
       }
     }
 
     return `${normalizedCode}-JCLB-${Date.now()}`;
+  }
+
+  private async resolveItemId(
+    branchId: string,
+    branchCode: string,
+    unitCode?: string,
+    client: PawnTicketDbClient = this.prisma,
+  ) {
+    const provided = this.normalizeProvidedItemId(unitCode);
+    if (provided) {
+      const existing = await client.pawned_items.findFirst({
+        where: {
+          item_id: { equals: provided, mode: 'insensitive' },
+        },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return provided;
+      }
+    }
+
+    return this.generateNextItemIdForBranch(branchId, branchCode, client);
   }
 
   private isItemIdUniqueError(error: unknown) {
@@ -161,20 +192,16 @@ export class PawnTicketsService {
 
     const meta = rec.meta as Record<string, unknown> | undefined;
     const target = meta?.target;
+    const message = typeof rec.message === 'string' ? rec.message : '';
 
-    if (Array.isArray(target)) {
-      return target.includes('item_id');
-    }
-    if (typeof target === 'string') {
-      return target.includes('item_id');
-    }
+    const isP2002 = rec.code === 'P2002';
+    const mentionsItemId =
+      message.toLowerCase().includes('item_id') ||
+      (Array.isArray(target)
+        ? target.some((t) => String(t).toLowerCase().includes('item_id'))
+        : typeof target === 'string' && target.toLowerCase().includes('item_id'));
 
-    // Some Prisma driver paths omit `meta.target` for constraint violations
-    // raised inside interactive transactions. Since item_id is the only
-    // unique field this service writes to inside the retry-guarded
-    // transaction, treat an untargeted P2002 here as an item_id collision
-    // rather than silently falling through and surfacing a raw 500.
-    return true;
+    return isP2002 && (mentionsItemId || !target);
   }
 
   private getTodayDateKey() {
@@ -524,10 +551,6 @@ export class PawnTicketsService {
       item_photos: true,
     } satisfies Prisma.pawned_itemsSelect;
 
-    let itemId = await this.generateNextItemIdForBranch(
-      branchId,
-      branch.branch_code,
-    );
     type CreatedPawnedItem = Prisma.pawned_itemsGetPayload<{
       select: typeof pawnedItemSelect;
     }>;
@@ -538,9 +561,18 @@ export class PawnTicketsService {
       transactionNo: string;
     } | null = null;
 
+    let itemId = '';
+
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         result = await this.prisma.$transaction(async (tx) => {
+          itemId = await this.resolveItemId(
+            branchId,
+            branch.branch_code,
+            attempt === 0 ? dto.item.unitCode : undefined,
+            tx,
+          );
+
           const manilaDate = getPhCalendarDateString();
           await this.financeDailyBalance.assertNetChangePermittedInTx(
             tx,
@@ -711,13 +743,6 @@ export class PawnTicketsService {
         break;
       } catch (e) {
         if (this.isItemIdUniqueError(e) && attempt < 2) {
-          console.warn(
-            `[PawnTicketsService] item_id collision on "${itemId}" (attempt ${attempt + 1}); regenerating and retrying.`,
-          );
-          itemId = await this.generateNextItemIdForBranch(
-            branchId,
-            branch.branch_code,
-          );
           continue;
         }
 
@@ -897,19 +922,39 @@ export class PawnTicketsService {
       const bucket = parts[0];
       const path = parts.slice(1).join('/');
 
-      const { data } = await this.supabase
-        .getClient()
-        .storage.from(bucket)
-        .createSignedUrl(path, 60 * 60 * 24 * 7);
+      try {
+        const { data, error } = await this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .createSignedUrl(path, 60 * 60 * 24 * 7);
 
-      return data?.signedUrl || storedUrl;
+        if (!error && data?.signedUrl) {
+          return data.signedUrl;
+        }
+
+        const { data: pubData } = this.supabase
+          .getClient()
+          .storage.from(bucket)
+          .getPublicUrl(path);
+
+        return pubData?.publicUrl || storedUrl;
+      } catch {
+        return storedUrl;
+      }
     }
 
     try {
       const parsedUrl = new URL(storedUrl);
-      const storagePrefix = '/storage/v1/object/public/';
+      const publicPrefix = '/storage/v1/object/public/';
+      const signedPrefix = '/storage/v1/object/sign/';
 
-      if (!parsedUrl.pathname.includes(storagePrefix)) {
+      const storagePrefix = parsedUrl.pathname.includes(publicPrefix)
+        ? publicPrefix
+        : parsedUrl.pathname.includes(signedPrefix)
+          ? signedPrefix
+          : null;
+
+      if (!storagePrefix) {
         return storedUrl;
       }
 
