@@ -598,34 +598,66 @@ export class InventoryService {
 
     return {
       items: await Promise.all(
-        paginatedItems.map(async (item: PawnedItemRow) => ({
-          id: item.id,
-          itemId: item.item_id,
-          itemName: item.item_name,
-          category: item.category,
-          branch: item.branch,
-          pawnDate: item.pawn_date,
-          status: item.status,
-          renewalCount: (item.item_renewals || []).length,
-          renewals: (item.item_renewals || []).map((r: ItemRenewalRow) => ({
+        paginatedItems.map(async (item: PawnedItemRow) => {
+          const category = item.category;
+          const group = findInterestRateGroup(interestRates, category);
+          const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
+          const graceDuration = group
+            ? Number((group as { gracePeriodDuration?: number }).gracePeriodDuration ?? 4)
+            : 4;
+
+          const renewals = (item.item_renewals || []).map((r: ItemRenewalRow) => ({
             date: r.renewal_date,
             amount: r.amount_paid,
-          })),
-          remarks: item.remarks || '',
-          qrCode: item.qr_code || '',
-          originalPhoto: await this.resolveStorageUrl(item.profile_photo),
-          itemPhotos: await this.resolveStorageUrls(item.item_photos),
-          conditionReport: item.condition_report || '',
-          amount: item.amount || 0,
-          customers: item.customers
-            ? this.encryption.decryptCustomerEmbed(item.customers)
-            : item.customers,
-          serialNumber: item.serial_number,
-          itemsIncluded: item.items_included,
-          condition: item.condition,
-          memoryStorage: item.memory_storage,
-          interestRateSnapshot: item.interest_rate_snapshot ?? null,
-        })),
+          }));
+          const lastRenewalDate = renewals
+            .map((r) => r.date)
+            .filter(Boolean)
+            .sort()
+            .at(-1);
+
+          const baseDateRaw = lastRenewalDate || item.pawn_date;
+          let maturityDate: string | null = null;
+          let expirationDate: string | null = null;
+          if (baseDateRaw) {
+            const maturity = new Date(baseDateRaw);
+            if (!Number.isNaN(maturity.getTime())) {
+              maturity.setDate(maturity.getDate() + defaultDuration);
+              maturityDate = maturity.toISOString().slice(0, 10);
+              const expiry = new Date(maturity);
+              expiry.setDate(expiry.getDate() + graceDuration);
+              expirationDate = expiry.toISOString().slice(0, 10);
+            }
+          }
+
+          return {
+            id: item.id,
+            itemId: item.item_id,
+            itemName: item.item_name,
+            category: item.category,
+            branch: item.branch,
+            pawnDate: item.pawn_date,
+            maturityDate,
+            expirationDate,
+            status: item.status,
+            renewalCount: renewals.length,
+            renewals,
+            remarks: item.remarks || '',
+            qrCode: item.qr_code || '',
+            originalPhoto: await this.resolveStorageUrl(item.profile_photo),
+            itemPhotos: await this.resolveStorageUrls(item.item_photos),
+            conditionReport: item.condition_report || '',
+            amount: item.amount || 0,
+            customers: item.customers
+              ? this.encryption.decryptCustomerEmbed(item.customers)
+              : item.customers,
+            serialNumber: item.serial_number,
+            itemsIncluded: item.items_included,
+            condition: item.condition,
+            memoryStorage: item.memory_storage,
+            interestRateSnapshot: item.interest_rate_snapshot ?? null,
+          };
+        }),
       ),
       total: totalCount,
     };
