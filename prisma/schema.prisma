@@ -11,7 +11,7 @@ datasource db {
 model branches {
   id                                                       String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   branch_code                                              String                     @default(dbgenerated("lpad((nextval('branch_code_seq'::regclass))::text, 3, '0'::text)"))
-  name                                                     String                     @unique
+  name                                                     String
   location                                                 String
   status                                                   String                     @default("Active")
   created_at                                               DateTime                   @default(now()) @db.Timestamptz(6)
@@ -69,6 +69,7 @@ model users {
   notification_sound                                                   String?                    @default("sound8.mp3")
   is_developer                                                         Boolean                    @default(false)
   environment                                                          String                     @default("production") @db.VarChar(20)
+  onboarding_completed                                                 Boolean                    @default(false)
   created_by                                                           String?                    @db.Uuid
   activity_logs                                                        activity_logs[]
   authorized_devices                                                   authorized_devices[]
@@ -1450,9 +1451,10 @@ enum user_status {
 }
 
 model tenants {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name       String
-  created_at DateTime @default(now()) @db.Timestamptz(6)
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                 String
+  onboarding_completed Boolean  @default(false)
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   users         users[]
