@@ -69,7 +69,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly branchesService: BranchesService,
     private readonly usersService: UsersService,
-  ) {}
+  ) { }
 
   /** Public branch list for signup (avoids /branches/:id catching "public"). */
   @Public()
