@@ -136,6 +136,14 @@ export class AuthController {
     return this.authService.getProfile(req.user.id);
   }
 
+  @Post('complete-onboarding')
+  async completeOnboarding(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: { branchName: string; location: string; contactNumber: string },
+  ) {
+    return this.authService.completeOnboarding(req.user, dto);
+  }
+
   /** Confirms possession of password before sensitive actions — rate-limit like login. */
   @Throttle(AUTH_STRICT_THROTTLE)
   @Post('verify-password')
@@ -154,6 +162,34 @@ export class AuthController {
     }
 
     return { success: true };
+  }
+
+  @Throttle(AUTH_STRICT_THROTTLE)
+  @Post('request-password-otp')
+  async requestPasswordOtp(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: { currentPassword: string; newPassword: string; confirmPassword: string },
+  ) {
+    return this.authService.requestPasswordOtp(
+      req.user,
+      dto.currentPassword,
+      dto.newPassword,
+      dto.confirmPassword,
+    );
+  }
+
+  @Throttle(AUTH_STRICT_THROTTLE)
+  @Post('verify-password-otp')
+  async verifyPasswordOtp(
+    @Req() req: { user: AuthenticatedUserProfile },
+    @Body() dto: { currentPassword: string; newPassword: string; otp: string },
+  ) {
+    return this.authService.verifyPasswordOtpAndChange(
+      req.user,
+      dto.currentPassword,
+      dto.newPassword,
+      dto.otp,
+    );
   }
 
   @Throttle(AUTH_STRICT_THROTTLE)
