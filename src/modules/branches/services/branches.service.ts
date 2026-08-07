@@ -47,6 +47,7 @@ export class BranchesService {
     location: true,
     contact_number: true,
     status: true,
+    maintaining_balance: true,
     environment: true,
   } as const;
 
@@ -148,6 +149,9 @@ export class BranchesService {
         ),
       ),
       status: createBranchDto.status,
+      ...(createBranchDto.maintaining_balance !== undefined
+        ? { maintaining_balance: createBranchDto.maintaining_balance }
+        : {}),
       ...environmentCreateFields(user),
     };
 
@@ -352,6 +356,10 @@ export class BranchesService {
           }
         : {}),
       ...(updateBranchDto.status ? { status: updateBranchDto.status } : {}),
+      ...(user.role === Role.SUPER_ADMIN &&
+      updateBranchDto.maintaining_balance !== undefined
+        ? { maintaining_balance: updateBranchDto.maintaining_balance }
+        : {}),
     };
 
     const patchResp = await this.supabaseService

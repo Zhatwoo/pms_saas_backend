@@ -19,6 +19,8 @@ model branches {
   contact_number                                           String
   /// Configured opening cash when no prior daily_balances row exists (initial capital).
   opening_cash_balance                                     Decimal                    @default(0) @db.Decimal(12, 2)
+  /// Minimum operational cash threshold configured by a super admin.
+  maintaining_balance                                      Decimal?                   @db.Decimal(12, 2)
   /// LOAN_AMOUNT: sum pawn loan amounts; APPRAISED_VALUE: sum appraised_value with fallback to amount.
   inventory_valuation_mode                                 String                     @default("LOAN_AMOUNT")
   allowed_ip                                               String?
