@@ -3,8 +3,11 @@ import {
   IsString,
   IsOptional,
   IsEnum,
+  IsNumber,
   Matches,
+  Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export const PHONE_REGEX = /^\+639\d{9}$/;
 
@@ -45,4 +48,10 @@ export class CreateBranchDto {
   @IsOptional()
   @IsEnum(BranchStatus)
   status?: BranchStatus = BranchStatus.ACTIVE;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  maintaining_balance?: number;
 }
