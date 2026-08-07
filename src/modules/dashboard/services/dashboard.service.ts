@@ -41,6 +41,7 @@ interface BranchRecord {
   location?: string | null;
   status: string | null;
   opening_cash_balance?: number | string | null;
+  maintaining_balance?: number | string | null;
 }
 
 interface DailyBalanceRow {
@@ -660,6 +661,7 @@ export class DashboardService {
     return params.branches.map((branch) => {
       const transferred = transferredSummaryByBranch.get(branch.id);
       const openingFallback = this.toMoney(branch.opening_cash_balance);
+      const maintainingBalance = this.toMoney(branch.maintaining_balance);
       const snap = buildBranchDaySnapshotFromFetched({
         today: params.asOfDate,
         todayRow: params.todayByBranch.get(branch.id),
@@ -675,6 +677,9 @@ export class DashboardService {
         status: branch.status ?? 'Unknown',
         startingBalance: snap.startingBalance,
         currentBalance: snap.endingBalance,
+        maintainingBalance,
+        isLowBudget:
+          maintainingBalance > 0 && snap.endingBalance <= maintainingBalance,
         totalAdded: transferred?.totalAdded ?? 0,
         totalTransferred: 0,
         lastUpdated:
@@ -762,6 +767,7 @@ export class DashboardService {
               location: true,
               status: true,
               opening_cash_balance: true,
+              maintaining_balance: true,
             },
             orderBy: { name: 'asc' },
           }),
@@ -841,6 +847,7 @@ export class DashboardService {
         const branchListSa = branchesResult.map((branch) => ({
           ...branch,
           opening_cash_balance: Number(branch.opening_cash_balance),
+          maintaining_balance: Number(branch.maintaining_balance ?? 0),
         }));
         const branchIdsSa = branchListSa.map((b) => b.id);
         const { todayByBranch: todayMapSa, priorByBranch: priorMapSa } =
