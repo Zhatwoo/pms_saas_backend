@@ -1,4 +1,5 @@
-import { IsOptional, IsString, IsEnum, Matches } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsOptional, IsString, IsEnum, Matches, IsNumber, Min } from 'class-validator';
 import { BranchStatus, PHONE_REGEX } from './create-branch.dto';
 
 export class UpdateBranchDto {
@@ -27,4 +28,10 @@ export class UpdateBranchDto {
   @IsOptional()
   @IsEnum(BranchStatus)
   status?: BranchStatus;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  maintaining_balance?: number;
 }
