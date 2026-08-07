@@ -21,8 +21,14 @@ import {
   isDeveloper,
   getEnvironment,
 } from '../../../common/utils/authorization.util';
+import nodemailer from 'nodemailer';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
+
+interface PasswordOtpStore {
+  code: string;
+  expiresAt: number;
+}
 
 // Rows fetched via the untyped Supabase client come back as `any`; this
 // interface pins down the shape actually selected by the queries below.
@@ -38,6 +44,7 @@ interface PasswordChangeLogRow {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly passwordOtpCache = new Map<string, PasswordOtpStore>();
 
   constructor(
     private supabaseService: SupabaseService,
@@ -331,6 +338,8 @@ export class AuthService {
         avatarUrl: user.avatarUrl,
         notificationSound: user.notificationSound,
         isDeveloper: effectiveIsDeveloper,
+        onboardingCompleted: user.onboardingCompleted,
+        subscriptionPlan: { name: 'Standard Plan', maxBranches: 1 },
         environment: userEnvironment,
       },
     };
@@ -349,8 +358,77 @@ export class AuthService {
       avatarUrl: user.avatarUrl,
       notificationSound: user.notificationSound,
       isDeveloper: user.isDeveloper,
+      onboardingCompleted: user.onboardingCompleted,
+      subscriptionPlan: { name: 'Standard Plan', maxBranches: 1 },
       environment: getEnvironment(user),
     };
+  }
+
+  async completeOnboarding(
+    user: AuthenticatedUserProfile,
+    dto: { branchName: string; location: string; contactNumber: string },
+  ) {
+    if (user.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException('Only Super Admin can complete onboarding');
+    }
+
+    const branchName = dto.branchName?.trim();
+    const location = dto.location?.trim();
+    const contactNumber = dto.contactNumber?.trim();
+
+    if (!branchName) {
+      throw new BadRequestException('Branch name is required');
+    }
+    if (!location) {
+      throw new BadRequestException('Branch location is required');
+    }
+    if (!contactNumber) {
+      throw new BadRequestException('Contact number is required');
+    }
+
+    const rows = await this.prisma.branches.findMany({
+      select: { branch_code: true },
+    });
+    const usedCodes = new Set(rows.map((row) => row.branch_code));
+    let branchCode = '001';
+    for (let i = 1; i <= 9999; i++) {
+      const candidate = String(i).padStart(3, '0');
+      if (!usedCodes.has(candidate)) {
+        branchCode = candidate;
+        break;
+      }
+    }
+
+    const encryptedContact = this.encryption.encryptBranchContactNumber(contactNumber);
+
+    const branch = await this.prisma.branches.create({
+      data: {
+        name: branchName,
+        branch_code: branchCode,
+        location,
+        contact_number: encryptedContact,
+        status: 'Active',
+        ...(user.tenantId ? { tenant_id: user.tenantId } : {}),
+        created_by: user.id,
+      },
+    });
+
+    await this.prisma.users.update({
+      where: { id: user.id },
+      data: {
+        branch_id: branch.id,
+        onboarding_completed: true,
+      },
+    });
+
+    if (user.tenantId) {
+      await this.prisma.tenants.update({
+        where: { id: user.tenantId },
+        data: { onboarding_completed: true },
+      }).catch(() => {});
+    }
+
+    return await this.getProfile(user.id);
   }
 
   async verifyPassword(authId: string, email: string, password: string) {
@@ -409,6 +487,158 @@ export class AuthService {
         error.message || 'Failed to update password',
       );
     }
+
+    return { message: 'Password updated successfully' };
+  }
+
+  async requestPasswordOtp(
+    user: AuthenticatedUserProfile,
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) {
+    const trimmedCurrentPassword = currentPassword?.trim() ?? '';
+    const trimmedNewPassword = newPassword?.trim() ?? '';
+    const trimmedConfirmPassword = confirmPassword?.trim() ?? '';
+
+    if (!trimmedCurrentPassword) {
+      throw new BadRequestException('Current password is required');
+    }
+
+    if (trimmedNewPassword.length < 6) {
+      throw new BadRequestException('New password must be at least 6 characters');
+    }
+
+    if (trimmedNewPassword !== trimmedConfirmPassword) {
+      throw new BadRequestException('New password confirmation does not match');
+    }
+
+    if (trimmedCurrentPassword === trimmedNewPassword) {
+      throw new BadRequestException('New password must be different from current password');
+    }
+
+    const isCurrentPasswordValid = await this.verifyPassword(
+      user.authId,
+      user.email,
+      trimmedCurrentPassword,
+    );
+
+    if (!isCurrentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Generate 6-digit numeric OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiration
+
+    this.passwordOtpCache.set(user.email.toLowerCase(), {
+      code: otpCode,
+      expiresAt,
+    });
+
+    // Send email via Nodemailer
+    const userEmail = process.env.GMAIL_USER || 'inspirenextglobal.marketing@gmail.com';
+    const pass = process.env.GMAIL_APP_PASSWORD || 'yzzjsanvztjdrnpk';
+    const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const port = Number(process.env.SMTP_PORT || 465);
+    const secure = process.env.SMTP_SECURE !== 'false';
+    const fromName = process.env.SMTP_FROM_NAME || 'PMS SaaS';
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: {
+          user: userEmail.trim(),
+          pass: pass.replace(/\s+/g, ''),
+        },
+      });
+
+      await transporter.sendMail({
+        from: `"${fromName}" <${userEmail}>`,
+        to: user.email,
+        subject: `[${otpCode}] Password Change Verification Code - PMS SaaS`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #ffffff;">
+            <div style="text-align: center; padding-bottom: 15px; border-bottom: 2px solid #10b981;">
+              <h2 style="color: #111827; margin: 0;">Password Change Verification</h2>
+            </div>
+            <div style="padding: 20px 0; color: #374151; font-size: 14px; line-height: 1.6;">
+              <p>Hello <strong>${user.fullName || 'User'}</strong>,</p>
+              <p>We received a request to change your password for your PMS SaaS account. Use the 6-digit verification code below to complete your password change:</p>
+
+              <div style="text-align: center; margin: 25px 0;">
+                <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #059669; background-color: #ecfdf5; padding: 10px 24px; border-radius: 8px; border: 1px dashed #10b981;">
+                  ${otpCode}
+                </span>
+              </div>
+
+              <p style="font-size: 13px; color: #6b7280; text-align: center;">This code will expire in <strong>10 minutes</strong>.</p>
+              <p style="font-size: 12px; color: #9ca3af; margin-top: 20px;">If you did not request this password change, please ignore this email.</p>
+            </div>
+          </div>
+        `,
+      });
+      this.logger.log(`Sent password change OTP code to ${user.email}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to send password change OTP to ${user.email}: ${msg}`);
+      throw new InternalServerErrorException('Failed to send verification code email');
+    }
+
+    return { message: 'Verification code sent to your email.' };
+  }
+
+  async verifyPasswordOtpAndChange(
+    user: AuthenticatedUserProfile,
+    currentPassword: string,
+    newPassword: string,
+    otp: string,
+  ) {
+    const trimmedOtp = otp?.trim() ?? '';
+    const trimmedNewPassword = newPassword?.trim() ?? '';
+    const trimmedCurrentPassword = currentPassword?.trim() ?? '';
+
+    if (!trimmedOtp) {
+      throw new BadRequestException('Verification code is required');
+    }
+
+    const storedOtp = this.passwordOtpCache.get(user.email.toLowerCase());
+    if (!storedOtp || storedOtp.expiresAt < Date.now()) {
+      throw new BadRequestException('Verification code has expired or is invalid. Please request a new code.');
+    }
+
+    if (storedOtp.code !== trimmedOtp) {
+      throw new BadRequestException('Invalid verification code');
+    }
+
+    if (trimmedNewPassword.length < 6) {
+      throw new BadRequestException('New password must be at least 6 characters');
+    }
+
+    const isCurrentPasswordValid = await this.verifyPassword(
+      user.authId,
+      user.email,
+      trimmedCurrentPassword,
+    );
+
+    if (!isCurrentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const { error } = await this.supabaseService
+      .getClient()
+      .auth.admin.updateUserById(user.authId, {
+        password: trimmedNewPassword,
+      });
+
+    if (error) {
+      throw new BadRequestException(error.message || 'Failed to update password');
+    }
+
+    // Clear used OTP
+    this.passwordOtpCache.delete(user.email.toLowerCase());
 
     return { message: 'Password updated successfully' };
   }

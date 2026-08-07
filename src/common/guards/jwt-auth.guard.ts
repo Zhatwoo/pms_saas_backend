@@ -287,9 +287,15 @@ export class JwtAuthGuard implements CanActivate {
   }
 
   private throwUnauthorized(request: Request, reason: string): never {
-    this.logger.warn(
-      `${reason} for ${request.method} ${request.originalUrl ?? request.path}`,
-    );
+    if (reason === 'Missing authentication credential') {
+      this.logger.debug(
+        `${reason} for ${request.method} ${request.originalUrl ?? request.path}`,
+      );
+    } else {
+      this.logger.warn(
+        `${reason} for ${request.method} ${request.originalUrl ?? request.path}`,
+      );
+    }
     throw new UnauthorizedException(UNAUTHORIZED_RESPONSE);
   }
 }
