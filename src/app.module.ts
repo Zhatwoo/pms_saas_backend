@@ -47,6 +47,7 @@ import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { LandingChatModule } from './modules/landing-chat/landing-chat.module';
 
 @Module({
   // Triggering reload for new QR replacement routes
@@ -104,6 +105,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     TenantsModule,
     SubscriptionsModule,
     WebhooksModule,
+    LandingChatModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

@@ -16,8 +16,11 @@ import { AuthService } from '../services/auth.service';
 import { BranchesService } from '../../branches/services/branches.service';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { VerifyPasswordDto } from '../dto/verify-password.dto';
+import { CompleteOnboardingDto } from '../dto/complete-onboarding.dto';
 import { UpdateUserDto } from '../../users/dto/update-user.dto';
 import { UsersService } from '../../users/services/users.service';
 import { Public } from '../../../common/decorators';
@@ -115,6 +118,20 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_STRICT_THROTTLE)
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Throttle(AUTH_STRICT_THROTTLE)
+  @Post('reset-password')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.email, dto.otp, dto.newPassword);
+  }
+
+  @Public()
   @Post('logout')
   logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie(ACCESS_TOKEN_COOKIE, {
@@ -139,7 +156,7 @@ export class AuthController {
   @Post('complete-onboarding')
   async completeOnboarding(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() dto: { branchName: string; location: string; contactNumber: string },
+    @Body() dto: CompleteOnboardingDto,
   ) {
     return this.authService.completeOnboarding(req.user, dto);
   }
