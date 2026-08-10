@@ -6,7 +6,7 @@ import { EmailService } from '../services/email.service';
 import { ContactDto } from '../dto/contact.dto';
 
 const CONTACT_INBOX =
-  process.env.CONTACT_FORM_TO_EMAIL || 'inspirenextglobal.marketing@gmail.com';
+  process.env.CONTACT_FORM_TO_EMAIL || 'quickpawn.pms@gmail.com';
 
 function escapeHtml(value: string): string {
   return value

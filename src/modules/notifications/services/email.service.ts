@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import nodemailer from 'nodemailer';
 import { SupabaseService } from '../../../infrastructure/supabase/supabase.service';
 import type { AuthenticatedUserProfile } from '../../../infrastructure/supabase/supabase.service';
 
@@ -71,47 +72,80 @@ export class EmailService {
     subject: string,
     html: string,
   ): Promise<{ success: boolean; message: string }> {
-    if (!this.resendApiKey) {
-      return {
-        success: false,
-        message: 'Email service not configured (RESEND_API_KEY missing)',
-      };
-    }
-
-    const toEmail = this.VERIFIED_EMAIL;
-    const testNotice =
-      to !== toEmail
-        ? ` [TEST MODE] Sending to verified email. Actual recipient: ${to}`
-        : '';
+    const recipient =
+      to?.trim() ||
+      this.configService.get<string>('CONTACT_FORM_TO_EMAIL') ||
+      'quickpawn.pms@gmail.com';
+    const userEmail = (
+      this.configService.get<string>('GMAIL_USER') || 'quickpawn.pms@gmail.com'
+    ).trim();
+    const pass = (
+      this.configService.get<string>('GMAIL_APP_PASSWORD') || 'uxoewotewjmbwgvg'
+    ).replace(/\s+/g, '');
+    const host =
+      this.configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
+    const port = Number(this.configService.get<number>('SMTP_PORT') || 465);
+    const secure =
+      this.configService.get<string>('SMTP_SECURE') !== 'false';
+    const fromName =
+      this.configService.get<string>('SMTP_FROM_NAME') || 'QuickPawn PMS';
 
     try {
-      const response = await fetch(this.RESEND_API_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.resendApiKey}`,
-          'Content-Type': 'application/json',
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: {
+          user: userEmail,
+          pass,
         },
-        body: JSON.stringify({
-          from: 'JCLB Pawnshop <onboarding@resend.dev>',
-          to: toEmail,
-          subject,
-          html,
-        }),
       });
 
-      if (!response.ok) {
-        const error: unknown = await response.json();
-        this.logger.error(`Resend API error for ${toEmail}:`, error);
-        return { success: false, message: 'Failed to send email' };
+      await transporter.sendMail({
+        from: `"${fromName}" <${userEmail}>`,
+        to: recipient,
+        subject,
+        html,
+      });
+
+      this.logger.log(`✓ Email sent successfully via Nodemailer to ${recipient}`);
+      return { success: true, message: 'Email sent successfully' };
+    } catch (smtpError) {
+      const smtpMsg =
+        smtpError instanceof Error ? smtpError.message : String(smtpError);
+      this.logger.warn(
+        `Nodemailer send failed to ${recipient}: ${smtpMsg}. Trying Resend fallback...`,
+      );
+
+      if (this.resendApiKey) {
+        try {
+          const response = await fetch(this.RESEND_API_URL, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.resendApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: `${fromName} <onboarding@resend.dev>`,
+              to: recipient,
+              subject,
+              html,
+            }),
+          });
+
+          if (response.ok) {
+            this.logger.log(`✓ Email sent successfully via Resend to ${recipient}`);
+            return { success: true, message: 'Email sent successfully' };
+          }
+        } catch (resendError) {
+          this.logger.error(
+            `Resend fallback failed for ${recipient}:`,
+            resendError,
+          );
+        }
       }
 
-      this.logger.log(`✓ Email sent to ${toEmail}.${testNotice}`);
-      return { success: true, message: 'Email sent' };
-    } catch (error) {
-      this.logger.error(
-        `Email sending error for ${to}:`,
-        error instanceof Error ? error.message : 'Unknown error',
-      );
+      this.logger.error(`Failed to send email to ${recipient}: ${smtpMsg}`);
       return { success: false, message: 'Failed to send email' };
     }
   }
@@ -326,7 +360,7 @@ export class EmailService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: 'JCLB Pawnshop <onboarding@resend.dev>',
+          from: 'QuickPawn Pawnshop <onboarding@resend.dev>',
           to: toEmail,
           subject: `[TEST] ${categoryLabels[category]} - ${customer.customerName} (${customer.email})`,
           html,
@@ -395,7 +429,7 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1 style="margin: 0;">JCLB Buy Back Shop</h1>
+              <h1 style="margin: 0;">QuickPawn Pawnshop</h1>
               <p style="margin: 5px 0 0 0;">Pawnshop Management System</p>
             </div>
             
@@ -425,23 +459,23 @@ export class EmailService {
               <p><strong>What you can do:</strong></p>
               <ul>
                 <li>Renew your items to extend the expiration date</li>
-                <li>Buy back your items to take them back</li>
+                <li>Redeem your items to take them back</li>
                 <li>Contact us if you need assistance</li>
               </ul>
 
               <center>
-                <a href="https://pms.jclbbuyback.com/pawn-ticket" class="button">View Your Items</a>
+                <a href="https://quickpawn.ph/pawn-ticket" class="button">View Your Items</a>
               </center>
 
               <p style="margin-top: 30px; font-size: 14px; color: #6b7280;">
                 Best regards,<br>
-                <strong>JCLB Buy Back Shop Management Team</strong>
+                <strong>QuickPawn Pawnshop Management Team</strong>
               </p>
             </div>
 
             <div class="footer">
               <p>This is an automated message. Please do not reply to this email.</p>
-              <p>&copy; 2026 JCLB Buy Back Shop. All rights reserved.</p>
+              <p>&copy; 2026 QuickPawn Pawnshop. All rights reserved.</p>
             </div>
           </div>
         </body>
