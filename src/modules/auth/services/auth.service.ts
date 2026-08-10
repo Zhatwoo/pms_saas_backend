@@ -45,6 +45,7 @@ interface PasswordChangeLogRow {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly passwordOtpCache = new Map<string, PasswordOtpStore>();
+  private readonly forgotPasswordOtpCache = new Map<string, PasswordOtpStore>();
 
   constructor(
     private supabaseService: SupabaseService,
@@ -1000,5 +1001,133 @@ export class AuthService {
       status: nextStatus,
       requiresPasswordResubmission: true,
     };
+  }
+
+  async forgotPassword(email: string) {
+    const trimmedEmail = email?.trim().toLowerCase();
+    if (!trimmedEmail) {
+      throw new BadRequestException('Email address is required');
+    }
+
+    const user = await this.prisma.users.findFirst({
+      where: { email: trimmedEmail },
+      select: { id: true, auth_id: true, email: true, full_name: true },
+    });
+
+    if (!user) {
+      return { message: 'If an account exists with this email, a verification code has been sent.' };
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+
+    this.forgotPasswordOtpCache.set(trimmedEmail, {
+      code: otpCode,
+      expiresAt,
+    });
+
+    const userEmail = process.env.GMAIL_USER || 'inspirenextglobal.marketing@gmail.com';
+    const pass = process.env.GMAIL_APP_PASSWORD || 'yzzjsanvztjdrnpk';
+    const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const port = Number(process.env.SMTP_PORT || 465);
+    const secure = process.env.SMTP_SECURE !== 'false';
+    const fromName = process.env.SMTP_FROM_NAME || 'QuickPawn';
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: {
+          user: userEmail.trim(),
+          pass: pass.replace(/\s+/g, ''),
+        },
+      });
+
+      let decryptedName = 'User';
+      if (user.full_name) {
+        try {
+          decryptedName = this.encryption.decryptUserFullName(user.full_name) || 'User';
+        } catch {
+          decryptedName = 'User';
+        }
+      }
+
+      await transporter.sendMail({
+        from: `"${fromName}" <${userEmail}>`,
+        to: user.email,
+        subject: `[${otpCode}] Password Reset Verification Code - QuickPawn`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+            <div style="text-align: center; padding-bottom: 16px; border-bottom: 2px solid #059669;">
+              <h2 style="color: #059669; margin: 0; font-size: 22px;">QuickPawn Password Reset</h2>
+            </div>
+            <div style="padding: 20px 0; color: #374151; font-size: 14px; line-height: 1.6;">
+              <p>Hello <strong>${decryptedName}</strong>,</p>
+              <p>We received a request to reset your password for your QuickPawn account. Use the 6-digit verification code below to reset your password:</p>
+
+              <div style="text-align: center; margin: 25px 0;">
+                <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #059669; background-color: #ecfdf5; padding: 12px 28px; border-radius: 8px; border: 1px dashed #10b981;">
+                  ${otpCode}
+                </span>
+              </div>
+
+              <p style="font-size: 13px; color: #6b7280; text-align: center;">This code will expire in <strong>10 minutes</strong>.</p>
+              <p style="font-size: 12px; color: #9ca3af; margin-top: 20px; text-align: center;">If you did not request a password reset, you can safely ignore this email.</p>
+            </div>
+          </div>
+        `,
+      });
+      this.logger.log(`Sent password reset OTP code to ${user.email}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to send password reset OTP to ${user.email}: ${msg}`);
+      throw new InternalServerErrorException('Failed to send verification code email');
+    }
+
+    return { message: 'Verification code sent to your email.' };
+  }
+
+  async resetPassword(email: string, otp: string, newPassword: string) {
+    const trimmedEmail = email?.trim().toLowerCase();
+    const trimmedOtp = otp?.trim();
+    const trimmedPassword = newPassword?.trim();
+
+    if (!trimmedEmail || !trimmedOtp || !trimmedPassword) {
+      throw new BadRequestException('Email, OTP, and new password are required');
+    }
+
+    if (trimmedPassword.length < 6) {
+      throw new BadRequestException('New password must be at least 6 characters');
+    }
+
+    const storedOtp = this.forgotPasswordOtpCache.get(trimmedEmail);
+    if (!storedOtp || storedOtp.code !== trimmedOtp || Date.now() > storedOtp.expiresAt) {
+      throw new BadRequestException('Invalid or expired verification code');
+    }
+
+    const user = await this.prisma.users.findFirst({
+      where: { email: trimmedEmail },
+      select: { id: true, auth_id: true, email: true },
+    });
+
+    if (!user || !user.auth_id) {
+      throw new NotFoundException('User account not found');
+    }
+
+    const client = this.supabaseService.getClient();
+    const { error } = await client.auth.admin.updateUserById(user.auth_id, {
+      password: trimmedPassword,
+    });
+
+    if (error) {
+      this.logger.error(`Failed to update password in Supabase for ${trimmedEmail}: ${error.message}`);
+      throw new BadRequestException(error.message || 'Failed to update password in Supabase');
+    }
+
+    this.forgotPasswordOtpCache.delete(trimmedEmail);
+    this.logger.log(`Successfully reset password via Supabase Auth for ${trimmedEmail}`);
+
+    return { success: true, message: 'Password reset successfully. You can now log in with your new password.' };
   }
 }

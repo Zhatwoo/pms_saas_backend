@@ -16,6 +16,8 @@ import { AuthService } from '../services/auth.service';
 import { BranchesService } from '../../branches/services/branches.service';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { VerifyPasswordDto } from '../dto/verify-password.dto';
 import { UpdateUserDto } from '../../users/dto/update-user.dto';
@@ -112,6 +114,20 @@ export class AuthController {
     res.cookie(WAS_LOGGED_IN_COOKIE, '1', rememberedCookieOptions());
 
     return { user: session.user };
+  }
+
+  @Public()
+  @Throttle(AUTH_STRICT_THROTTLE)
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Throttle(AUTH_STRICT_THROTTLE)
+  @Post('reset-password')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.email, dto.otp, dto.newPassword);
   }
 
   @Public()
