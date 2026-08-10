@@ -18,6 +18,7 @@ import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { VerifyPasswordDto } from '../dto/verify-password.dto';
+import { CompleteOnboardingDto } from '../dto/complete-onboarding.dto';
 import { UpdateUserDto } from '../../users/dto/update-user.dto';
 import { UsersService } from '../../users/services/users.service';
 import { Public } from '../../../common/decorators';
@@ -139,7 +140,7 @@ export class AuthController {
   @Post('complete-onboarding')
   async completeOnboarding(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() dto: { branchName: string; location: string; contactNumber: string },
+    @Body() dto: CompleteOnboardingDto,
   ) {
     return this.authService.completeOnboarding(req.user, dto);
   }

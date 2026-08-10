@@ -366,7 +366,7 @@ export class AuthService {
 
   async completeOnboarding(
     user: AuthenticatedUserProfile,
-    dto: { branchName: string; location: string; contactNumber: string },
+    dto: { branchName: string; location: string; contactNumber: string; contactType?: string },
   ) {
     if (user.role !== Role.SUPER_ADMIN) {
       throw new ForbiddenException('Only Super Admin can complete onboarding');
@@ -375,6 +375,7 @@ export class AuthService {
     const branchName = dto.branchName?.trim();
     const location = dto.location?.trim();
     const contactNumber = dto.contactNumber?.trim();
+    const contactType = dto.contactType?.trim().toLowerCase() || 'mobile';
 
     if (!branchName) {
       throw new BadRequestException('Branch name is required');
@@ -386,7 +387,33 @@ export class AuthService {
       throw new BadRequestException('Contact number is required');
     }
 
+    const digitsOnly = contactNumber.replace(/\D/g, '');
+    if (contactType === 'mobile') {
+      if (!/^09\d{9}$/.test(digitsOnly)) {
+        throw new BadRequestException(
+          'Mobile number must be exactly 11 digits starting with 09 (e.g. 09XXXXXXXXX)',
+        );
+      }
+    } else if (contactType === 'telephone') {
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        throw new BadRequestException(
+          'Telephone number must be between 7 and 15 digits',
+        );
+      }
+    }
+
+    // Resolve tenantId if not already present on user profile object
+    let tenantId = user.tenantId ?? null;
+    if (!tenantId) {
+      const dbUser = await this.prisma.users.findUnique({
+        where: { id: user.id },
+        select: { tenant_id: true },
+      });
+      tenantId = dbUser?.tenant_id ?? null;
+    }
+
     const rows = await this.prisma.branches.findMany({
+      where: tenantId ? { tenant_id: tenantId } : {},
       select: { branch_code: true },
     });
     const usedCodes = new Set(rows.map((row) => row.branch_code));
@@ -408,7 +435,7 @@ export class AuthService {
         location,
         contact_number: encryptedContact,
         status: 'Active',
-        ...(user.tenantId ? { tenant_id: user.tenantId } : {}),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
         created_by: user.id,
       },
     });
@@ -421,11 +448,13 @@ export class AuthService {
       },
     });
 
-    if (user.tenantId) {
-      await this.prisma.tenants.update({
-        where: { id: user.tenantId },
-        data: { onboarding_completed: true },
-      }).catch(() => {});
+    if (tenantId) {
+      await this.prisma.tenants
+        .update({
+          where: { id: tenantId },
+          data: { onboarding_completed: true },
+        })
+        .catch(() => {});
     }
 
     return await this.getProfile(user.id);
