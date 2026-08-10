@@ -26,6 +26,7 @@ type UserRow = {
   avatar_url: string | null;
   account_status: string | null;
   is_developer: boolean | null;
+  tenant_id?: string | null;
   branches?: { name: string } | null;
 };
 
@@ -39,6 +40,7 @@ type RequestUser = {
   branchName: string | null;
   avatarUrl: string | null;
   isDeveloper: boolean;
+  tenantId?: string | null;
 };
 
 type AuthenticatedRequest = Request & { user?: RequestUser };
@@ -115,6 +117,7 @@ export class JwtAuthGuard implements CanActivate {
         avatar_url: true,
         account_status: true,
         is_developer: true,
+        tenant_id: true,
         branches: { select: { name: true } },
       },
     });
@@ -283,6 +286,7 @@ export class JwtAuthGuard implements CanActivate {
       isDeveloper:
         Boolean(user.is_developer) ||
         user.email.trim().toLowerCase().endsWith('@dev.com'),
+      tenantId: user.tenant_id ?? null,
     };
   }
 
