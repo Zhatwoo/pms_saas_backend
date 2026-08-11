@@ -7,6 +7,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { QUICKPAWN_LANDING_ASSISTANT_PROMPT } from '../prompts/quickpawn-assistant.prompt';
 import type { LandingChatHistoryMessageDto } from '../dto/landing-chat.dto';
+import {
+  detectReplyLanguage,
+  replyLanguageInstruction,
+} from '../utils/detect-reply-language';
 
 type GroqChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -42,6 +46,7 @@ export class LandingChatService {
       'llama-3.3-70b-versatile';
 
     const trimmedMessage = message.trim();
+    const replyLanguage = detectReplyLanguage(trimmedMessage);
     const safeHistory = history
       .filter(
         (entry) =>
@@ -58,7 +63,10 @@ export class LandingChatService {
       );
 
     const messages: GroqChatMessage[] = [
-      { role: 'system', content: QUICKPAWN_LANDING_ASSISTANT_PROMPT },
+      {
+        role: 'system',
+        content: `${QUICKPAWN_LANDING_ASSISTANT_PROMPT}\n\n${replyLanguageInstruction(replyLanguage)}`,
+      },
       ...safeHistory,
       { role: 'user', content: trimmedMessage },
     ];
