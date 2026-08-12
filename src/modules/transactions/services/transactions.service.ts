@@ -134,6 +134,7 @@ const LINKED_PAWNED_ITEM_SELECT = {
   amount: true,
   branch_id: true,
   status: true,
+  customer_id: true,
 } satisfies Prisma.pawned_itemsSelect;
 
 type LinkedPawnedItem = Prisma.pawned_itemsGetPayload<{
@@ -755,12 +756,39 @@ export class TransactionsService implements OnModuleInit {
 
         if (!linkedPawnedItem) {
           throw new BadRequestException(
-            `${purpose} requires a valid pawned item reference.`,
+            'Buy Back requires a valid expired pawn item from a pawn transaction.',
+          );
+        }
+
+        if (!linkedPawnedItem.customer_id) {
+          throw new BadRequestException(
+            'Buy Back requires an original pawner on the pawn record.',
           );
         }
 
         if (linkedPawnedItem.status === 'Redeemed') {
           throw new BadRequestException('Pawned item is already redeemed.');
+        }
+
+        if (linkedPawnedItem.status !== 'Expired') {
+          throw new BadRequestException(
+            'Buy Back is only allowed for expired pawn items.',
+          );
+        }
+
+        const soldSaleItem = await tx.sale_items.findFirst({
+          where: applyEnvironmentFilter(user, {
+            original_pawn_id: linkedPawnedItem.id,
+            status: 'Sold',
+            ...(branchId ? { branch_id: branchId } : {}),
+          }),
+          select: { id: true },
+        });
+
+        if (soldSaleItem) {
+          throw new BadRequestException(
+            'This item has already been sold and is not eligible for buy back.',
+          );
         }
 
         const principal = Number(

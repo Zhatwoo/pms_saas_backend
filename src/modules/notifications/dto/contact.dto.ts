@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class ContactDto {
   @IsString()
@@ -9,8 +9,20 @@ export class ContactDto {
   @IsEmail()
   email: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(1)
+  preferredDate?: string;
+
+  @IsOptional()
+  @IsString()
+  preferredTime?: string;
+
+  @IsOptional()
+  @IsString()
+  meetingPlatform?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(4000)
-  message: string;
+  message?: string;
 }
