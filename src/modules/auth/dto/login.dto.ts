@@ -1,4 +1,10 @@
-import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -12,4 +18,9 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   deviceFingerprint?: string;
+
+  /** Persist the "was logged in" cookie across browser restarts. */
+  @IsOptional()
+  @IsBoolean()
+  rememberMe?: boolean;
 }

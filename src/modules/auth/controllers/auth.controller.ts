@@ -112,7 +112,15 @@ export class AuthController {
       session.access_token,
       accessCookieOptions(session.expires_in),
     );
-    res.cookie(WAS_LOGGED_IN_COOKIE, '1', rememberedCookieOptions());
+    if (loginDto.rememberMe) {
+      res.cookie(WAS_LOGGED_IN_COOKIE, '1', rememberedCookieOptions());
+    } else {
+      res.clearCookie(WAS_LOGGED_IN_COOKIE, {
+        path: '/',
+        secure: authCookieSecure(),
+        sameSite: 'lax',
+      });
+    }
 
     return { user: session.user };
   }

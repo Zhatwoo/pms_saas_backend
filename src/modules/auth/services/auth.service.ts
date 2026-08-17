@@ -567,12 +567,17 @@ export class AuthService {
     });
 
     // Send email via Nodemailer
-    const userEmail = process.env.GMAIL_USER || 'inspirenextglobal.marketing@gmail.com';
-    const pass = process.env.GMAIL_APP_PASSWORD || 'yzzjsanvztjdrnpk';
+    const userEmail = (process.env.GMAIL_USER || '').trim();
+    const pass = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT || 465);
     const secure = process.env.SMTP_SECURE !== 'false';
-    const fromName = process.env.SMTP_FROM_NAME || 'PMS SaaS';
+    const fromName = process.env.SMTP_FROM_NAME || 'QuickPawn';
+
+    if (!userEmail || !pass) {
+      this.logger.error('Email credentials not configured (GMAIL_USER or GMAIL_APP_PASSWORD missing)');
+      throw new InternalServerErrorException('Email service is not configured');
+    }
 
     try {
       const transporter = nodemailer.createTransport({
@@ -580,8 +585,8 @@ export class AuthService {
         port,
         secure,
         auth: {
-          user: userEmail.trim(),
-          pass: pass.replace(/\s+/g, ''),
+          user: userEmail,
+          pass,
         },
       });
 
@@ -1055,12 +1060,17 @@ export class AuthService {
       expiresAt,
     });
 
-    const userEmail = process.env.GMAIL_USER || 'quickpawn.pms@gmail.com';
-    const pass = process.env.GMAIL_APP_PASSWORD || '';
+    const userEmail = (process.env.GMAIL_USER || '').trim();
+    const pass = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT || 465);
     const secure = process.env.SMTP_SECURE !== 'false';
     const fromName = process.env.SMTP_FROM_NAME || 'QuickPawn';
+
+    if (!userEmail || !pass) {
+      this.logger.error('Email credentials not configured (GMAIL_USER or GMAIL_APP_PASSWORD missing)');
+      throw new InternalServerErrorException('Email service is not configured');
+    }
 
     try {
       const transporter = nodemailer.createTransport({
@@ -1068,8 +1078,8 @@ export class AuthService {
         port,
         secure,
         auth: {
-          user: userEmail.trim(),
-          pass: pass.replace(/\s+/g, ''),
+          user: userEmail,
+          pass,
         },
       });
 
