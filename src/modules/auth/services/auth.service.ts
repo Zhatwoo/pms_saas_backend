@@ -1039,7 +1039,7 @@ export class AuthService {
     }
 
     const user = await this.prisma.users.findFirst({
-      where: { email: trimmedEmail },
+      where: { email: { equals: trimmedEmail, mode: 'insensitive' } },
       select: { id: true, auth_id: true, email: true, full_name: true },
     });
 
@@ -1055,8 +1055,8 @@ export class AuthService {
       expiresAt,
     });
 
-    const userEmail = process.env.GMAIL_USER || 'inspirenextglobal.marketing@gmail.com';
-    const pass = process.env.GMAIL_APP_PASSWORD || 'yzzjsanvztjdrnpk';
+    const userEmail = process.env.GMAIL_USER || 'quickpawn.pms@gmail.com';
+    const pass = process.env.GMAIL_APP_PASSWORD || '';
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT || 465);
     const secure = process.env.SMTP_SECURE !== 'false';
