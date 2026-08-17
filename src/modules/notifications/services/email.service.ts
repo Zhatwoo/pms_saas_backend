@@ -52,7 +52,10 @@ export class EmailService {
   private logger = new Logger('EmailService');
   private resendApiKey: string;
   private readonly RESEND_API_URL = 'https://api.resend.com/emails';
-  private readonly VERIFIED_EMAIL = 'ndelatorre08252002@gmail.com';
+  private readonly VERIFIED_EMAIL =
+    process.env.RESEND_VERIFIED_EMAIL ||
+    process.env.GMAIL_USER ||
+    'inquire.quickpawn.pms@gmail.com';
 
   constructor(
     private supabase: SupabaseService,
@@ -62,7 +65,7 @@ export class EmailService {
   }
 
   /**
-   * Sends a single plain email via Resend. Reuses the same sandbox override
+   * Sends a single plain email via Resend / Nodemailer. Reuses the same sandbox override
    * as sendExpirationBlast: while RESEND_API_KEY is on a non-verified Resend
    * domain, Resend only accepts sends to VERIFIED_EMAIL, so all mail is
    * redirected there regardless of `to` until the sending domain is verified.
@@ -75,12 +78,13 @@ export class EmailService {
     const recipient =
       to?.trim() ||
       this.configService.get<string>('CONTACT_FORM_TO_EMAIL') ||
-      'quickpawn.pms@gmail.com';
+      this.configService.get<string>('GMAIL_USER') ||
+      'inquire.quickpawn.pms@gmail.com';
     const userEmail = (
-      this.configService.get<string>('GMAIL_USER') || 'quickpawn.pms@gmail.com'
+      this.configService.get<string>('GMAIL_USER') || ''
     ).trim();
     const pass = (
-      this.configService.get<string>('GMAIL_APP_PASSWORD') || 'uxoewotewjmbwgvg'
+      this.configService.get<string>('GMAIL_APP_PASSWORD') || ''
     ).replace(/\s+/g, '');
     const host =
       this.configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
@@ -91,6 +95,10 @@ export class EmailService {
       this.configService.get<string>('SMTP_FROM_NAME') || 'QuickPawn PMS';
 
     try {
+      if (!userEmail || !pass) {
+        throw new Error('Nodemailer credentials (GMAIL_USER or GMAIL_APP_PASSWORD) not configured');
+      }
+
       const transporter = nodemailer.createTransport({
         host,
         port,
