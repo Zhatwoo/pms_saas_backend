@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsOptional, IsBoolean } from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -12,4 +12,9 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   deviceFingerprint?: string;
+
+  /** Whether the user wants to stay logged in longer. */
+  @IsOptional()
+  @IsBoolean()
+  rememberMe?: boolean;
 }
