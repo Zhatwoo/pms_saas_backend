@@ -367,7 +367,12 @@ export class AuthService {
 
   async completeOnboarding(
     user: AuthenticatedUserProfile,
-    dto: { branchName: string; location: string; contactNumber: string; contactType?: string },
+    dto: {
+      branchName: string;
+      location: string;
+      contactNumber: string;
+      contactType?: string;
+    },
   ) {
     if (user.role !== Role.SUPER_ADMIN) {
       throw new ForbiddenException('Only Super Admin can complete onboarding');
@@ -427,7 +432,8 @@ export class AuthService {
       }
     }
 
-    const encryptedContact = this.encryption.encryptBranchContactNumber(contactNumber);
+    const encryptedContact =
+      this.encryption.encryptBranchContactNumber(contactNumber);
 
     const branch = await this.prisma.branches.create({
       data: {
@@ -536,7 +542,9 @@ export class AuthService {
     }
 
     if (trimmedNewPassword.length < 6) {
-      throw new BadRequestException('New password must be at least 6 characters');
+      throw new BadRequestException(
+        'New password must be at least 6 characters',
+      );
     }
 
     if (trimmedNewPassword !== trimmedConfirmPassword) {
@@ -544,7 +552,9 @@ export class AuthService {
     }
 
     if (trimmedCurrentPassword === trimmedNewPassword) {
-      throw new BadRequestException('New password must be different from current password');
+      throw new BadRequestException(
+        'New password must be different from current password',
+      );
     }
 
     const isCurrentPasswordValid = await this.verifyPassword(
@@ -567,7 +577,8 @@ export class AuthService {
     });
 
     // Send email via Nodemailer
-    const userEmail = process.env.GMAIL_USER || 'inspirenextglobal.marketing@gmail.com';
+    const userEmail =
+      process.env.GMAIL_USER || 'inspirenextglobal.marketing@gmail.com';
     const pass = process.env.GMAIL_APP_PASSWORD || 'yzzjsanvztjdrnpk';
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT || 465);
@@ -613,8 +624,12 @@ export class AuthService {
       this.logger.log(`Sent password change OTP code to ${user.email}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Failed to send password change OTP to ${user.email}: ${msg}`);
-      throw new InternalServerErrorException('Failed to send verification code email');
+      this.logger.error(
+        `Failed to send password change OTP to ${user.email}: ${msg}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to send verification code email',
+      );
     }
 
     return { message: 'Verification code sent to your email.' };
@@ -636,7 +651,9 @@ export class AuthService {
 
     const storedOtp = this.passwordOtpCache.get(user.email.toLowerCase());
     if (!storedOtp || storedOtp.expiresAt < Date.now()) {
-      throw new BadRequestException('Verification code has expired or is invalid. Please request a new code.');
+      throw new BadRequestException(
+        'Verification code has expired or is invalid. Please request a new code.',
+      );
     }
 
     if (storedOtp.code !== trimmedOtp) {
@@ -644,7 +661,9 @@ export class AuthService {
     }
 
     if (trimmedNewPassword.length < 6) {
-      throw new BadRequestException('New password must be at least 6 characters');
+      throw new BadRequestException(
+        'New password must be at least 6 characters',
+      );
     }
 
     const isCurrentPasswordValid = await this.verifyPassword(
@@ -664,7 +683,9 @@ export class AuthService {
       });
 
     if (error) {
-      throw new BadRequestException(error.message || 'Failed to update password');
+      throw new BadRequestException(
+        error.message || 'Failed to update password',
+      );
     }
 
     // Clear used OTP
@@ -1044,7 +1065,10 @@ export class AuthService {
     });
 
     if (!user) {
-      return { message: 'If an account exists with this email, a verification code has been sent.' };
+      return {
+        message:
+          'If an account exists with this email, a verification code has been sent.',
+      };
     }
 
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -1076,7 +1100,8 @@ export class AuthService {
       let decryptedName = 'User';
       if (user.full_name) {
         try {
-          decryptedName = this.encryption.decryptUserFullName(user.full_name) || 'User';
+          decryptedName =
+            this.encryption.decryptUserFullName(user.full_name) || 'User';
         } catch {
           decryptedName = 'User';
         }
@@ -1110,8 +1135,12 @@ export class AuthService {
       this.logger.log(`Sent password reset OTP code to ${user.email}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Failed to send password reset OTP to ${user.email}: ${msg}`);
-      throw new InternalServerErrorException('Failed to send verification code email');
+      this.logger.error(
+        `Failed to send password reset OTP to ${user.email}: ${msg}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to send verification code email',
+      );
     }
 
     return { message: 'Verification code sent to your email.' };
@@ -1123,15 +1152,23 @@ export class AuthService {
     const trimmedPassword = newPassword?.trim();
 
     if (!trimmedEmail || !trimmedOtp || !trimmedPassword) {
-      throw new BadRequestException('Email, OTP, and new password are required');
+      throw new BadRequestException(
+        'Email, OTP, and new password are required',
+      );
     }
 
     if (trimmedPassword.length < 6) {
-      throw new BadRequestException('New password must be at least 6 characters');
+      throw new BadRequestException(
+        'New password must be at least 6 characters',
+      );
     }
 
     const storedOtp = this.forgotPasswordOtpCache.get(trimmedEmail);
-    if (!storedOtp || storedOtp.code !== trimmedOtp || Date.now() > storedOtp.expiresAt) {
+    if (
+      !storedOtp ||
+      storedOtp.code !== trimmedOtp ||
+      Date.now() > storedOtp.expiresAt
+    ) {
       throw new BadRequestException('Invalid or expired verification code');
     }
 
@@ -1150,13 +1187,23 @@ export class AuthService {
     });
 
     if (error) {
-      this.logger.error(`Failed to update password in Supabase for ${trimmedEmail}: ${error.message}`);
-      throw new BadRequestException(error.message || 'Failed to update password in Supabase');
+      this.logger.error(
+        `Failed to update password in Supabase for ${trimmedEmail}: ${error.message}`,
+      );
+      throw new BadRequestException(
+        error.message || 'Failed to update password in Supabase',
+      );
     }
 
     this.forgotPasswordOtpCache.delete(trimmedEmail);
-    this.logger.log(`Successfully reset password via Supabase Auth for ${trimmedEmail}`);
+    this.logger.log(
+      `Successfully reset password via Supabase Auth for ${trimmedEmail}`,
+    );
 
-    return { success: true, message: 'Password reset successfully. You can now log in with your new password.' };
+    return {
+      success: true,
+      message:
+        'Password reset successfully. You can now log in with your new password.',
+    };
   }
 }
