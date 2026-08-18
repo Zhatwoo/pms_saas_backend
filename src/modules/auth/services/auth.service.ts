@@ -578,8 +578,8 @@ export class AuthService {
 
     // Send email via Nodemailer
     const userEmail =
-      process.env.GMAIL_USER || 'inspirenextglobal.marketing@gmail.com';
-    const pass = process.env.GMAIL_APP_PASSWORD || 'yzzjsanvztjdrnpk';
+      (process.env.GMAIL_USER || '').trim();
+    const pass = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT || 465);
     const secure = process.env.SMTP_SECURE !== 'false';
