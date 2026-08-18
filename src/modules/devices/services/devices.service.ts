@@ -528,21 +528,22 @@ export class DevicesService {
         return;
       }
 
-      // Build notification message
+      const employeeDec = this.decryptUserJoin(employee);
+      const requesterName = employeeDec?.full_name?.trim() || 'Unknown User';
+      const requesterEmail = employeeDec?.email?.trim() || 'Unknown Email';
+
+      // Keep the bell overview concise; fingerprint and other audit details stay in audit logs.
       const messageParts = [
-        `Device: ${deviceName} (${deviceType})`,
-        `Requested by: ${employee.full_name} (${employee.email})`,
+        `Device: ${deviceName}`,
+        `Email: ${requesterEmail}`,
+        `IP Address: ${ipAddress?.trim() || 'Unknown'}`,
       ];
 
-      if (ipAddress) {
-        messageParts.push(`IP Address: ${ipAddress}`);
-      }
-
-      const message = messageParts.join('\n');
+      const message = messageParts.join(' · ');
 
       // Create notification payload
       const payload: NotificationCreateInput = {
-        title: `Device Authorization Request from ${employee.full_name}`,
+        title: `Device Authorization Request from ${requesterName}`,
         message,
         category: 'Requests',
         entity_type: 'system',

@@ -148,9 +148,13 @@ export class JwtAuthGuard implements CanActivate {
 
     return (
       (method === 'POST' &&
-        ['/auth/login', '/auth/register', '/auth/logout'].includes(
-          normalizedPath,
-        )) ||
+        [
+          '/auth/login',
+          '/auth/register',
+          '/auth/logout',
+          '/auth/forgot-password',
+          '/auth/reset-password',
+        ].includes(normalizedPath)) ||
       (method === 'GET' && normalizedPath === '/auth/signup/branches') ||
       (method === 'POST' && normalizedPath === '/devices/request-authorization')
     );
