@@ -185,7 +185,12 @@ export class AuthController {
   @Post('request-password-otp')
   async requestPasswordOtp(
     @Req() req: { user: AuthenticatedUserProfile },
-    @Body() dto: { currentPassword: string; newPassword: string; confirmPassword: string },
+    @Body()
+    dto: {
+      currentPassword: string;
+      newPassword: string;
+      confirmPassword: string;
+    },
   ) {
     return this.authService.requestPasswordOtp(
       req.user,

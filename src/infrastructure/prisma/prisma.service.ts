@@ -54,12 +54,17 @@ function withTenantScope() {
           // where clauses, to enforce tenant isolation.
           if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
             args.where = { ...args.where, tenant_id: tenantId };
-            return (this as any)[operation === 'findUnique' ? 'findFirst' : 'findFirstOrThrow'](args);
+            return this[
+              operation === 'findUnique' ? 'findFirst' : 'findFirstOrThrow'
+            ](args);
           }
 
           if (CREATE_OPERATIONS.includes(operation)) {
             if (operation === 'createMany' && Array.isArray(args.data)) {
-              args.data = args.data.map((d: any) => ({ ...d, tenant_id: tenantId }));
+              args.data = args.data.map((d: any) => ({
+                ...d,
+                tenant_id: tenantId,
+              }));
             } else {
               args.data = { ...args.data, tenant_id: tenantId };
             }
@@ -139,7 +144,10 @@ export class PrismaService
               const isCreate = ['create', 'createMany'].includes(operation);
               if (isCreate && a.data) {
                 if (operation === 'createMany' && Array.isArray(a.data)) {
-                  a.data = a.data.map((d: any) => ({ ...d, tenant_id: tenantId }));
+                  a.data = a.data.map((d: any) => ({
+                    ...d,
+                    tenant_id: tenantId,
+                  }));
                 } else {
                   a.data = { ...a.data, tenant_id: tenantId };
                 }

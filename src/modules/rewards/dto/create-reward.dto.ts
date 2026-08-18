@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsBoolean,
   Min,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -42,4 +43,12 @@ export class CreateRewardDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  promo_start_at?: string;
+
+  @IsOptional()
+  @IsDateString()
+  promo_end_at?: string;
 }

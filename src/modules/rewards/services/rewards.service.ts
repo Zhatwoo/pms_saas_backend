@@ -16,6 +16,28 @@ import {
 } from '../../../common/utils/authorization.util';
 import { CreateRewardDto } from '../dto/create-reward.dto';
 import { UpdateRewardDto } from '../dto/update-reward.dto';
+import {
+  assertValidPromoWindow,
+  isRewardWithinPromoPeriod,
+  parsePromoDateInput,
+  parsePromoEndDateInput,
+} from '../utils/reward-promo.util';
+
+function resolvePromoDates(dto: {
+  promo_start_at?: string;
+  promo_end_at?: string;
+}) {
+  try {
+    const promoStartAt = parsePromoDateInput(dto.promo_start_at);
+    const promoEndAt = parsePromoEndDateInput(dto.promo_end_at);
+    assertValidPromoWindow(promoStartAt, promoEndAt);
+    return { promoStartAt, promoEndAt };
+  } catch (err) {
+    throw new BadRequestException(
+      err instanceof Error ? err.message : 'Invalid promo duration.',
+    );
+  }
+}
 
 @Injectable()
 export class RewardsService {
@@ -26,6 +48,8 @@ export class RewardsService {
   /* ───────────────────────── Reward Rules CRUD ───────────────────────── */
 
   async createReward(user: UserWithBranch, dto: CreateRewardDto) {
+    const { promoStartAt, promoEndAt } = resolvePromoDates(dto);
+
     return this.prisma.rewards.create({
       data: {
         name: dto.name.trim(),
@@ -36,6 +60,8 @@ export class RewardsService {
         required_total_amount: dto.required_total_amount ?? 0,
         transaction_type: dto.transaction_type?.trim() || null,
         is_active: dto.is_active ?? true,
+        promo_start_at: promoStartAt,
+        promo_end_at: promoEndAt,
         ...environmentCreateFields(user),
       },
     });
@@ -46,6 +72,23 @@ export class RewardsService {
       where: applyEnvironmentFilter(user, { id }),
     });
     if (!existing) throw new NotFoundException('Reward not found');
+
+    const promoStartAt =
+      dto.promo_start_at !== undefined
+        ? parsePromoDateInput(dto.promo_start_at)
+        : existing.promo_start_at;
+    const promoEndAt =
+      dto.promo_end_at !== undefined
+        ? parsePromoEndDateInput(dto.promo_end_at)
+        : existing.promo_end_at;
+
+    try {
+      assertValidPromoWindow(promoStartAt, promoEndAt);
+    } catch (err) {
+      throw new BadRequestException(
+        err instanceof Error ? err.message : 'Invalid promo duration.',
+      );
+    }
 
     return this.prisma.rewards.update({
       where: { id },
@@ -70,6 +113,10 @@ export class RewardsService {
           transaction_type: dto.transaction_type?.trim() || null,
         }),
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
+        ...(dto.promo_start_at !== undefined && {
+          promo_start_at: promoStartAt,
+        }),
+        ...(dto.promo_end_at !== undefined && { promo_end_at: promoEndAt }),
         updated_at: new Date(),
       },
     });
@@ -268,6 +315,11 @@ export class RewardsService {
 
     return activeRewards.map((reward) => {
       const alreadyEarned = earnedRewardIds.has(reward.id);
+      const withinPromoPeriod = isRewardWithinPromoPeriod(
+        new Date(),
+        reward.promo_start_at,
+        reward.promo_end_at,
+      );
 
       const txCountRequired = reward.required_transaction_count;
       const amountRequired = Number(reward.required_total_amount);
@@ -291,12 +343,16 @@ export class RewardsService {
         required_transaction_count: txCountRequired,
         required_total_amount: amountRequired,
         transaction_type: reward.transaction_type,
+        promo_start_at: reward.promo_start_at,
+        promo_end_at: reward.promo_end_at,
         current_transaction_count: transactionCount,
         current_total_amount: totalAmount,
         tx_count_progress: txCountProgress,
         amount_progress: amountProgress,
-        is_eligible: txCountMet && amountMet && !alreadyEarned,
+        is_eligible:
+          txCountMet && amountMet && !alreadyEarned && withinPromoPeriod,
         already_earned: alreadyEarned,
+        is_within_promo_period: withinPromoPeriod,
       };
     });
   }
@@ -356,6 +412,16 @@ export class RewardsService {
 
       for (const reward of activeRewards) {
         if (alreadyEarned.has(reward.id)) continue;
+
+        if (
+          !isRewardWithinPromoPeriod(
+            new Date(),
+            reward.promo_start_at,
+            reward.promo_end_at,
+          )
+        ) {
+          continue;
+        }
 
         // Check transaction_type filter
         if (
