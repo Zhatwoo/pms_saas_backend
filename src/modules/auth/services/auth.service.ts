@@ -583,12 +583,7 @@ export class AuthService {
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT || 465);
     const secure = process.env.SMTP_SECURE !== 'false';
-    const fromName = process.env.SMTP_FROM_NAME || 'QuickPawn';
-
-    if (!userEmail || !pass) {
-      this.logger.error('Email credentials not configured (GMAIL_USER or GMAIL_APP_PASSWORD missing)');
-      throw new InternalServerErrorException('Email service is not configured');
-    }
+    const fromName = process.env.SMTP_FROM_NAME || 'PMS SaaS';
 
     try {
       const transporter = nodemailer.createTransport({
@@ -596,8 +591,8 @@ export class AuthService {
         port,
         secure,
         auth: {
-          user: userEmail,
-          pass,
+          user: userEmail.trim(),
+          pass: pass.replace(/\s+/g, ''),
         },
       });
 
@@ -1084,17 +1079,12 @@ export class AuthService {
       expiresAt,
     });
 
-    const userEmail = (process.env.GMAIL_USER || '').trim();
-    const pass = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '');
+    const userEmail = process.env.GMAIL_USER || 'quickpawn.pms@gmail.com';
+    const pass = process.env.GMAIL_APP_PASSWORD || '';
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT || 465);
     const secure = process.env.SMTP_SECURE !== 'false';
     const fromName = process.env.SMTP_FROM_NAME || 'QuickPawn';
-
-    if (!userEmail || !pass) {
-      this.logger.error('Email credentials not configured (GMAIL_USER or GMAIL_APP_PASSWORD missing)');
-      throw new InternalServerErrorException('Email service is not configured');
-    }
 
     try {
       const transporter = nodemailer.createTransport({
@@ -1102,8 +1092,8 @@ export class AuthService {
         port,
         secure,
         auth: {
-          user: userEmail,
-          pass,
+          user: userEmail.trim(),
+          pass: pass.replace(/\s+/g, ''),
         },
       });
 

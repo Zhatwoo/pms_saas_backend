@@ -20,6 +20,6 @@ export class ListCustomersDto {
   @Transform(({ value }) => Number(value))
   @IsInt()
   @Min(1)
-  @Max(1000)
-  limit = 100;
+  @Max(100)
+  limit = 25;
 }
