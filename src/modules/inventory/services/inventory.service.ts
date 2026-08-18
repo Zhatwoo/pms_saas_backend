@@ -185,16 +185,54 @@ export class InventoryService {
     private readonly financeDailyBalance: FinanceDailyBalanceService,
   ) {}
 
+  private extractFirstPhoto(
+    photos?: Array<string | null> | string | null,
+  ): string | null {
+    if (!photos) return null;
+    if (Array.isArray(photos)) {
+      const valid = photos.find(
+        (p) => typeof p === 'string' && p.trim().length > 0,
+      );
+      return valid || null;
+    }
+    if (typeof photos === 'string') {
+      const trimmed = photos.trim();
+      if (!trimmed || trimmed === '[]') return null;
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            const valid = parsed.find(
+              (p) => typeof p === 'string' && p.trim().length > 0,
+            );
+            return valid || null;
+          }
+        } catch {
+          // ignore json parse failure
+        }
+      }
+      return trimmed;
+    }
+    return null;
+  }
+
   private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
     if (!storedUrl) {
       return '';
     }
 
+    if (storedUrl.startsWith('data:')) {
+      return storedUrl;
+    }
+
     if (!storedUrl.startsWith('http')) {
-      const parts = storedUrl.split('/');
-      if (parts.length < 2) return storedUrl;
-      const bucket = parts[0];
-      const path = parts.slice(1).join('/');
+      let bucket = 'pawned_items';
+      let path = storedUrl;
+      if (storedUrl.includes('/')) {
+        const parts = storedUrl.split('/');
+        bucket = parts[0];
+        path = parts.slice(1).join('/');
+      }
 
       try {
         const { data, error } = await this.supabase
@@ -987,7 +1025,32 @@ export class InventoryService {
 
     if (saleData) {
       assertResourceBranch(user, saleData.branch_id);
-      const originalPhoto = await this.resolveStorageUrl(saleData.image_url);
+      let rawPhoto = saleData.image_url || null;
+      if (!rawPhoto) {
+        if (pawnedData) {
+          rawPhoto =
+            this.extractFirstPhoto(pawnedData.item_photos) ||
+            pawnedData.profile_photo ||
+            pawnedData.id_photo ||
+            null;
+        } else if (saleData.original_pawn_id) {
+          const { data: origPawn } = await client
+            .from('pawned_items')
+            .select('id, item_id, item_photos, profile_photo, id_photo')
+            .eq('id', saleData.original_pawn_id)
+            .eq('environment', getEnvironment(user))
+            .returns<PawnedItemRow[]>()
+            .maybeSingle();
+          if (origPawn) {
+            rawPhoto =
+              this.extractFirstPhoto(origPawn.item_photos) ||
+              origPawn.profile_photo ||
+              origPawn.id_photo ||
+              null;
+          }
+        }
+      }
+      const originalPhoto = await this.resolveStorageUrl(rawPhoto);
 
       await assertOpeningAuditItem({
         type: 'SALE',
@@ -1006,6 +1069,7 @@ export class InventoryService {
         pawnDate: saleData.available_date,
         status: saleData.status,
         originalPhoto,
+        imageUrl: originalPhoto,
         type: 'SALE',
       };
     }
@@ -1248,6 +1312,12 @@ export class InventoryService {
         ? pawnedItem.item_id.trim()
         : `PAWN-${String(pawnedItem.id).slice(0, 8).toUpperCase()}`;
 
+    const rawPhoto =
+      this.extractFirstPhoto(pawnedItem.item_photos) ||
+      pawnedItem.profile_photo ||
+      pawnedItem.id_photo ||
+      null;
+
     const { data: saleItem, error: insertErr } = await client
       .from('sale_items')
       .insert([
@@ -1261,6 +1331,7 @@ export class InventoryService {
           price: 0,
           status: 'Available',
           original_pawn_id: pawnedItem.id,
+          image_url: rawPhoto,
           ...environmentCreateFields(user),
         },
       ])
@@ -1802,20 +1873,99 @@ export class InventoryService {
       rows = rows.filter((item) => !pendingSaleItemIds.has(item.id));
     }
 
+    const pawnIdsToLookup = new Set<string>();
+    const pawnItemIdsToLookup = new Set<string>();
+    for (const row of rows) {
+      if (!row.image_url) {
+        if (row.original_pawn_id) {
+          pawnIdsToLookup.add(row.original_pawn_id);
+        }
+        if (row.item_id) {
+          pawnItemIdsToLookup.add(row.item_id);
+        }
+      }
+    }
+
+    const pawnMapById = new Map<string, PawnedItemRow>();
+    const pawnMapByItemId = new Map<string, PawnedItemRow>();
+
+    const pawnIdList = Array.from(pawnIdsToLookup);
+    const pawnItemIdList = Array.from(pawnItemIdsToLookup);
+
+    const pawnQueries: PromiseLike<{ data: PawnedItemRow[] | null }>[] = [];
+    if (pawnIdList.length > 0) {
+      pawnQueries.push(
+        client
+          .from('pawned_items')
+          .select('id, item_id, item_photos, profile_photo, id_photo')
+          .eq('environment', getEnvironment(user))
+          .in('id', pawnIdList)
+          .returns<PawnedItemRow[]>(),
+      );
+    }
+    if (pawnItemIdList.length > 0) {
+      pawnQueries.push(
+        client
+          .from('pawned_items')
+          .select('id, item_id, item_photos, profile_photo, id_photo')
+          .eq('environment', getEnvironment(user))
+          .in('item_id', pawnItemIdList)
+          .returns<PawnedItemRow[]>(),
+      );
+    }
+
+    if (pawnQueries.length > 0) {
+      const pawnResults = await Promise.all(pawnQueries);
+      for (const res of pawnResults) {
+        if (Array.isArray(res.data)) {
+          for (const pRow of res.data) {
+            if (pRow.id) pawnMapById.set(pRow.id, pRow);
+            if (pRow.item_id) pawnMapByItemId.set(pRow.item_id, pRow);
+          }
+        }
+      }
+    }
+
+    const items = await Promise.all(
+      rows.map(async (item) => {
+        let rawImage = item.image_url || null;
+        if (!rawImage) {
+          const pawnRow =
+            (item.original_pawn_id &&
+              (pawnMapById.get(item.original_pawn_id) ||
+                pawnMapByItemId.get(item.original_pawn_id))) ||
+            (item.item_id &&
+              (pawnMapByItemId.get(item.item_id) ||
+                pawnMapById.get(item.item_id)));
+          if (pawnRow) {
+            rawImage =
+              this.extractFirstPhoto(pawnRow.item_photos) ||
+              pawnRow.profile_photo ||
+              pawnRow.id_photo ||
+              null;
+          }
+        }
+        const imageUrl = await this.resolveStorageUrl(rawImage);
+
+        return {
+          id: item.id,
+          itemId: item.item_id,
+          itemName: item.item_name,
+          category: item.category,
+          branch: item.branch,
+          branchId: item.branch_id,
+          availableDate: item.available_date,
+          price: item.price,
+          stockLevel: item.stock_level || 1,
+          status: item.status || 'Available',
+          originalPawnId: item.original_pawn_id || null,
+          imageUrl,
+        };
+      }),
+    );
+
     return {
-      items: rows.map((item) => ({
-        id: item.id,
-        itemId: item.item_id,
-        itemName: item.item_name,
-        category: item.category,
-        branch: item.branch,
-        branchId: item.branch_id,
-        availableDate: item.available_date,
-        price: item.price,
-        stockLevel: item.stock_level || 1,
-        status: item.status || 'Available',
-        originalPawnId: item.original_pawn_id || null,
-      })),
+      items,
       total: count || 0,
     };
   }
@@ -2538,7 +2688,45 @@ export class InventoryService {
       throw new NotFoundException('Item not found');
     }
     assertResourceBranch(user, data?.branch_id);
-    return data;
+
+    let rawImage = data.image_url || null;
+    if (!rawImage) {
+      let pawnRow: PawnedItemRow | null = null;
+      if (data.original_pawn_id) {
+        const { data: pById } = await client
+          .from('pawned_items')
+          .select('id, item_id, item_photos, profile_photo, id_photo')
+          .eq('environment', getEnvironment(user))
+          .eq('id', data.original_pawn_id)
+          .returns<PawnedItemRow[]>()
+          .maybeSingle();
+        pawnRow = pById || null;
+      }
+      if (!pawnRow && data.item_id) {
+        const { data: pByItemId } = await client
+          .from('pawned_items')
+          .select('id, item_id, item_photos, profile_photo, id_photo')
+          .eq('environment', getEnvironment(user))
+          .eq('item_id', data.item_id)
+          .returns<PawnedItemRow[]>()
+          .maybeSingle();
+        pawnRow = pByItemId || null;
+      }
+      if (pawnRow) {
+        rawImage =
+          this.extractFirstPhoto(pawnRow.item_photos) ||
+          pawnRow.profile_photo ||
+          pawnRow.id_photo ||
+          null;
+      }
+    }
+
+    const imageUrl = await this.resolveStorageUrl(rawImage);
+    return {
+      ...data,
+      imageUrl,
+      image_url: imageUrl,
+    };
   }
 
   async updateForSale(user: UserWithBranch, id: string, dto: SaleItemWriteDto) {
