@@ -55,6 +55,9 @@ export class CsrfOriginMiddleware implements NestMiddleware {
     return (
       path === '/api/auth/login' ||
       path === '/api/auth/register' ||
+      path === '/api/auth/logout' ||
+      path === '/api/auth/forgot-password' ||
+      path === '/api/auth/reset-password' ||
       path === '/api/auth/signup/branches' ||
       path === '/api/devices/request-authorization'
     );

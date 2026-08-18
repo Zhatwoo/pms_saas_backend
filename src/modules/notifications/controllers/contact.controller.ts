@@ -29,9 +29,15 @@ export class ContactController {
   async submit(@Body() dto: ContactDto) {
     const name = escapeHtml(dto.name || '');
     const email = escapeHtml(dto.email || '');
-    const preferredDate = dto.preferredDate ? escapeHtml(dto.preferredDate) : 'Not specified';
-    const preferredTime = dto.preferredTime ? escapeHtml(dto.preferredTime) : 'Not specified';
-    const meetingPlatform = dto.meetingPlatform ? escapeHtml(dto.meetingPlatform) : 'Not specified';
+    const preferredDate = dto.preferredDate
+      ? escapeHtml(dto.preferredDate)
+      : 'Not specified';
+    const preferredTime = dto.preferredTime
+      ? escapeHtml(dto.preferredTime)
+      : 'Not specified';
+    const meetingPlatform = dto.meetingPlatform
+      ? escapeHtml(dto.meetingPlatform)
+      : 'Not specified';
     const message = dto.message ? escapeHtml(dto.message) : 'None';
 
     const subject =

@@ -199,7 +199,8 @@ export class PawnTicketsService {
       message.toLowerCase().includes('item_id') ||
       (Array.isArray(target)
         ? target.some((t) => String(t).toLowerCase().includes('item_id'))
-        : typeof target === 'string' && target.toLowerCase().includes('item_id'));
+        : typeof target === 'string' &&
+          target.toLowerCase().includes('item_id'));
 
     return isP2002 && (mentionsItemId || !target);
   }

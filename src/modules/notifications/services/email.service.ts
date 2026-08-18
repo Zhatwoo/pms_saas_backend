@@ -89,8 +89,7 @@ export class EmailService {
     const host =
       this.configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
     const port = Number(this.configService.get<number>('SMTP_PORT') || 465);
-    const secure =
-      this.configService.get<string>('SMTP_SECURE') !== 'false';
+    const secure = this.configService.get<string>('SMTP_SECURE') !== 'false';
     const fromName =
       this.configService.get<string>('SMTP_FROM_NAME') || 'QuickPawn PMS';
 
@@ -116,7 +115,9 @@ export class EmailService {
         html,
       });
 
-      this.logger.log(`✓ Email sent successfully via Nodemailer to ${recipient}`);
+      this.logger.log(
+        `✓ Email sent successfully via Nodemailer to ${recipient}`,
+      );
       return { success: true, message: 'Email sent successfully' };
     } catch (smtpError) {
       const smtpMsg =
@@ -142,7 +143,9 @@ export class EmailService {
           });
 
           if (response.ok) {
-            this.logger.log(`✓ Email sent successfully via Resend to ${recipient}`);
+            this.logger.log(
+              `✓ Email sent successfully via Resend to ${recipient}`,
+            );
             return { success: true, message: 'Email sent successfully' };
           }
         } catch (resendError) {
