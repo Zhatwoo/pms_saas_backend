@@ -12,7 +12,7 @@ export class TenantInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    
+
     // Fallback if tenantId is not attached directly to the user (e.g. public routes)
     // You could also extract it from a custom header like 'x-tenant-id' if appropriate
     const tenantId = user?.tenantId || request.headers['x-tenant-id'];

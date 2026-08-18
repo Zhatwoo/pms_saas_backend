@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsOptional, IsString, IsEnum, Matches, IsNumber, Min } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsEnum,
+  Matches,
+  IsNumber,
+  Min,
+} from 'class-validator';
 import { BranchStatus, PHONE_REGEX } from './create-branch.dto';
 
 export class UpdateBranchDto {

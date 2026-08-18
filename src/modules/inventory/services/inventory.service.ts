@@ -603,13 +603,18 @@ export class InventoryService {
           const group = findInterestRateGroup(interestRates, category);
           const defaultDuration = group ? (group.defaultDuration ?? 30) : 30;
           const graceDuration = group
-            ? Number((group as { gracePeriodDuration?: number }).gracePeriodDuration ?? 4)
+            ? Number(
+                (group as { gracePeriodDuration?: number })
+                  .gracePeriodDuration ?? 4,
+              )
             : 4;
 
-          const renewals = (item.item_renewals || []).map((r: ItemRenewalRow) => ({
-            date: r.renewal_date,
-            amount: r.amount_paid,
-          }));
+          const renewals = (item.item_renewals || []).map(
+            (r: ItemRenewalRow) => ({
+              date: r.renewal_date,
+              amount: r.amount_paid,
+            }),
+          );
           const lastRenewalDate = renewals
             .map((r) => r.date)
             .filter(Boolean)
