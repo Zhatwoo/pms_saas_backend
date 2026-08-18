@@ -186,15 +186,21 @@ export class InventoryService {
   ) {}
 
   private async resolveStorageUrl(storedUrl?: string | null): Promise<string> {
-    if (!storedUrl) {
+    if (!storedUrl || typeof storedUrl !== 'string' || !storedUrl.trim()) {
       return '';
     }
 
-    if (!storedUrl.startsWith('http')) {
-      const parts = storedUrl.split('/');
-      if (parts.length < 2) return storedUrl;
-      const bucket = parts[0];
-      const path = parts.slice(1).join('/');
+    const trimmed = storedUrl.trim();
+
+    if (!trimmed.startsWith('http')) {
+      const parts = trimmed.split('/');
+      let bucket = 'items_for_sale';
+      let path = trimmed;
+
+      if (parts.length >= 2) {
+        bucket = parts[0];
+        path = parts.slice(1).join('/');
+      }
 
       try {
         const { data, error } = await this.supabase
@@ -211,14 +217,34 @@ export class InventoryService {
           .storage.from(bucket)
           .getPublicUrl(path);
 
-        return pubData?.publicUrl || storedUrl;
+        if (pubData?.publicUrl) return pubData.publicUrl;
       } catch {
-        return storedUrl;
+        // fallback
       }
+
+      if (bucket === 'items_for_sale' || parts.length < 2) {
+        try {
+          const { data: fallbackData } = await this.supabase
+            .getClient()
+            .storage.from('pawned_items')
+            .createSignedUrl(path, 60 * 60 * 24 * 7);
+          if (fallbackData?.signedUrl) return fallbackData.signedUrl;
+
+          const { data: pubFallback } = this.supabase
+            .getClient()
+            .storage.from('pawned_items')
+            .getPublicUrl(path);
+          if (pubFallback?.publicUrl) return pubFallback.publicUrl;
+        } catch {
+          // ignore
+        }
+      }
+
+      return trimmed;
     }
 
     try {
-      const parsedUrl = new URL(storedUrl);
+      const parsedUrl = new URL(trimmed);
       const publicPrefix = '/storage/v1/object/public/';
       const signedPrefix = '/storage/v1/object/sign/';
 
@@ -229,19 +255,19 @@ export class InventoryService {
           : null;
 
       if (!storagePrefix) {
-        return storedUrl;
+        return trimmed;
       }
 
       const storagePath = parsedUrl.pathname.split(storagePrefix)[1];
       if (!storagePath) {
-        return storedUrl;
+        return trimmed;
       }
 
       const [bucketName, ...objectPathParts] = storagePath.split('/');
       const objectPath = objectPathParts.join('/');
 
       if (!bucketName || !objectPath) {
-        return storedUrl;
+        return trimmed;
       }
 
       const { data, error } = await this.supabase
@@ -250,12 +276,16 @@ export class InventoryService {
         .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
 
       if (error || !data?.signedUrl) {
-        return storedUrl;
+        const { data: pubData } = this.supabase
+          .getClient()
+          .storage.from(bucketName)
+          .getPublicUrl(objectPath);
+        return pubData?.publicUrl || trimmed;
       }
 
       return data.signedUrl;
     } catch {
-      return storedUrl;
+      return trimmed;
     }
   }
 
@@ -1242,6 +1272,25 @@ export class InventoryService {
       throw new InternalServerErrorException(updateErr.message);
     }
 
+    let firstPawnPhoto: string | null = null;
+    if (Array.isArray(pawnedItem.item_photos) && pawnedItem.item_photos.length > 0) {
+      firstPawnPhoto = pawnedItem.item_photos[0];
+    } else if (typeof pawnedItem.item_photos === 'string' && pawnedItem.item_photos.trim()) {
+      try {
+        const parsed = JSON.parse(pawnedItem.item_photos);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          firstPawnPhoto = parsed[0];
+        } else {
+          firstPawnPhoto = pawnedItem.item_photos.split(',')[0].trim();
+        }
+      } catch {
+        firstPawnPhoto = pawnedItem.item_photos.split(',')[0].trim();
+      }
+    }
+    if (!firstPawnPhoto && pawnedItem.profile_photo) {
+      firstPawnPhoto = pawnedItem.profile_photo;
+    }
+
     const saleItemId =
       typeof pawnedItem.item_id === 'string' &&
       pawnedItem.item_id.trim().length > 0
@@ -1261,6 +1310,7 @@ export class InventoryService {
           price: 0,
           status: 'Available',
           original_pawn_id: pawnedItem.id,
+          image_url: firstPawnPhoto || null,
           ...environmentCreateFields(user),
         },
       ])
@@ -1693,7 +1743,7 @@ export class InventoryService {
     let imageUrl = dto.image_url;
     if (imageUrl && imageUrl.startsWith('data:image')) {
       const path = `sales_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-      imageUrl = await this.uploadPhoto(imageUrl, path, 'pawned_items');
+      imageUrl = await this.uploadPhoto(imageUrl, path, 'items_for_sale');
     }
 
     const { data, error } = await client
@@ -1802,20 +1852,94 @@ export class InventoryService {
       rows = rows.filter((item) => !pendingSaleItemIds.has(item.id));
     }
 
+    // Look up pawn photos for any items that have original_pawn_id but missing image_url
+    const missingPhotoPawnIds = rows
+      .filter((item) => !item.image_url && item.original_pawn_id)
+      .map((item) => item.original_pawn_id as string);
+
+    const pawnPhotoMap = new Map<string, string>();
+    if (missingPhotoPawnIds.length > 0) {
+      const { data: pawnItems } = await client
+        .from('pawned_items')
+        .select('id, item_photos, profile_photo')
+        .in('id', missingPhotoPawnIds)
+        .eq('environment', getEnvironment(user))
+        .returns<
+          Array<{
+            id: string;
+            item_photos?: string[] | string | null;
+            profile_photo?: string | null;
+          }>
+        >();
+
+      for (const p of pawnItems || []) {
+        let photo: string | null = null;
+        if (Array.isArray(p.item_photos) && p.item_photos.length > 0) {
+          photo = p.item_photos[0];
+        } else if (typeof p.item_photos === 'string' && p.item_photos.trim()) {
+          try {
+            const parsed = JSON.parse(p.item_photos);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              photo = parsed[0];
+            } else {
+              photo = p.item_photos.split(',')[0].trim();
+            }
+          } catch {
+            photo = p.item_photos.split(',')[0].trim();
+          }
+        }
+        if (!photo && p.profile_photo) {
+          photo = p.profile_photo;
+        }
+        if (photo) {
+          pawnPhotoMap.set(p.id, photo);
+        }
+      }
+    }
+
+    const items = await Promise.all(
+      rows.map(async (item) => {
+        const rawPhoto =
+          item.image_url ||
+          (item.original_pawn_id ? pawnPhotoMap.get(item.original_pawn_id) : null);
+        const imageUrl = rawPhoto
+          ? await this.resolveStorageUrl(rawPhoto)
+          : null;
+
+        return {
+          id: item.id,
+          itemId: item.item_id,
+          itemName: item.item_name,
+          category: item.category,
+          branch: item.branch,
+          branchId: item.branch_id,
+          availableDate: item.available_date,
+          price: item.price,
+          stockLevel: item.stock_level || 1,
+          status: item.status || 'Available',
+          originalPawnId: item.original_pawn_id || null,
+          imageUrl: imageUrl || null,
+        };
+      }),
+    );
+
     return {
-      items: rows.map((item) => ({
-        id: item.id,
-        itemId: item.item_id,
-        itemName: item.item_name,
-        category: item.category,
-        branch: item.branch,
-        branchId: item.branch_id,
-        availableDate: item.available_date,
-        price: item.price,
-        stockLevel: item.stock_level || 1,
-        status: item.status || 'Available',
-        originalPawnId: item.original_pawn_id || null,
-      })),
+      items: await Promise.all(
+        rows.map(async (item) => ({
+          id: item.id,
+          itemId: item.item_id,
+          itemName: item.item_name,
+          category: item.category,
+          branch: item.branch,
+          branchId: item.branch_id,
+          availableDate: item.available_date,
+          price: item.price,
+          stockLevel: item.stock_level || 1,
+          status: item.status || 'Available',
+          originalPawnId: item.original_pawn_id || null,
+          imageUrl: await this.resolveStorageUrl(item.image_url),
+        })),
+      ),
       total: count || 0,
     };
   }
@@ -2534,16 +2658,61 @@ export class InventoryService {
       .eq('environment', getEnvironment(user))
       .returns<SaleItemRow[]>()
       .single();
-    if (error) {
+    if (error || !data) {
       throw new NotFoundException('Item not found');
     }
     assertResourceBranch(user, data?.branch_id);
-    return data;
+
+    let rawPhoto = data.image_url;
+    if (!rawPhoto && data.original_pawn_id) {
+      const { data: pawnItem } = await client
+        .from('pawned_items')
+        .select('item_photos, profile_photo')
+        .eq('id', data.original_pawn_id)
+        .eq('environment', getEnvironment(user))
+        .returns<Array<{ item_photos?: string[] | string | null; profile_photo?: string | null }>>()
+        .maybeSingle();
+
+      if (pawnItem) {
+        if (Array.isArray(pawnItem.item_photos) && pawnItem.item_photos.length > 0) {
+          rawPhoto = pawnItem.item_photos[0];
+        } else if (typeof pawnItem.item_photos === 'string' && pawnItem.item_photos.trim()) {
+          try {
+            const parsed = JSON.parse(pawnItem.item_photos);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              rawPhoto = parsed[0];
+            } else {
+              rawPhoto = pawnItem.item_photos.split(',')[0].trim();
+            }
+          } catch {
+            rawPhoto = pawnItem.item_photos.split(',')[0].trim();
+          }
+        }
+        if (!rawPhoto && pawnItem.profile_photo) {
+          rawPhoto = pawnItem.profile_photo;
+        }
+      }
+    }
+
+    const imageUrl = rawPhoto ? await this.resolveStorageUrl(rawPhoto) : null;
+
+    return {
+      ...data,
+      imageUrl: imageUrl || null,
+    };
   }
 
   async updateForSale(user: UserWithBranch, id: string, dto: SaleItemWriteDto) {
     await this.findOneForSale(user, id);
     const client = this.supabase.getClient();
+
+    let imageUrl = dto.image_url;
+    if (imageUrl && imageUrl.startsWith('data:image')) {
+      const path = `sales_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+      imageUrl = await this.uploadPhoto(imageUrl, path, 'items_for_sale');
+      dto.image_url = imageUrl;
+    }
+
     const { data, error } = await client
       .from('sale_items')
       .update(dto)

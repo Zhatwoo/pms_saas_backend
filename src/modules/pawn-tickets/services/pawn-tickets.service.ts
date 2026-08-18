@@ -871,18 +871,49 @@ export class PawnTicketsService {
   }
 
   async findByUnitCode(unitCode: string) {
-    const cleanCode = unitCode.trim().toUpperCase();
+    const cleanCode = (() => {
+      const raw = String(unitCode || '').trim();
+      try {
+        return decodeURIComponent(raw).trim().toUpperCase();
+      } catch {
+        return raw.toUpperCase();
+      }
+    })();
+
+    if (!cleanCode) {
+      throw new BadRequestException('Item not found or unit code is invalid.');
+    }
 
     const item = await this.prisma.pawned_items.findFirst({
       where: { item_id: { equals: cleanCode, mode: 'insensitive' } },
       include: { customers: true, branches: true },
     });
 
-    if (!item) {
+    if (item) {
+      return this.mapPublicPawnedTicket(item);
+    }
+
+    const saleItem = await this.prisma.sale_items.findFirst({
+      where: { item_id: { equals: cleanCode, mode: 'insensitive' } },
+      include: {
+        customers: true,
+        branches: true,
+        pawned_items: { include: { customers: true } },
+      },
+    });
+
+    if (!saleItem) {
       throw new BadRequestException('Item not found or unit code is invalid.');
     }
 
-    // Resolve storage URLs for photos
+    return this.mapPublicSaleTicket(saleItem);
+  }
+
+  private async mapPublicPawnedTicket(
+    item: Prisma.pawned_itemsGetPayload<{
+      include: { customers: true; branches: true };
+    }>,
+  ) {
     const [profilePhoto, itemPhotos, idPhoto, idBackPhoto] = await Promise.all([
       this.resolveStorageUrl(item.profile_photo),
       this.resolveStorageUrls(
@@ -893,6 +924,7 @@ export class PawnTicketsService {
     ]);
 
     return {
+      listing_type: 'pawn' as const,
       ...item,
       customer: item.customers
         ? (this.encryption.decryptCustomerEmbed(
@@ -908,6 +940,57 @@ export class PawnTicketsService {
       item_photos: itemPhotos,
       id_photo: idPhoto,
       id_back_photo: idBackPhoto,
+    };
+  }
+
+  private async mapPublicSaleTicket(
+    saleItem: Prisma.sale_itemsGetPayload<{
+      include: {
+        customers: true;
+        branches: true;
+        pawned_items: { include: { customers: true } };
+      };
+    }>,
+  ) {
+    const pawned = saleItem.pawned_items;
+    const customerSource = saleItem.customers ?? pawned?.customers ?? null;
+    const [saleImage, profilePhoto, pawnedPhotos] = await Promise.all([
+      this.resolveStorageUrl(saleItem.image_url),
+      this.resolveStorageUrl(pawned?.profile_photo),
+      this.resolveStorageUrls(
+        (pawned?.item_photos as Array<string | null> | string | null) ?? null,
+      ),
+    ]);
+
+    const itemPhotos = [
+      ...(saleImage ? [saleImage] : []),
+      ...pawnedPhotos.filter((url) => url && url !== saleImage),
+    ];
+
+    return {
+      listing_type: 'sale' as const,
+      id: saleItem.id,
+      item_id: saleItem.item_id,
+      item_name: saleItem.item_name,
+      category: saleItem.category,
+      amount: this.toNumber(saleItem.price),
+      pawn_date: this.formatDate(saleItem.available_date),
+      serial_number: pawned?.serial_number ?? null,
+      condition: pawned?.condition ?? saleItem.status,
+      items_included: pawned?.items_included ?? null,
+      memory_storage: pawned?.memory_storage ?? null,
+      remarks: null,
+      status: saleItem.status,
+      customer: customerSource
+        ? (this.encryption.decryptCustomerEmbed(
+            customerSource,
+          ) as typeof customerSource)
+        : null,
+      branch_info: saleItem.branches,
+      profile_photo: profilePhoto,
+      item_photos: itemPhotos,
+      id_photo: '',
+      id_back_photo: '',
     };
   }
 
