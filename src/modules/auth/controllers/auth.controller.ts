@@ -72,7 +72,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly branchesService: BranchesService,
     private readonly usersService: UsersService,
-  ) { }
+  ) {}
 
   /** Public branch list for signup (avoids /branches/:id catching "public"). */
   @Public()
@@ -112,15 +112,7 @@ export class AuthController {
       session.access_token,
       accessCookieOptions(session.expires_in),
     );
-    if (loginDto.rememberMe) {
-      res.cookie(WAS_LOGGED_IN_COOKIE, '1', rememberedCookieOptions());
-    } else {
-      res.clearCookie(WAS_LOGGED_IN_COOKIE, {
-        path: '/',
-        secure: authCookieSecure(),
-        sameSite: 'lax',
-      });
-    }
+    res.cookie(WAS_LOGGED_IN_COOKIE, '1', rememberedCookieOptions());
 
     return { user: session.user };
   }

@@ -3,15 +3,15 @@ import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 export class CompleteOnboardingDto {
   @IsString()
   @IsNotEmpty()
-  branchName!: string;
+  branchName: string;
 
   @IsString()
   @IsNotEmpty()
-  location!: string;
+  location: string;
 
   @IsString()
   @IsNotEmpty()
-  contactNumber!: string;
+  contactNumber: string;
 
   @IsOptional()
   @IsString()

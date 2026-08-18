@@ -316,7 +316,7 @@ export class CustomersService {
     query: ListCustomersDto = new ListCustomersDto(),
   ) {
     const page = query.page ?? 1;
-    const limit = query.limit ?? 100;
+    const limit = query.limit ?? 25;
     const where: Prisma.customersWhereInput = this.customerScopeWhere(
       user,
       query.branchId,
