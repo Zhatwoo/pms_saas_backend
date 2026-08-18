@@ -1919,7 +1919,22 @@ export class InventoryService {
     );
 
     return {
-      items,
+      items: await Promise.all(
+        rows.map(async (item) => ({
+          id: item.id,
+          itemId: item.item_id,
+          itemName: item.item_name,
+          category: item.category,
+          branch: item.branch,
+          branchId: item.branch_id,
+          availableDate: item.available_date,
+          price: item.price,
+          stockLevel: item.stock_level || 1,
+          status: item.status || 'Available',
+          originalPawnId: item.original_pawn_id || null,
+          imageUrl: await this.resolveStorageUrl(item.image_url),
+        })),
+      ),
       total: count || 0,
     };
   }
