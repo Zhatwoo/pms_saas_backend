@@ -576,6 +576,37 @@ export class IncidentTicketsService {
     return patch;
   }
 
+  private mapPatchToPrismaData(
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const data: Record<string, unknown> = {};
+
+    if (patch.title !== undefined) data.title = patch.title;
+    if (patch.summary !== undefined) data.summary = patch.summary;
+    if (patch.category !== undefined) data.category = patch.category;
+    if (patch.priority !== undefined) data.priority = patch.priority;
+    if (patch.amount_impact !== undefined) data.amount_impact = patch.amount_impact;
+    if (patch.transaction_ref !== undefined) {
+      data.transaction_ref = patch.transaction_ref;
+    }
+    if (patch.status !== undefined) data.status = patch.status;
+    if (patch.resolved_by !== undefined) data.resolved_by = patch.resolved_by;
+    if (patch.resolved_at !== undefined) data.resolved_at = patch.resolved_at;
+    if (patch.resolution_notes !== undefined) {
+      data.resolution_notes = patch.resolution_notes;
+    }
+    if (patch.reopened_at !== undefined) data.reopened_at = patch.reopened_at;
+    if (patch.requires_manager_escalation !== undefined) {
+      data.requires_manager_escalation = patch.requires_manager_escalation;
+    }
+    if (patch.escalation_owner_user_id !== undefined) {
+      data.escalation_owner_user_id = patch.escalation_owner_user_id;
+    }
+
+    data.updated_at = new Date();
+    return data;
+  }
+
   private async applyIncidentTicketPatch(
     user: AuthenticatedUserProfile,
     id: string,
@@ -593,13 +624,25 @@ export class IncidentTicketsService {
       throw new BadRequestException('No ticket updates were provided.');
     }
 
+    try {
+      await this.prisma.incident_tickets.update({
+        where: { id },
+        data: this.mapPatchToPrismaData(patch) as never,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to update incident ticket ${id}: ${this.extractErrorMessage(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to update incident ticket',
+      );
+    }
+
     const {
       data,
       error,
     }: { data: Record<string, unknown> | null; error: unknown } = await client
       .from('incident_tickets')
-      .update(patch)
-      .eq('id', id)
       .select(
         `
         id,
@@ -634,14 +677,15 @@ export class IncidentTicketsService {
         updated_at
       `,
       )
+      .eq('id', id)
       .maybeSingle();
 
     if (error) {
       this.logger.error(
-        `Failed to update incident ticket ${id}: ${this.extractErrorMessage(error)}`,
+        `Failed to load updated incident ticket ${id}: ${this.extractErrorMessage(error)}`,
       );
       throw new InternalServerErrorException(
-        'Failed to update incident ticket',
+        'Failed to load updated incident ticket',
       );
     }
 
