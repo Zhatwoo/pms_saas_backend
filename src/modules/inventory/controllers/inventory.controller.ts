@@ -444,7 +444,7 @@ export class InventoryController {
     return this.inventoryService.findOneForSale(req.user, id);
   }
 
-  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Roles(Role.SUPER_ADMIN)
   @Put('for-sale/:id')
   updateForSale(
     @Req() req: { user: AuthenticatedUserProfile },
