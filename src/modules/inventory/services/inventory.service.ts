@@ -172,7 +172,7 @@ interface SaleItemWriteDto {
   category?: string;
   price?: number;
   status?: string;
-  image_url?: string;
+  image_url?: string | null;
   [key: string]: unknown;
 }
 
@@ -1724,15 +1724,9 @@ export class InventoryService {
       );
     }
 
-    const { data: signedData, error: signError } = await client.storage
-      .from(bucket)
-      .createSignedUrl(path, 60 * 60 * 24 * 7);
-
-    if (signError || !signedData?.signedUrl) {
-      return `${bucket}/${path}`;
-    }
-
-    return signedData.signedUrl;
+    // Store a stable bucket/path reference in the database. Signed URLs expire,
+    // while resolveStorageUrl() creates a fresh URL whenever the item is read.
+    return `${bucket}/${path}`;
   }
 
   async createForSale(user: UserWithBranch, dto: SaleItemWriteDto) {
@@ -1764,7 +1758,7 @@ export class InventoryService {
     let imageUrl = dto.image_url;
     if (imageUrl && imageUrl.startsWith('data:image')) {
       const path = `sales_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-      imageUrl = await this.uploadPhoto(imageUrl, path, 'pawned_items');
+      imageUrl = await this.uploadPhoto(imageUrl, path, 'items_for_sale');
     }
 
     const { data, error } = await client
@@ -1876,7 +1870,7 @@ export class InventoryService {
     const pawnIdsToLookup = new Set<string>();
     const pawnItemIdsToLookup = new Set<string>();
     for (const row of rows) {
-      if (!row.image_url) {
+      if (row.image_url === null) {
         if (row.original_pawn_id) {
           pawnIdsToLookup.add(row.original_pawn_id);
         }
@@ -1928,8 +1922,8 @@ export class InventoryService {
 
     const items = await Promise.all(
       rows.map(async (item) => {
-        let rawImage = item.image_url || null;
-        if (!rawImage) {
+        let rawImage = item.image_url ?? null;
+        if (rawImage === null) {
           const pawnRow =
             (item.original_pawn_id &&
               (pawnMapById.get(item.original_pawn_id) ||
@@ -2536,6 +2530,88 @@ export class InventoryService {
     };
   }
 
+  async findPublicForSaleByItemId(itemId: string) {
+    const raw = String(itemId || '').trim();
+    let clean = raw;
+    try {
+      clean = decodeURIComponent(raw).trim();
+    } catch {
+      clean = raw;
+    }
+    if (!clean) {
+      throw new BadRequestException('Item not found or unit code is invalid.');
+    }
+
+    const client = this.supabase.getClient();
+    const { data, error } = await client
+      .from('sale_items')
+      .select(
+        'id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url',
+      )
+      .ilike('item_id', clean)
+      .maybeSingle()
+      .returns<{
+        id: string;
+        item_id: string;
+        item_name: string;
+        category: string;
+        branch: string;
+        branch_id: string;
+        available_date?: string | null;
+        price?: number | null;
+        status: string;
+        image_url?: string | null;
+      } | null>();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+    if (!data) {
+      throw new BadRequestException('Item not found or unit code is invalid.');
+    }
+
+    const [{ data: branchData }, imageUrl] = await Promise.all([
+      client
+        .from('branches')
+        .select('id, name, location, phone')
+        .eq('id', data.branch_id)
+        .maybeSingle()
+        .returns<{
+          id: string;
+          name: string;
+          location?: string | null;
+          phone?: string | null;
+        } | null>(),
+      this.resolveStorageUrl(data.image_url),
+    ]);
+
+    return {
+      listing_type: 'sale' as const,
+      id: data.id,
+      item_id: data.item_id,
+      item_name: data.item_name,
+      category: data.category,
+      amount: Number(data.price || 0),
+      pawn_date: data.available_date || '',
+      serial_number: null,
+      condition: data.status,
+      items_included: null,
+      memory_storage: null,
+      remarks: null,
+      status: data.status,
+      customer: null,
+      branch_info: {
+        name: branchData?.name || data.branch,
+        location: branchData?.location || '',
+        phone: branchData?.phone || '',
+      },
+      profile_photo: '',
+      item_photos: imageUrl ? [imageUrl] : [],
+      id_photo: '',
+      id_back_photo: '',
+    };
+  }
+
   async findForSaleCategories(
     user: UserWithBranch,
     branch?: string,
@@ -2689,8 +2765,8 @@ export class InventoryService {
     }
     assertResourceBranch(user, data?.branch_id);
 
-    let rawImage = data.image_url || null;
-    if (!rawImage) {
+    let rawImage = data.image_url ?? null;
+    if (rawImage === null) {
       let pawnRow: PawnedItemRow | null = null;
       if (data.original_pawn_id) {
         const { data: pById } = await client
@@ -2732,9 +2808,48 @@ export class InventoryService {
   async updateForSale(user: UserWithBranch, id: string, dto: SaleItemWriteDto) {
     await this.findOneForSale(user, id);
     const client = this.supabase.getClient();
+    const { data: existingItem, error: existingItemError } = await client
+      .from('sale_items')
+      .select('image_url')
+      .eq('id', id)
+      .eq('environment', getEnvironment(user))
+      .single();
+    if (existingItemError || !existingItem) {
+      throw new NotFoundException('Item not found');
+    }
+
+    // The item ID is the QR label's stable identifier.  Never allow it to be
+    // changed through an item edit (including by callers that bypass the UI).
+    if (dto.item_id !== undefined) {
+      throw new BadRequestException('The QR/item ID cannot be edited.');
+    }
+
+    const updates: Pick<
+      SaleItemWriteDto,
+      'item_name' | 'category' | 'price' | 'image_url'
+    > = {};
+    if (typeof dto.item_name === 'string') updates.item_name = dto.item_name.trim();
+    if (typeof dto.category === 'string') updates.category = dto.category.trim();
+    if (typeof dto.price === 'number' && Number.isFinite(dto.price) && dto.price >= 0) {
+      updates.price = dto.price;
+    }
+    if (dto.image_url === null) {
+      // An empty value deliberately suppresses the original pawn image fallback.
+      updates.image_url = '';
+    } else if (typeof dto.image_url === 'string' && dto.image_url.startsWith('data:image')) {
+      const path = `sales_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+      updates.image_url = await this.uploadPhoto(dto.image_url, path, 'items_for_sale');
+    } else if (dto.image_url !== undefined) {
+      throw new BadRequestException('Image must be an uploaded image or removed.');
+    }
+
+    if (Object.keys(updates).length === 0) {
+      throw new BadRequestException('Provide at least one valid editable item field.');
+    }
+
     const { data, error } = await client
       .from('sale_items')
-      .update(dto)
+      .update(updates)
       .eq('id', id)
       .eq('environment', getEnvironment(user))
       .select()
@@ -2742,6 +2857,17 @@ export class InventoryService {
       .single();
     if (error) {
       throw new InternalServerErrorException(error.message);
+    }
+
+    const oldImage = existingItem.image_url;
+    if (
+      updates.image_url !== undefined &&
+      oldImage?.startsWith('items_for_sale/') &&
+      oldImage !== updates.image_url
+    ) {
+      await client.storage
+        .from('items_for_sale')
+        .remove([oldImage.slice('items_for_sale/'.length)]);
     }
     return data;
   }
