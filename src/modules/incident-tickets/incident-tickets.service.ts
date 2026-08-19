@@ -10,6 +10,16 @@ import { Role } from '../../common/enums';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import type { AuthenticatedUserProfile } from '../../infrastructure/supabase/supabase.service';
 import { SupabaseService } from '../../infrastructure/supabase/supabase.service';
+import {
+  canEditIncidentTicketContent,
+  creatorAttemptedManagementUpdate,
+  hasCreatorContentUpdate,
+  isIncidentTicketManager,
+} from './incident-ticket-permissions.util';
+import {
+  buildIncidentEditHistory,
+  type IncidentTicketContentSnapshot,
+} from './incident-ticket-edit-history.util';
 
 interface CreateIncidentTicketDto {
   title?: string;
@@ -24,9 +34,16 @@ interface CreateIncidentTicketDto {
   itemStatus?: 'missing' | 'broken' | 'damaged' | null;
   metadata?: Record<string, unknown>;
   requiresManagerEscalation?: boolean;
+  escalationOwnerUserId?: string | null;
 }
 
 interface UpdateIncidentTicketDto {
+  title?: string;
+  summary?: string;
+  category?: string;
+  priority?: string;
+  amountImpact?: number | null;
+  transactionRef?: string | null;
   status?: string;
   requiresManagerEscalation?: boolean;
   escalationOwnerUserId?: string | null;
@@ -42,7 +59,14 @@ interface IncidentTicketRow {
   id: string;
   branch_id: string;
   status: string;
+  reported_by_user_id: string | null;
   escalation_owner_user_id: string | null;
+  title?: string;
+  summary?: string;
+  category?: string;
+  priority?: string;
+  amount_impact?: number | null;
+  transaction_ref?: string | null;
   [key: string]: unknown;
 }
 
@@ -55,7 +79,8 @@ interface IncidentTicketEventPayload {
     | 'unassigned'
     | 'escalated'
     | 'resolved'
-    | 'reopened';
+    | 'reopened'
+    | 'updated';
   actorUserId?: string | null;
   subjectUserId?: string | null;
   notes?: string | null;
@@ -78,13 +103,6 @@ export class IncidentTicketsService {
         'You cannot access incident tickets for this branch.',
       );
     }
-  }
-
-  private ensureManagerAccess(user: AuthenticatedUserProfile) {
-    if (user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN) return;
-    throw new ForbiddenException(
-      'You can only view the status of incident tickets you submitted.',
-    );
   }
 
   async findAll(user: AuthenticatedUserProfile, branch?: string) {
@@ -175,9 +193,15 @@ export class IncidentTicketsService {
       );
     }
 
-    const escalationOwnerUserId = dto.requiresManagerEscalation
-      ? await this.resolveManagerId(branchId)
-      : null;
+    let escalationOwnerUserId: string | null = null;
+    if (dto.requiresManagerEscalation) {
+      if (dto.escalationOwnerUserId) {
+        await this.ensureAssigneeAccess(user, branchId, dto.escalationOwnerUserId);
+        escalationOwnerUserId = dto.escalationOwnerUserId;
+      } else {
+        escalationOwnerUserId = await this.resolveManagerId(branchId);
+      }
+    }
 
     const rpcResult: {
       data: RaiseIncidentTicketResult | null;
@@ -257,12 +281,24 @@ export class IncidentTicketsService {
     }: {
       data: Pick<
         IncidentTicketRow,
-        'id' | 'branch_id' | 'status' | 'escalation_owner_user_id'
+        | 'id'
+        | 'branch_id'
+        | 'status'
+        | 'reported_by_user_id'
+        | 'escalation_owner_user_id'
+        | 'title'
+        | 'summary'
+        | 'category'
+        | 'priority'
+        | 'amount_impact'
+        | 'transaction_ref'
       > | null;
       error: unknown;
     } = await client
       .from('incident_tickets')
-      .select('id, branch_id, status, escalation_owner_user_id')
+      .select(
+        'id, branch_id, status, reported_by_user_id, escalation_owner_user_id, title, summary, category, priority, amount_impact, transaction_ref',
+      )
       .eq('id', id)
       .maybeSingle();
 
@@ -278,10 +314,80 @@ export class IncidentTicketsService {
     }
 
     this.ensureBranchAccess(user, existing.branch_id);
-    this.ensureManagerAccess(user);
+
+    const isManager = isIncidentTicketManager(user.role as Role);
+    const canEditContent = canEditIncidentTicketContent(existing, user.id);
+
+    if (!isManager) {
+      if (!canEditContent) {
+        throw new ForbiddenException(
+          'You can only edit incident tickets you created or are assigned to.',
+        );
+      }
+
+      if (creatorAttemptedManagementUpdate(dto)) {
+        throw new ForbiddenException(
+          'You can only update ticket details for tickets you created.',
+        );
+      }
+
+      if (!hasCreatorContentUpdate(dto)) {
+        throw new BadRequestException('No ticket details were provided to update.');
+      }
+
+      const patch = this.buildCreatorContentPatch(dto);
+      const events = this.buildContentUpdateEvents(user.id, id, existing, patch);
+      return this.applyIncidentTicketPatch(user, id, existing, patch, events, false);
+    }
+
+    if (hasCreatorContentUpdate(dto) && !canEditContent) {
+      throw new ForbiddenException(
+        'You can only edit incident tickets you created or are assigned to.',
+      );
+    }
 
     const patch: Record<string, unknown> = {};
     const events: IncidentTicketEventPayload[] = [];
+
+    if (dto.title !== undefined) {
+      const title = dto.title.trim();
+      if (!title) {
+        throw new BadRequestException('Title is required.');
+      }
+      patch.title = title;
+    }
+
+    if (dto.summary !== undefined) {
+      const summary = dto.summary.trim();
+      if (!summary) {
+        throw new BadRequestException('Summary is required.');
+      }
+      patch.summary = summary;
+    }
+
+    if (dto.category !== undefined) {
+      const category = dto.category.trim();
+      if (!category) {
+        throw new BadRequestException('Category is required.');
+      }
+      patch.category = category;
+    }
+
+    if (dto.priority !== undefined) {
+      patch.priority = dto.priority;
+    }
+
+    if (dto.amountImpact !== undefined) {
+      patch.amount_impact =
+        typeof dto.amountImpact === 'number' &&
+        Number.isFinite(dto.amountImpact)
+          ? dto.amountImpact
+          : null;
+    }
+
+    if (dto.transactionRef !== undefined) {
+      patch.transaction_ref = dto.transactionRef?.trim() || null;
+    }
 
     if (dto.status) {
       patch.status = dto.status;
@@ -353,6 +459,138 @@ export class IncidentTicketsService {
             : 'Ticket assignment removed.',
         });
       }
+    }
+
+    const contentUpdateEvents = this.buildContentUpdateEvents(
+      user.id,
+      id,
+      existing,
+      patch,
+    );
+    events.push(...contentUpdateEvents);
+
+    return this.applyIncidentTicketPatch(user, id, existing, patch, events, false);
+  }
+
+  private toContentSnapshot(
+    ticket: Pick<
+      IncidentTicketRow,
+      | 'title'
+      | 'summary'
+      | 'category'
+      | 'priority'
+      | 'amount_impact'
+      | 'transaction_ref'
+    >,
+  ): IncidentTicketContentSnapshot {
+    return {
+      title: String(ticket.title ?? ''),
+      summary: String(ticket.summary ?? ''),
+      category: String(ticket.category ?? ''),
+      priority: String(ticket.priority ?? ''),
+      amount_impact:
+        typeof ticket.amount_impact === 'number' ? ticket.amount_impact : null,
+      transaction_ref: ticket.transaction_ref ?? null,
+    };
+  }
+
+  private buildContentUpdateEvents(
+    actorUserId: string,
+    ticketId: string,
+    existing: Pick<
+      IncidentTicketRow,
+      | 'branch_id'
+      | 'title'
+      | 'summary'
+      | 'category'
+      | 'priority'
+      | 'amount_impact'
+      | 'transaction_ref'
+    >,
+    patch: Record<string, unknown>,
+  ): IncidentTicketEventPayload[] {
+    const history = buildIncidentEditHistory(
+      this.toContentSnapshot(existing),
+      patch,
+    );
+
+    if (!history) return [];
+
+    return [
+      {
+        ticketId,
+        branchId: existing.branch_id,
+        action: 'updated',
+        actorUserId,
+        notes: history.notes,
+        metadata: { changedFields: history.changedFields },
+      },
+    ];
+  }
+
+  private buildCreatorContentPatch(
+    dto: UpdateIncidentTicketDto,
+  ): Record<string, unknown> {
+    const patch: Record<string, unknown> = {};
+
+    if (dto.title !== undefined) {
+      const title = dto.title.trim();
+      if (!title) {
+        throw new BadRequestException('Title is required.');
+      }
+      patch.title = title;
+    }
+
+    if (dto.summary !== undefined) {
+      const summary = dto.summary.trim();
+      if (!summary) {
+        throw new BadRequestException('Summary is required.');
+      }
+      patch.summary = summary;
+    }
+
+    if (dto.category !== undefined) {
+      const category = dto.category.trim();
+      if (!category) {
+        throw new BadRequestException('Category is required.');
+      }
+      patch.category = category;
+    }
+
+    if (dto.priority !== undefined) {
+      patch.priority = dto.priority;
+    }
+
+    if (dto.amountImpact !== undefined) {
+      patch.amount_impact =
+        typeof dto.amountImpact === 'number' &&
+        Number.isFinite(dto.amountImpact)
+          ? dto.amountImpact
+          : null;
+    }
+
+    if (dto.transactionRef !== undefined) {
+      patch.transaction_ref = dto.transactionRef?.trim() || null;
+    }
+
+    return patch;
+  }
+
+  private async applyIncidentTicketPatch(
+    user: AuthenticatedUserProfile,
+    id: string,
+    existing: Pick<IncidentTicketRow, 'branch_id' | 'escalation_owner_user_id'>,
+    dto: UpdateIncidentTicketDto | Record<string, unknown>,
+    events: IncidentTicketEventPayload[],
+    creatorOnly: boolean,
+  ) {
+    const client = this.supabaseService.getClient();
+    const patch = creatorOnly
+      ? this.buildCreatorContentPatch(dto as UpdateIncidentTicketDto)
+      : (dto as Record<string, unknown>);
+
+    if (Object.keys(patch).length === 0) {
+      throw new BadRequestException('No ticket updates were provided.');
     }
 
     const {
