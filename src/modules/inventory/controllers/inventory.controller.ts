@@ -312,6 +312,12 @@ export class InventoryController {
     return this.inventoryService.findPublicForSale();
   }
 
+  @Public()
+  @Get('public/for-sale/:itemId')
+  findPublicForSaleByItemId(@Param('itemId') itemId: string) {
+    return this.inventoryService.findPublicForSaleByItemId(itemId);
+  }
+
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
   @Get('for-sale-categories')
   findForSaleCategories(
