@@ -2536,6 +2536,88 @@ export class InventoryService {
     };
   }
 
+  async findPublicForSaleByItemId(itemId: string) {
+    const raw = String(itemId || '').trim();
+    let clean = raw;
+    try {
+      clean = decodeURIComponent(raw).trim();
+    } catch {
+      clean = raw;
+    }
+    if (!clean) {
+      throw new BadRequestException('Item not found or unit code is invalid.');
+    }
+
+    const client = this.supabase.getClient();
+    const { data, error } = await client
+      .from('sale_items')
+      .select(
+        'id, item_id, item_name, category, branch, branch_id, available_date, price, status, image_url',
+      )
+      .ilike('item_id', clean)
+      .maybeSingle()
+      .returns<{
+        id: string;
+        item_id: string;
+        item_name: string;
+        category: string;
+        branch: string;
+        branch_id: string;
+        available_date?: string | null;
+        price?: number | null;
+        status: string;
+        image_url?: string | null;
+      } | null>();
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+    if (!data) {
+      throw new BadRequestException('Item not found or unit code is invalid.');
+    }
+
+    const [{ data: branchData }, imageUrl] = await Promise.all([
+      client
+        .from('branches')
+        .select('id, name, location, phone')
+        .eq('id', data.branch_id)
+        .maybeSingle()
+        .returns<{
+          id: string;
+          name: string;
+          location?: string | null;
+          phone?: string | null;
+        } | null>(),
+      this.resolveStorageUrl(data.image_url),
+    ]);
+
+    return {
+      listing_type: 'sale' as const,
+      id: data.id,
+      item_id: data.item_id,
+      item_name: data.item_name,
+      category: data.category,
+      amount: Number(data.price || 0),
+      pawn_date: data.available_date || '',
+      serial_number: null,
+      condition: data.status,
+      items_included: null,
+      memory_storage: null,
+      remarks: null,
+      status: data.status,
+      customer: null,
+      branch_info: {
+        name: branchData?.name || data.branch,
+        location: branchData?.location || '',
+        phone: branchData?.phone || '',
+      },
+      profile_photo: '',
+      item_photos: imageUrl ? [imageUrl] : [],
+      id_photo: '',
+      id_back_photo: '',
+    };
+  }
+
   async findForSaleCategories(
     user: UserWithBranch,
     branch?: string,
