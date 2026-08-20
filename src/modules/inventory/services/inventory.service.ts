@@ -710,19 +710,26 @@ export class InventoryService {
     user: UserWithBranch,
     branch?: string,
     date?: string,
+    status?: string,
   ): Promise<{ category: string; count: number }[]> {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
     let query = client
       .from('pawned_items')
-      .select('category')
+      .select('category, status')
       .eq('environment', getEnvironment(user));
 
     if (branchId) {
       query = query.eq('branch_id', branchId);
     } else if (branchNameIlike) {
       query = query.ilike('branch', `%${branchNameIlike}%`);
+    }
+
+    if (status && status !== 'all') {
+      query = query.eq('status', status);
+    } else if (!status) {
+      query = query.in('status', INVENTORY_VALUATION_STATUSES);
     }
 
     if (date) {
@@ -2615,17 +2622,27 @@ export class InventoryService {
   async findForSaleCategories(
     user: UserWithBranch,
     branch?: string,
+    status?: string,
+    viewMode?: string,
   ): Promise<{ category: string; count: number }[]> {
     const client = this.supabase.getClient();
     const { branchId, branchNameIlike } = inventoryBranchFilters(user, branch);
 
     let query = client
       .from('sale_items')
-      .select('category')
+      .select('category, status')
       .eq('environment', getEnvironment(user));
     if (branchId) query = query.eq('branch_id', branchId);
     else if (branchNameIlike)
       query = query.ilike('branch', `%${branchNameIlike}%`);
+
+    if (viewMode === 'history') {
+      query = query.eq('status', 'Sold');
+    } else if (status && status !== 'all') {
+      query = query.eq('status', status);
+    } else if (!status) {
+      query = query.in('status', ['Available', 'available']);
+    }
 
     const { data, error } =
       await query.returns<Array<Pick<SaleItemRow, 'category'>>>();
