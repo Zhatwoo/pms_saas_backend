@@ -31,6 +31,7 @@ import {
   OPENING_AUDIT_PAWN_WINDOW_DAYS,
 } from '../../../common/utils/inventory-valuation.util';
 import type { InterestRateGroup } from '../../../common/utils/inventory-valuation.util';
+import { resolveForSaleAvailableDate } from '../utils/sale-available-date.util';
 import {
   environmentCreateFields,
   getEnvironment,
@@ -173,6 +174,7 @@ interface SaleItemWriteDto {
   price?: number;
   status?: string;
   image_url?: string | null;
+  available_date?: string;
   [key: string]: unknown;
 }
 
@@ -1770,7 +1772,7 @@ export class InventoryService {
           category: dto.category,
           branch: branchName,
           branch_id: branchId,
-          available_date: new Date().toISOString().split('T')[0],
+          available_date: resolveForSaleAvailableDate(dto.available_date),
           price: dto.price || 0,
           status: dto.status || 'Available',
           image_url: imageUrl || null,
@@ -2828,23 +2830,40 @@ export class InventoryService {
       SaleItemWriteDto,
       'item_name' | 'category' | 'price' | 'image_url'
     > = {};
-    if (typeof dto.item_name === 'string') updates.item_name = dto.item_name.trim();
-    if (typeof dto.category === 'string') updates.category = dto.category.trim();
-    if (typeof dto.price === 'number' && Number.isFinite(dto.price) && dto.price >= 0) {
+    if (typeof dto.item_name === 'string')
+      updates.item_name = dto.item_name.trim();
+    if (typeof dto.category === 'string')
+      updates.category = dto.category.trim();
+    if (
+      typeof dto.price === 'number' &&
+      Number.isFinite(dto.price) &&
+      dto.price >= 0
+    ) {
       updates.price = dto.price;
     }
     if (dto.image_url === null) {
       // An empty value deliberately suppresses the original pawn image fallback.
       updates.image_url = '';
-    } else if (typeof dto.image_url === 'string' && dto.image_url.startsWith('data:image')) {
+    } else if (
+      typeof dto.image_url === 'string' &&
+      dto.image_url.startsWith('data:image')
+    ) {
       const path = `sales_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-      updates.image_url = await this.uploadPhoto(dto.image_url, path, 'items_for_sale');
+      updates.image_url = await this.uploadPhoto(
+        dto.image_url,
+        path,
+        'items_for_sale',
+      );
     } else if (dto.image_url !== undefined) {
-      throw new BadRequestException('Image must be an uploaded image or removed.');
+      throw new BadRequestException(
+        'Image must be an uploaded image or removed.',
+      );
     }
 
     if (Object.keys(updates).length === 0) {
-      throw new BadRequestException('Provide at least one valid editable item field.');
+      throw new BadRequestException(
+        'Provide at least one valid editable item field.',
+      );
     }
 
     const { data, error } = await client
