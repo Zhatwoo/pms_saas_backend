@@ -21,6 +21,10 @@ import {
   applyEnvironmentFilter,
   getEnvironment,
 } from '../../../common/utils/authorization.util';
+import {
+  buildDashboardNotificationsOrFilter,
+  filterDashboardNotificationsForViewer,
+} from '../utils/dashboard-notification-visibility.util';
 
 interface DashboardRelationUser {
   id: string;
@@ -154,6 +158,8 @@ interface DashboardNotificationRow {
   created_at: string | null;
   is_read: boolean | null;
   branch_id?: string | null;
+  user_id?: string | null;
+  target_role?: string | null;
 }
 
 @Injectable()
@@ -1465,26 +1471,27 @@ export class DashboardService {
     // Notifications (fetch from notifications table)
     let notifQuery = client
       .from('notifications')
-      .select('id, title, subtitle, created_at, is_read')
+      .select(
+        'id, title, subtitle, created_at, is_read, branch_id, user_id, target_role',
+      )
       .eq('environment', getEnvironment(user))
       .order('created_at', { ascending: false })
       .limit(10);
 
-    if (user.role !== Role.SUPER_ADMIN) {
-      if (user.branchId) {
-        notifQuery = notifQuery.or(
-          `branch_id.eq.${user.branchId},user_id.eq.${user.id},branch_id.is.null`,
-        );
-      } else {
-        notifQuery = notifQuery.or(`user_id.eq.${user.id},branch_id.is.null`);
-      }
-    } else if (branchId) {
-      notifQuery = notifQuery.or(`branch_id.eq.${branchId},branch_id.is.null`);
+    const notificationOrFilter = buildDashboardNotificationsOrFilter({
+      role: user.role,
+      userId: user.id,
+      branchId: user.role === Role.SUPER_ADMIN ? branchId : user.branchId,
+    });
+    if (notificationOrFilter) {
+      notifQuery = notifQuery.or(notificationOrFilter);
     }
 
     const notifResult = await notifQuery;
-    const notificationRows = (notifResult.data ??
-      []) as DashboardNotificationRow[];
+    const notificationRows = filterDashboardNotificationsForViewer(
+      (notifResult.data ?? []) as DashboardNotificationRow[],
+      user.role,
+    );
     const notifications = notificationRows.map((item) => ({
       id: item.id,
       message: item.title || item.subtitle || 'Notification',
