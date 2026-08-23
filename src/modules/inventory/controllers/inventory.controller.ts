@@ -55,8 +55,14 @@ export class InventoryController {
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
     @Query('date') date?: string,
+    @Query('status') status?: string,
   ) {
-    return this.inventoryService.findPawnedCategories(req.user, branch, date);
+    return this.inventoryService.findPawnedCategories(
+      req.user,
+      branch,
+      date,
+      status,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
@@ -323,8 +329,15 @@ export class InventoryController {
   findForSaleCategories(
     @Req() req: { user: AuthenticatedUserProfile },
     @Query('branch') branch?: string,
+    @Query('status') status?: string,
+    @Query('viewMode') viewMode?: string,
   ) {
-    return this.inventoryService.findForSaleCategories(req.user, branch);
+    return this.inventoryService.findForSaleCategories(
+      req.user,
+      branch,
+      status,
+      viewMode,
+    );
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EMPLOYEE)
