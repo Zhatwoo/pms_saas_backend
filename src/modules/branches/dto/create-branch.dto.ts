@@ -16,6 +16,7 @@ export enum BranchStatus {
   INACTIVE = 'Inactive',
   PROCESS = 'Process',
   TERMINATED = 'Terminated',
+  UNDER_MAINTENANCE = 'Under Maintenance',
 }
 
 export class CreateBranchDto {
