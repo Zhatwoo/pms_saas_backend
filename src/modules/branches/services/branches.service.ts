@@ -415,11 +415,17 @@ export class BranchesService {
           status: true,
           appraised_value: true,
           estimated_resale_value: true,
+          category: true,
         },
       }),
       this.prisma.sale_items.findMany({
         where: applyEnvironmentFilter(user),
-        select: { branch_id: true, price: true, status: true },
+        select: {
+          branch_id: true,
+          price: true,
+          status: true,
+          category: true,
+        },
       }),
     ]);
 
@@ -436,12 +442,22 @@ export class BranchesService {
 
     const branchStats = new Map<
       string,
-      { pawnedItems: number; forSaleItems: number; totalValue: number }
+      {
+        pawnedItems: number;
+        forSaleItems: number;
+        totalValue: number;
+        categories: Record<string, number>;
+      }
     >();
 
     const ensure = (id: string) => {
       if (!branchStats.has(id)) {
-        branchStats.set(id, { pawnedItems: 0, forSaleItems: 0, totalValue: 0 });
+        branchStats.set(id, {
+          pawnedItems: 0,
+          forSaleItems: 0,
+          totalValue: 0,
+          categories: {},
+        });
       }
       return branchStats.get(id)!;
     };
@@ -462,23 +478,40 @@ export class BranchesService {
       );
       s.pawnedItems += 1;
       s.totalValue += Number(line.toFixed(2));
+      const cat = (item.category || 'Uncategorized').trim();
+      s.categories[cat] = (s.categories[cat] || 0) + 1;
     }
 
     for (const item of saleResult) {
       if (!item.branch_id) continue;
-      const s = ensure(item.branch_id);
-      if (item.status === 'Available') {
+      const statusLower = (item.status || '').trim().toLowerCase();
+      if (statusLower === 'available') {
+        const s = ensure(item.branch_id);
         s.forSaleItems += 1;
         s.totalValue += Number(item.price ?? 0);
+        const cat = (item.category || 'Uncategorized').trim();
+        s.categories[cat] = (s.categories[cat] || 0) + 1;
       }
     }
 
     const result: Record<
       string,
-      { pawnedItems: number; forSaleItems: number; totalValue: number }
+      {
+        pawnedItems: number;
+        forSaleItems: number;
+        totalValue: number;
+        categories: { name: string; count: number }[];
+      }
     > = {};
     for (const [id, stats] of branchStats) {
-      result[id] = stats;
+      result[id] = {
+        pawnedItems: stats.pawnedItems,
+        forSaleItems: stats.forSaleItems,
+        totalValue: stats.totalValue,
+        categories: Object.entries(stats.categories)
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count),
+      };
     }
 
     return result;
